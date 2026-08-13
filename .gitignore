@@ -1,0 +1,27 @@
+# Locked upstream sources and local dependency environment
+.upstream/
+.build/
+
+# MOOSE build products
+*.d
+*.la
+*.lo
+*.o
+*-dbg
+*-devel
+*-oprof
+*-opt
+
+# Runtime results
+outputs/
+test/output/
+*.e
+*.exo
+*.xdr
+*.rd
+core.*
+
+# Local editor and OS files
+.DS_Store
+*.swp
+*~
