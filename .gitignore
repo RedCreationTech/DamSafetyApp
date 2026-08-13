@@ -21,6 +21,10 @@ test/output/
 *.rd
 core.*
 
+# Python caches
+__pycache__/
+*.py[cod]
+
 # Local editor and OS files
 .DS_Store
 *.swp

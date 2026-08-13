@@ -24,3 +24,14 @@
 - 不读取或修改 `/home/kevin/gt/demo/mayor/rig/build/moose`。
 
 具体版本、命令和完成证据见 [`doc/p0/`](doc/p0/)。当前状态不代表求解器已通过工程验收。
+
+## Abaqus 二维转换原型
+
+`tools/abaqus/abaqus2exodus.py` 是从锁定的 `demo-process` 转换器派生的项目内原型，现已支持同一 Part 中混合 `CPS4/CPS4R/CPS3`、二维 sideset，以及 `*Include` 中各向异性节点附加质量的分方向 CSV 导出。
+
+```bash
+./tools/abaqus/create-env.sh
+./tools/abaqus/run-tests.sh
+```
+
+使用方法、来源和已知边界见 [`tools/abaqus/README.md`](tools/abaqus/README.md)。该能力当前状态为 `prototype`，是 TASK-MOOSE-017 的前置技术验证，不表示完整 Abaqus 材料、分析步或动力响应已经等价迁移。
