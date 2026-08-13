@@ -9,6 +9,7 @@
 ./scripts/p0/create-env.sh
 ./scripts/p0/build-blackbear.sh
 ./scripts/p0/probe-environment.sh
+./scripts/p0/smoke-runtime.sh
 ./scripts/p0/run-official-gate.sh
 ```
 
