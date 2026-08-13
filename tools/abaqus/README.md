@@ -12,7 +12,7 @@
 
 ## 环境
 
-转换器使用独立环境，不修改 P0 锁定的 `.build/env`：
+转换与梁时程求解工具使用独立环境，不修改 P0 锁定的 `.build/env`。环境包含 Python、NumPy、netCDF4 和 SciPy：
 
 ```bash
 ./tools/abaqus/create-env.sh
@@ -51,6 +51,39 @@ x,y,z,mass
 
 测试覆盖递归 include、混合 `QUAD4/TRI3`、二维 sideset、重复 `elset` 的各向异性质量、Exodus 写出和分方向 CSV。
 
+## 线性梁三场时程
+
+`beam_field_solver.py` 源自锁定的 `demo-process` 线性梁直接积分器，支持把同一次 Newmark 时程计算拆分为位移、梁截面应力包络和绝对加速度三份 Exodus：
+
+```bash
+.build/abaqus-converter-env/bin/python \
+  tools/abaqus/beam_field_solver.py \
+  --report /path/to/report.json \
+  --mesh /path/to/mesh.e \
+  --displacement-out /path/to/displacement.e \
+  --stress-out /path/to/stress.e \
+  --acceleration-out /path/to/acceleration.e \
+  --csv /path/to/summary.csv
+```
+
+输出语义：
+
+- 位移：`disp_x/y/z` 与 `rot_x/y/z`；
+- 绝对加速度：`accel_x/y/z` 与 `rot_accel_x/y/z`；
+- 梁应力：`axial_stress`、`bending_stress`、`torsional_shear` 和 `vonmises_stress`，单位随 mm-t-N-s 模型为 MPa。
+
+`vonmises_stress` 是由两端内力恢复的截面最外缘保守包络，不是实体积分点应力。是否启用 `--no-releases` 必须依据目标基线决定，不能静默改变连接语义。
+
+三场视频使用：
+
+```bash
+/home/kevin/miniforge3/envs/moose/bin/pvpython \
+  tools/abaqus/render_beam_fields.py \
+  displacement.e stress.e acceleration.e /path/to/render-output <field>
+```
+
+`<field>` 分别为 `displacement`、`stress` 或 `acceleration`。建议每个场使用独立 pvpython 进程，避免 ParaView 保留前一场的色标。
+
 ## ParaView 动画
 
 服务器安装 ParaView 的环境中，可参考 `demo-process` 的渲染链生成变形与 von Mises 应力动画：
@@ -71,3 +104,4 @@ x,y,z,mass
 - 三维 surface 到 Exodus side 编号仍沿用旧工具的 nodeset 行为，未在本次扩展中声明支持；
 - 转换成功不等于物理等价，必须继续做拓扑、质量合计、边界、反力和关键响应对比。
 - 当前动力冒烟结果只有三个真实时间状态；其 MP4 是产出链路示例，不是完整地震响应动画。
+- 线性梁直接积分器用于复算已审核的 B31 时程模型，不替代 BlackBear 非线性材料或正式 Abaqus 对照；截面应力超过材料线性范围时必须转入非线性复核。

@@ -35,3 +35,5 @@
 ```
 
 使用方法、来源和已知边界见 [`tools/abaqus/README.md`](tools/abaqus/README.md)。该能力当前状态为 `prototype`，是 TASK-MOOSE-017 的前置技术验证，不表示完整 Abaqus 材料、分析步或动力响应已经等价迁移。
+
+同目录的 `beam_field_solver.py` 可复算已审核的线性 B31 梁时程，并分别输出位移、梁截面应力包络和绝对加速度 Exodus；`render_beam_fields.py` 生成对应三场 MP4。PR-RG-400gal-X 实例证据见 [`doc/prototypes/PR-RG-400gal-X-three-field-rerun.md`](doc/prototypes/PR-RG-400gal-X-three-field-rerun.md)。
