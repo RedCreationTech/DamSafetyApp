@@ -61,6 +61,24 @@ class Abaqus2Exodus2DTest(unittest.TestCase):
             2260.74
             *Elastic
             3.04e10, 0.2
+            *Boundary
+            MASS_NODES, 1, 2
+            *Amplitude, name=EQ, time=TOTAL TIME
+            0.0, -0.1, 0.01, 0.2
+            *Step, name=GRA, nlgeom=NO, inc=100
+            *Static
+            0.1, 1.0, 1e-15, 1.0
+            *Dload
+            , GRAV, 9.8, 0.0, -1.0
+            *Dsload
+            LOAD, HP, 592116.0, 60.42, 0.0
+            *End Step
+            *Step, name=EQ, nlgeom=NO, inc=1000
+            *Dynamic
+            0.01, 50.0, 5e-7
+            *Boundary, op=NEW, amplitude=EQ, type=ACCELERATION
+            MASS_NODES, 1, 1, 3.44
+            *End Step
         '''), encoding='utf-8')
 
     def tearDown(self):
@@ -74,6 +92,18 @@ class Abaqus2Exodus2DTest(unittest.TestCase):
         self.assertEqual(len(part.point_elems), 2)
         self.assertEqual(part.point_mass[101], [10.0, 20.0, 0.0])
         self.assertEqual(part.point_mass[102], [30.0, 40.0, 0.0])
+        self.assertEqual(model.amplitude_options['EQ']['time'], 'TOTAL TIME')
+        self.assertEqual(model.initial_boundaries[0]['dof2'], 2)
+        self.assertEqual(model.steps[0]['options']['inc'], '100')
+        self.assertEqual(model.steps[0]['loads'], [
+            {'region': '', 'type': 'GRAV', 'value': 9.8,
+             'parameters': [0.0, -1.0]},
+            {'surface': 'LOAD', 'type': 'HP', 'value': 592116.0,
+             'parameters': [60.42, 0.0]},
+        ])
+        self.assertEqual(model.steps[1]['boundaries'][0]['type'],
+                         'ACCELERATION')
+        self.assertEqual(model.steps[1]['boundaries'][0]['op'], 'NEW')
 
         result = CONVERTER.build_global_mesh(model, 1e-9)
         gm, blocks, block_types, block_meta, nodesets, sidesets = result

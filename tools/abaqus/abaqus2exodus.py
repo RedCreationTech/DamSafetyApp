@@ -100,6 +100,8 @@ class InpModel:
         self.surfaces = {}       # name -> [(instance, elset, face)]
         self.materials = defaultdict(dict)   # name -> {density, elastic, plastic, cdp...}
         self.amplitudes = {}
+        self.amplitude_options = {}  # name -> *Amplitude keyword parameters
+        self.initial_boundaries = []  # model-level *Boundary definitions
         self.steps = []
         self.ties = []
         self.couplings = []
@@ -428,9 +430,11 @@ def parse_inp(path):
             elif kw_name == 'amplitude':
                 cur_amp = kv.get('name')
                 m.amplitudes[cur_amp] = []
+                m.amplitude_options[cur_amp] = dict(kv)
             elif kw_name == 'step':
                 cur_step = {'name': kv.get('name'), 'nlgeom': kv.get('nlgeom'),
-                            'boundaries': [], 'loads': [], 'outputs': []}
+                            'options': dict(kv), 'boundaries': [],
+                            'loads': [], 'outputs': []}
                 m.steps.append(cur_step)
             elif kw_name == 'end step':
                 cur_step = None
@@ -443,7 +447,10 @@ def parse_inp(path):
                         cur_step['static'] = _nums(raw[i])
                         i += 1
             elif kw_name == 'boundary':
-                cur_nset = ('boundary', kv.get('amplitude'), 'type' in kv and kv.get('type'), False)
+                cur_nset = ('boundary', kv.get('amplitude'), {
+                    'type': kv.get('type'), 'op': kv.get('op')}, False)
+            elif kw_name == 'dload':
+                cur_nset = ('dload', None, None, False)
             elif kw_name == 'dsload':
                 cur_nset = ('dsload', None, None, False)
             elif kw_name == 'tie':
@@ -464,7 +471,7 @@ def parse_inp(path):
                              'damage initiation', 'damage evolution',
                              'damage stabilization', 'contact pair',
                              'el print', 'node print', 'monitor', 'controls',
-                             'cload', 'dload', 'dsflux', 'kinematic'):
+                             'cload', 'dsflux', 'kinematic'):
                 # 已知但不需要数据行的关键字 (cload/dload 等如需可扩展)
                 if kw_name == 'kinematic':
                     pass
@@ -527,14 +534,30 @@ def parse_inp(path):
                         tgt.setdefault(name, []).extend(ids)
                 elif kind == 'boundary':
                     vals = line.rstrip(',').split(',')
-                    if cur_step is not None and len(vals) >= 3:
-                        cur_step['boundaries'].append({
+                    if len(vals) >= 3:
+                        boundary = {
                             'set': vals[0].strip(),
                             'dof1': int(float(vals[1])),
                             'dof2': int(float(vals[2])),
                             'value': float(vals[3]) if len(vals) > 3 and vals[3].strip() else 0.0,
                             'amplitude': name,
+                            'type': inst.get('type') if isinstance(inst, dict) else None,
+                            'op': inst.get('op') if isinstance(inst, dict) else None,
                             'encastre': any('encastre' in v.lower() for v in vals[1:]),
+                        }
+                        if cur_step is not None:
+                            cur_step['boundaries'].append(boundary)
+                        else:
+                            m.initial_boundaries.append(boundary)
+                elif kind == 'dload':
+                    vals = [value.strip() for value in line.rstrip(',').split(',')]
+                    if cur_step is not None and len(vals) >= 3:
+                        cur_step['loads'].append({
+                            'region': vals[0],
+                            'type': vals[1].upper(),
+                            'value': float(vals[2]),
+                            'parameters': [float(value) for value in vals[3:]
+                                           if value],
                         })
                 elif kind == 'dsload':
                     vals = line.rstrip(',').split(',')
@@ -543,6 +566,8 @@ def parse_inp(path):
                             'surface': vals[0].strip(),
                             'type': vals[1].strip(),
                             'value': float(vals[2]),
+                            'parameters': [float(value) for value in vals[3:]
+                                           if value.strip()],
                         })
                 elif kind == 'tie_surfs':
                     # *Tie 数据行: slave 面, master 面
@@ -1920,6 +1945,8 @@ def main():
         'sidesets': {n: len(v) for n, v in sorted(sidesets.items())},
         'materials': {k: v for k, v in model.materials.items()},
         'amplitudes': model.amplitudes,
+        'amplitude_options': model.amplitude_options,
+        'initial_boundaries': model.initial_boundaries,
         'steps': model.steps,
         'ties': model.ties,
         'couplings': model.couplings,

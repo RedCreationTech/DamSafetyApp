@@ -36,4 +36,6 @@
 
 使用方法、来源和已知边界见 [`tools/abaqus/README.md`](tools/abaqus/README.md)。该能力当前状态为 `prototype`，是 TASK-MOOSE-017 的前置技术验证，不表示完整 Abaqus 材料、分析步或动力响应已经等价迁移。
 
+`gen_dam_two_step_case.py` 可从增强后的转换报告生成线弹性二维坝体“静力预载 → 完整动力”两阶段 MOOSE 输入，保留重力、静水压力、节点附加质量、Rayleigh 阻尼和 Abaqus `TOTAL TIME` 加速度幅值。2D 坝 50 秒复算证据见 [`doc/prototypes/abaqus-2d-static-dynamic-rerun.md`](doc/prototypes/abaqus-2d-static-dynamic-rerun.md)。该能力仍为 `prototype`，尚未迁移混凝土损伤塑性和 Lanczos 模态步。
+
 同目录的 `beam_field_solver.py` 可复算已审核的线性 B31 梁时程，并分别输出位移、梁截面应力包络和绝对加速度 Exodus；`render_beam_fields.py` 生成对应三场 MP4。PR-RG-400gal-X 实例证据见 [`doc/prototypes/PR-RG-400gal-X-three-field-rerun.md`](doc/prototypes/PR-RG-400gal-X-three-field-rerun.md)。

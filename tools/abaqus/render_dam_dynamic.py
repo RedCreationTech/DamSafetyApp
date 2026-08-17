@@ -1,15 +1,16 @@
 #!/usr/bin/env python3
-"""Render the 2D dam added-mass dynamic prototype with ParaView.
+"""Render a 2D dam dynamic Exodus result with ParaView.
 
 Usage:
   pvpython tools/abaqus/render_dam_dynamic.py [result.e] [output_dir]
+      [--max-frames N] [--seconds-per-state S] [--video-name NAME]
 
 The video contains only solver time states present in Exodus. Displacement is
 visually amplified and the scalar color is element von Mises stress.
 """
 
+import argparse
 import subprocess
-import sys
 from pathlib import Path
 
 import netCDF4
@@ -18,15 +19,25 @@ import numpy as np
 
 PROJECT_DIR = Path(__file__).resolve().parents[2]
 CASE_DIR = PROJECT_DIR / '.build' / 'cases' / 'abaqus-2d-dam-p0'
-RESULT = Path(sys.argv[1]).resolve() if len(sys.argv) > 1 else (
-    CASE_DIR / 'results' / 'dam_dynamic_added_mass_smoke.e')
-OUTPUT_DIR = Path(sys.argv[2]).resolve() if len(sys.argv) > 2 else (
-    CASE_DIR / 'renders' / 'dam_dynamic_added_mass_prototype')
+PARSER = argparse.ArgumentParser()
+PARSER.add_argument('result', nargs='?', default=str(
+    CASE_DIR / 'results' / 'dam_dynamic_added_mass_smoke.e'))
+PARSER.add_argument('output_dir', nargs='?', default=str(
+    CASE_DIR / 'renders' / 'dam_dynamic_added_mass_prototype'))
+PARSER.add_argument('--max-frames', type=int, default=0,
+                    help='Evenly sample at most this many solver states; 0 keeps all')
+PARSER.add_argument('--seconds-per-state', type=float, default=1.0)
+PARSER.add_argument('--video-name', default='dam_dynamic_added_mass_prototype.mp4')
+PARSER.add_argument('--title', default='DamSafetyApp | 2D dam | dynamic response')
+ARGS = PARSER.parse_args()
+
+RESULT = Path(ARGS.result).resolve()
+OUTPUT_DIR = Path(ARGS.output_dir).resolve()
 OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
 
 RESOLUTION = [1600, 900]
 FPS = 25
-SECONDS_PER_STATE = 1
+SECONDS_PER_STATE = ARGS.seconds_per_state
 
 
 def exodus_stats(path):
@@ -56,6 +67,11 @@ def exodus_stats(path):
 
 
 MAX_DISP, MAX_VM, TIMES, BOUNDS = exodus_stats(RESULT)
+if ARGS.max_frames > 0 and len(TIMES) > ARGS.max_frames:
+    STATE_INDICES = np.unique(np.linspace(
+        0, len(TIMES) - 1, ARGS.max_frames, dtype=int)).tolist()
+else:
+    STATE_INDICES = list(range(len(TIMES)))
 X_MIN, X_MAX, Y_MIN, Y_MAX = BOUNDS
 HEIGHT = Y_MAX - Y_MIN
 WARP_SCALE = 0.04 * HEIGHT / max(MAX_DISP, 1e-15)
@@ -117,7 +133,7 @@ def render():
     scalar_bar.Visibility = 1
 
     title = Text()
-    title.Text = 'DamSafetyApp | 2D dam | added-mass dynamic prototype'
+    title.Text = ARGS.title
     title_display = Show(title, view)
     title_display.FontSize = 8
     title_display.Color = [0.92, 0.92, 0.92]
@@ -131,15 +147,17 @@ def render():
 
     scene = GetAnimationScene()
     scene.PlayMode = 'Sequence'
-    for index, time_value in enumerate(TIMES):
+    for frame_index, state_index in enumerate(STATE_INDICES):
+        time_value = TIMES[state_index]
         scene.AnimationTime = float(time_value)
-        time_label.Text = f't = {time_value:.3f} s | state {index + 1}/{len(TIMES)}'
+        time_label.Text = (f't = {time_value:.3f} s | '
+                           f'state {state_index + 1}/{len(TIMES)}')
         Render(view)
-        frame = OUTPUT_DIR / f'frame-{index:04d}.png'
+        frame = OUTPUT_DIR / f'frame-{frame_index:04d}.png'
         SaveScreenshot(str(frame), view, ImageResolution=RESOLUTION)
         print(f'[frame] {frame}')
 
-    video = OUTPUT_DIR / 'dam_dynamic_added_mass_prototype.mp4'
+    video = OUTPUT_DIR / ARGS.video_name
     subprocess.run([
         'ffmpeg', '-y', '-framerate', str(1 / SECONDS_PER_STATE),
         '-i', str(OUTPUT_DIR / 'frame-%04d.png'),
