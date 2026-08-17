@@ -58,3 +58,22 @@ Exodiff 在 `asr_confined.cmp` 自定义容差内通过，即本次求解结果�
 - `MooseApp::addCapability()` deprecation warning 与 P0 门禁记录一致，属上游已知告警，不影响结果；
 - 本次只复现 `test_strip`；`test_strip_kelvin`、`test_strip_isotropic`、`test_strip_in_tension` 变体和 `HEAVY` 的 `test_full` 已在 P0 定向门禁中通过（8 passed、1 skipped），本任务不重复运行；
 - 本记录证明锁定基线上官方 ASR 回归可复现，是派生 `dam_thm_asr_baseline.i`（TASK-MOOSE-009/010）的物理基线之一，不构成工程模型验收。
+
+## 5. 补充：官方 HEAVY 回归 test_full（2026-08-17）
+
+应人工交互验证需求，补跑官方 `HEAVY` 用例 `test:concrete_ASR_swelling.ASR_swelling/test_full`（`asr_confined.i` + `mesh_contact.e` 完整接触网格，覆盖圆柱更大轴向区域；1025 节点、920 单元、2 个 element block、6 个时间步）：
+
+```bash
+cd /home/kevin/DamSafetyApp/.upstream/blackbear
+MOOSE_DIR=moose ./run_tests -j 2 --heavy --re='concrete_ASR_swelling\.ASR_swelling/test_full$'
+```
+
+结果：**1 passed, 0 skipped, 0 failed**（5.8 s），Exodiff 通过官方金标准。
+
+| 对象 | SHA-256 |
+|---|---|
+| 测试日志 `.build/logs/TASK-MOOSE-007-A-asr-confined-full.log` | `5821f80ca2864abadc1473bea495aca3faf58ead6d8173f11c717f121e7a082e` |
+| 求解输出 `asr_confined_out.e` | `9d094cba29474d3a770dd5276dca85a020d3ed59ad8df52b1b0fa02ab3c0e78b` |
+| 官方金标准 `gold/asr_confined_out.e` | `d7fa8a10ef2a0542554c3c38915d61582980f928687d449d096201038d661fc8` |
+
+物理说明：均匀温度驱动下该算例空间场仍接近均匀（末步 `stress_yy` 单元间相对差异约 0.026%），其验证价值在于更大网格/接触语义的 Exodiff 一致性与时间演化，不适合作为空间梯度云图素材。P0 门禁中 `HEAVY` 延期项由此减少 1 项，剩余 3 项（钢蠕变损伤系列）仍按计划留待 TASK-MOOSE-025。
