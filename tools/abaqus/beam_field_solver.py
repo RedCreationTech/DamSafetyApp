@@ -10,6 +10,9 @@
 # DamSafetyApp 版本源自 demo-process@0cc241b8dbee6b7eb9594e9f7538fbd493d1f7a8
 # 的 tools/beam_direct_solver.py，并增加节点绝对加速度恢复、梁截面应力包络
 # 恢复，以及位移/加速度/应力三份独立 Exodus 输出。
+# 2026-08-17: Newmark γ/β 改为 CLI 可配 (--newmark-gamma/--newmark-beta,
+# 默认 0.5/0.25 不变), 并新增 --allfields-out 单场合并 Exodus:
+# 节点位移/转角、绝对加速度、基底约束反力, 单元应力包络、主应力与应变。
 #
 # 模型语义与 tools/gen_beam_case.py 一致 (同一 report.json):
 #   - 3D Timoshenko 梁 (φ 剪切因子), 截面特性来自 Abaqus I/CIRC 公式
@@ -26,6 +29,10 @@
 #   - bending_stress: 两个主弯矩在截面最外缘的绝对应力包络
 #   - torsional_shear: T*c/J 的截面外缘近似值
 #   - vonmises_stress: sqrt((axial+bending)^2 + 3*torsion^2)
+#   - s_max/mid/min_principal: 以最外缘 σ=axial+bending 与 τ=torsional_shear
+#     按平面应力主值公式 σ/2±sqrt(σ²/4+τ²)、σ2=0 (与 vonmises 口径自洽:
+#     sqrt(σ1²-σ1σ3+σ3²) == sqrt(σ²+3τ²))
+#   - axial_strain/bending_strain: σ/E 的线弹性外缘应变
 #   这是线性梁截面的保守可视化包络，不是实体积分点连续应力。
 
 import argparse
@@ -39,6 +46,18 @@ from scipy.sparse.linalg import splu, eigsh
 
 NEWMARK_BETA = 0.25
 NEWMARK_GAMMA = 0.5
+
+
+def newmark_coefficients(gamma, beta, dt):
+    """返回 Newmark 更新式系数 (a0..a5)。γ=0.5/β=0.25 为常加速度法;
+    γ>0.5 引入算法阻尼 (等价 HHT-α, α=0.5-γ), 精度降为一阶。"""
+    a0 = 1.0 / (beta * dt * dt)
+    a1 = gamma / (beta * dt)
+    a2 = 1.0 / (beta * dt)
+    a3 = 1.0 / (2 * beta) - 1.0
+    a4 = gamma / beta - 1.0
+    a5 = dt * (gamma / (2 * beta) - 1.0)
+    return a0, a1, a2, a3, a4, a5
 
 
 # ---------------------------------------------------------------- 截面特性
@@ -159,9 +178,8 @@ def _prepare_result(mesh_path, out_path, times):
     return nc
 
 
-def write_nodal_result(mesh_path, out_path, fields, times):
-    """克隆网格并写节点场，fields 为 name -> (frame,node)。"""
-    nc = _prepare_result(mesh_path, out_path, times)
+def _write_nodal_fields(nc, fields, times):
+    """在打开的 nc 上写节点场，fields 为 name -> (frame,node)。"""
     names = list(fields)
     nc.createDimension('num_nod_var', len(names))
     variable = nc.createVariable(
@@ -172,12 +190,10 @@ def write_nodal_result(mesh_path, out_path, fields, times):
             f'vals_nod_var{index}', 'f8', ('time_step', 'num_nodes'))
         values[0, :] = 0.0
         values[1:len(times) + 1, :] = fields[name]
-    nc.close()
 
 
-def write_element_result(mesh_path, out_path, fields, times, block_names):
-    """克隆网格并写单元场，fields 为 name -> block -> (frame,elem)。"""
-    nc = _prepare_result(mesh_path, out_path, times)
+def _write_element_fields(nc, fields, times, block_names):
+    """在打开的 nc 上写单元场，fields 为 name -> block -> (frame,elem)。"""
     names = list(fields)
     nc.createDimension('num_elem_var', len(names))
     variable = nc.createVariable(
@@ -197,14 +213,41 @@ def write_element_result(mesh_path, out_path, fields, times, block_names):
                 ('time_step', f'num_el_in_blk{block_index}'))
             values[0, :] = 0.0
             values[1:len(times) + 1, :] = block_values
+
+
+def write_nodal_result(mesh_path, out_path, fields, times):
+    """克隆网格并写节点场，fields 为 name -> (frame,node)。"""
+    nc = _prepare_result(mesh_path, out_path, times)
+    _write_nodal_fields(nc, fields, times)
     nc.close()
 
 
+def write_element_result(mesh_path, out_path, fields, times, block_names):
+    """克隆网格并写单元场，fields 为 name -> block -> (frame,elem)。"""
+    nc = _prepare_result(mesh_path, out_path, times)
+    _write_element_fields(nc, fields, times, block_names)
+    nc.close()
+
+
+def write_all_result(mesh_path, out_path, nodal_fields, element_fields,
+                     times, block_names):
+    """克隆网格并把节点场与单元场写入同一份合并 Exodus。"""
+    nc = _prepare_result(mesh_path, out_path, times)
+    _write_nodal_fields(nc, nodal_fields, times)
+    _write_element_fields(nc, element_fields, times, block_names)
+    nc.close()
+
+
+STRESS_ENVELOPE_NAMES = (
+    'axial_stress', 'bending_stress', 'torsional_shear', 'vonmises_stress')
+
+
 def recover_beam_stress(displacements, element_records):
-    """由节点位移恢复每个物理梁 block 的截面应力包络 (MPa)。"""
-    fields = {name: {} for name in (
-        'axial_stress', 'bending_stress', 'torsional_shear',
-        'vonmises_stress')}
+    """由节点位移恢复每个物理梁 block 的截面应力包络 (MPa)、
+    平面应力主值与线弹性外缘应变。"""
+    fields = {name: {} for name in STRESS_ENVELOPE_NAMES + (
+        's_max_principal', 's_mid_principal', 's_min_principal',
+        'axial_strain', 'bending_strain')}
     for block_name, records in element_records.items():
         shape = (displacements.shape[0], len(records))
         values = {name: np.zeros(shape) for name in fields}
@@ -229,32 +272,71 @@ def recover_beam_stress(displacements, element_records):
             bending = (moment_y * record['cz'] / record['iy'] +
                        moment_z * record['cy'] / record['iz'])
             torsional = torsion * max(record['cy'], record['cz']) / record['j']
+            sigma = axial + bending
+            radius = np.sqrt(sigma ** 2 / 4.0 + torsional ** 2)
             values['axial_stress'][:, element_index] = axial
             values['bending_stress'][:, element_index] = bending
             values['torsional_shear'][:, element_index] = torsional
             values['vonmises_stress'][:, element_index] = np.sqrt(
-                (axial + bending) ** 2 + 3.0 * torsional ** 2)
+                sigma ** 2 + 3.0 * torsional ** 2)
+            values['s_max_principal'][:, element_index] = sigma / 2.0 + radius
+            values['s_mid_principal'][:, element_index] = 0.0
+            values['s_min_principal'][:, element_index] = sigma / 2.0 - radius
+            values['axial_strain'][:, element_index] = axial / record['e']
+            values['bending_strain'][:, element_index] = bending / record['e']
         for name in fields:
             fields[name][block_name] = values[name]
     return fields
 
 
+def recover_base_reactions(stiffness, mass, damping_alpha, damping_beta,
+                           displacements, velocities, accelerations,
+                           constrained_dofs):
+    """在约束平动自由度上恢复反力 R = M·a + C·v + K·u (外载为运动激励,
+    约束处残差即反力), 非约束节点置 0。
+
+    displacements/velocities/accelerations 为 (frame, node, 6) 全自由度重构。
+    返回 (frame, node, 3) 的 rf_x/y/z。"""
+    nfr, nnode = displacements.shape[0], displacements.shape[1]
+    damping = damping_alpha * mass + damping_beta * stiffness
+    u_flat = displacements.reshape(nfr, -1).T
+    v_flat = velocities.reshape(nfr, -1).T
+    a_flat = accelerations.reshape(nfr, -1).T
+    residual = mass @ a_flat + damping @ v_flat + stiffness @ u_flat
+    reactions = np.zeros((nfr, nnode, 3))
+    for dof in constrained_dofs:
+        if dof % 6 >= 3:
+            continue
+        reactions[:, dof // 6, dof % 6] = residual[dof, :]
+    return reactions
+
+
 # ---------------------------------------------------------------- 主流程
-def main():
+def build_parser():
     ap = argparse.ArgumentParser()
     ap.add_argument('--report', required=True)
     ap.add_argument('--mesh', required=True)
     ap.add_argument('--displacement-out', required=True)
     ap.add_argument('--acceleration-out', required=True)
     ap.add_argument('--stress-out', required=True)
+    ap.add_argument('--allfields-out',
+                    help='合并全部节点/单元场的单场 Exodus 输出')
     ap.add_argument('--csv', help='输出帧的顶点与全场峰值摘要 CSV')
+    ap.add_argument('--newmark-gamma', type=float, default=NEWMARK_GAMMA,
+                    help='Newmark γ, 默认 0.5 (常加速度, 无数值阻尼)')
+    ap.add_argument('--newmark-beta', type=float, default=NEWMARK_BETA,
+                    help='Newmark β, 默认 0.25 (常加速度, 无数值阻尼)')
     ap.add_argument('--dt', type=float, default=None)
     ap.add_argument('--end-time', type=float, default=None)
     ap.add_argument('--output-interval', type=int, default=5)
     ap.add_argument('--save-matrices', help='导出 Kf/Mf/Cf npz (验证用)')
     ap.add_argument('--no-releases', action='store_true',
                     help='忽略 *RELEASE 端部释放 (与 MOOSE 模型对照用)')
-    args = ap.parse_args()
+    return ap
+
+
+def main():
+    args = build_parser().parse_args()
 
     t_start = time.time()
     r = json.load(open(args.report))
@@ -368,7 +450,7 @@ def main():
             element_records[bname].append({
                 'nodes': tuple(e), 'transform': T12, 'ke': ke.copy(),
                 'keep': list(keep), 'area': A, 'iy': Iy, 'iz': Iz,
-                'j': J, 'cy': cy, 'cz': cz})
+                'j': J, 'cy': cy, 'cz': cz, 'e': E})
             Tk = T12[np.ix_(keep, keep)]
             kg = Tk.T @ ke @ Tk
             mg = Tk.T @ me @ Tk
@@ -480,14 +562,13 @@ def main():
     print(f"[reduce] {time.time() - t_start:.1f}s")
 
     # ---- 阻尼 & Newmark ----
+    gamma = args.newmark_gamma
+    beta = args.newmark_beta
+    print(f"[int] Newmark γ={gamma} β={beta}"
+          + (" (常加速度)" if (gamma, beta) == (0.5, 0.25) else ""))
     Cf = eta * Mf + zeta * Kf
     Cfc = eta * Mfc + zeta * Kfc
-    a0 = 1.0 / (NEWMARK_BETA * dt * dt)
-    a1 = NEWMARK_GAMMA / (NEWMARK_BETA * dt)
-    a2 = 1.0 / (NEWMARK_BETA * dt)
-    a3 = 1.0 / (2 * NEWMARK_BETA) - 1.0
-    a4 = NEWMARK_GAMMA / NEWMARK_BETA - 1.0
-    a5 = dt * (NEWMARK_GAMMA / (2 * NEWMARK_BETA) - 1.0)
+    a0, a1, a2, a3, a4, a5 = newmark_coefficients(gamma, beta, dt)
     A = a0 * Mf + a1 * Cf + Kf
     print("[factor] 稀疏 LU ...")
     lu = splu(A.tocsc())
@@ -521,9 +602,11 @@ def main():
     ug = vg = 0.0
     out_every = args.output_interval
     frames = []
+    veloc_frames = []
     accel_frames = []
     times = []
     ug_frames = []
+    vg_frames = []
     ag_frames = []
     top_dof = None
     for pm in r.get('point_mass', []):
@@ -536,9 +619,9 @@ def main():
         t_new = (n + 1) * dt
         ag0 = ground_accel(n * dt)
         ag1 = ground_accel(t_new)
-        ug1 = ug + dt * vg + dt * dt * ((0.5 - NEWMARK_BETA) * ag0
-                                        + NEWMARK_BETA * ag1)
-        vg1 = vg + dt * ((1 - NEWMARK_GAMMA) * ag0 + NEWMARK_GAMMA * ag1)
+        ug1 = ug + dt * vg + dt * dt * ((0.5 - beta) * ag0
+                                        + beta * ag1)
+        vg1 = vg + dt * ((1 - gamma) * ag0 + gamma * ag1)
         b = (Mf @ (a0 * u + a2 * v + a3 * acc) +
              Cf @ (a1 * u + a4 * v + a5 * acc) -
              Kfc @ (np.full(len(accel_dofs), ug1)) -
@@ -546,14 +629,16 @@ def main():
              Mfc @ (np.full(len(accel_dofs), ag1)))
         u1 = lu.solve(b)
         acc1 = a0 * (u1 - u) - a2 * v - a3 * acc
-        v1 = v + dt * ((1 - NEWMARK_GAMMA) * acc + NEWMARK_GAMMA * acc1)
+        v1 = v + dt * ((1 - gamma) * acc + gamma * acc1)
         u, v, acc = u1, v1, acc1
         ug, vg = ug1, vg1
         top_hist.append(u[fidx[top_dof]] if top_dof in fidx else np.nan)
         if (n + 1) % out_every == 0 or n == nsteps - 1:
             frames.append(u.copy())
+            veloc_frames.append(v.copy())
             accel_frames.append(acc.copy())
             ug_frames.append(ug)
+            vg_frames.append(vg)
             ag_frames.append(ag1)
             times.append(t_new)
         if (n + 1) % 500 == 0:
@@ -567,30 +652,33 @@ def main():
     # ---- 重构全自由度并写 Exodus ----
     print("[recover] 位移、绝对加速度与梁截面应力 ...")
     nfr = len(frames)
-    U6 = np.zeros((nfr, nnode, 6))
-    A6 = np.zeros((nfr, nnode, 6))
     Fr = np.array(frames)                # (nfr, nfree)
+    Vr = np.array(veloc_frames)          # (nfr, nfree)
     Ar = np.array(accel_frames)          # (nfr, nfree)
-    for d in free:
-        U6[:, d // 6, d % 6] = Fr[:, fidx[d]]
-        A6[:, d // 6, d % 6] = Ar[:, fidx[d]]
-    for d in accel_dofs:
-        U6[:, d // 6, d % 6] = np.array(ug_frames)
-        A6[:, d // 6, d % 6] = np.array(ag_frames)
-    for d, combo in elim_map.items():
-        disp_vec = np.zeros(nfr)
-        accel_vec = np.zeros(nfr)
-        for md, w in combo:
-            if md in fidx:
-                disp_vec += w * Fr[:, fidx[md]]
-                accel_vec += w * Ar[:, fidx[md]]
-            elif md in accel_dofs:
-                disp_vec += w * np.array(ug_frames)
-                accel_vec += w * np.array(ag_frames)
-        U6[:, d // 6, d % 6] = disp_vec
-        A6[:, d // 6, d % 6] = accel_vec
 
-    stress_fields = recover_beam_stress(U6, element_records)
+    def reconstruct(free_frames, ground_frames):
+        """把 (nfr, nfree) 自由自由度帧重构为 (nfr, nnode, 6) 全场。"""
+        full = np.zeros((nfr, nnode, 6))
+        for d in free:
+            full[:, d // 6, d % 6] = free_frames[:, fidx[d]]
+        for d in accel_dofs:
+            full[:, d // 6, d % 6] = np.array(ground_frames)
+        for d, combo in elim_map.items():
+            vec = np.zeros(nfr)
+            for md, w in combo:
+                if md in fidx:
+                    vec += w * free_frames[:, fidx[md]]
+                elif md in accel_dofs:
+                    vec += w * np.array(ground_frames)
+            full[:, d // 6, d % 6] = vec
+        return full
+
+    U6 = reconstruct(Fr, ug_frames)
+    V6 = reconstruct(Vr, vg_frames)
+    A6 = reconstruct(Ar, ag_frames)
+
+    all_fields = recover_beam_stress(U6, element_records)
+    stress_fields = {name: all_fields[name] for name in STRESS_ENVELOPE_NAMES}
     displacement_fields = {
         name: U6[:, :, index] for index, name in enumerate(
             ['disp_x', 'disp_y', 'disp_z', 'rot_x', 'rot_y', 'rot_z'])}
@@ -606,6 +694,19 @@ def main():
         args.mesh, args.acceleration_out, acceleration_fields, times)
     write_element_result(
         args.mesh, args.stress_out, stress_fields, times, eb_names)
+
+    if args.allfields_out:
+        print("[write] 合并全场 Exodus ...")
+        rf = recover_base_reactions(
+            K, M, eta, zeta, U6, V6, A6, sorted(constrained))
+        reaction_fields = {
+            name: rf[:, :, index]
+            for index, name in enumerate(['rf_x', 'rf_y', 'rf_z'])}
+        write_all_result(
+            args.mesh, args.allfields_out,
+            {**displacement_fields, **acceleration_fields,
+             **reaction_fields},
+            all_fields, times, eb_names)
 
     max_accel = np.sqrt(np.sum(A6[:, :, :3] ** 2, axis=2)).max(axis=1)
     max_stress = np.zeros(nfr)

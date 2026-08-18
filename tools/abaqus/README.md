@@ -97,6 +97,8 @@ mpiexec -n 4 /path/to/blackbear-opt -i dam_2d_full_dynamic.i
 
 `vonmises_stress` 是由两端内力恢复的截面最外缘保守包络，不是实体积分点应力。是否启用 `--no-releases` 必须依据目标基线决定，不能静默改变连接语义。
 
+Newmark 积分参数可用 `--newmark-gamma`/`--newmark-beta` 调整，默认 `0.5`/`0.25`（常加速度法，无数值阻尼），与既有基线复现结果逐数组一致；`γ>0.5` 引入算法阻尼（等价 HHT-α，`α=0.5-γ`）但精度降为一阶。`--allfields-out` 额外输出单份合并 Exodus，含全部节点场（位移/转角、绝对加速度、基底约束反力 `rf_x/y/z`）与全部单元场（应力包络、主应力 `s_max/mid/min_principal`、外缘应变 `axial/bending_strain`）。
+
 三场视频使用：
 
 ```bash
