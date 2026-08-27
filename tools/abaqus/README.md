@@ -1,5 +1,45 @@
 # Abaqus 转换工具
 
+## Concrete Damaged Plasticity 表格提取（prototype）
+
+`abaqus_cdp.py` 从 Abaqus `.inp` 直接提取并检查 CDP 材料输入，不读取 ODB 或结果
+CSV。P0 支持 `*Elastic`、五个 `*Concrete Damaged Plasticity` 标量，以及 strain-based
+的四张二列表格。
+
+只检查输入：
+
+```bash
+python3 tools/abaqus/abaqus_cdp.py \
+  --inp /path/to/test.inp \
+  --check
+```
+
+生成可审计转换包：
+
+```bash
+python3 tools/abaqus/abaqus_cdp.py \
+  --inp /path/to/test.inp \
+  --material concrete \
+  --out-dir /path/to/cdp-input
+```
+
+输出包含四张原始表格 CSV、`cdp-mapping-manifest.json` 和
+`abaqus_cdp_material.i` 原型片段。manifest 记录源文件/制品哈希、关键词行号、单位、
+参数、恢复系数和由 Abaqus 公布公式推导的拉压等效塑性应变。
+
+当前边界：
+
+- 不支持温度、场变量和率依赖表；
+- 不支持 `TYPE=DISPLACEMENT` tension stiffening；
+- `.i` 片段依赖尚在开发的 `AbaqusCDPStressUpdate`，当前不能作为已完成求解器输入；
+- Abaqus 自动稳定化和 C3D8R 沙漏控制不属于该材料转换器。
+
+运行单测：
+
+```bash
+python3 test/tools/test_abaqus_cdp.py
+```
+
 本目录的 `abaqus2exodus.py` 源自 `demo-process@0cc241b8dbee6b7eb9594e9f7538fbd493d1f7a8`，原脚本 SHA-256 为 `7d01cdc2560b5fc6d3eb089c8fece6a3d066df3f1d9192844c754d0bebda1c19`。DamSafetyApp 在保留原有 `B31/C3D8R/T3D2` 能力的基础上增加：
 
 - 同一 Part 内逐单元保存类型，支持混合 `CPS4/CPS4R/CPS3`；

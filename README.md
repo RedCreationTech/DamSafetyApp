@@ -39,3 +39,13 @@
 `gen_dam_two_step_case.py` 可从增强后的转换报告生成线弹性二维坝体“静力预载 → 完整动力”两阶段 MOOSE 输入，保留重力、静水压力、节点附加质量、Rayleigh 阻尼和 Abaqus `TOTAL TIME` 加速度幅值。2D 坝 50 秒复算证据见 [`doc/prototypes/abaqus-2d-static-dynamic-rerun.md`](doc/prototypes/abaqus-2d-static-dynamic-rerun.md)。该能力仍为 `prototype`，尚未迁移混凝土损伤塑性和 Lanczos 模态步。
 
 同目录的 `beam_field_solver.py` 可复算已审核的线性 B31 梁时程，并分别输出位移、梁截面应力包络和绝对加速度 Exodus；`render_beam_fields.py` 生成对应三场 MP4。PR-RG-400gal-X 实例证据见 [`doc/prototypes/PR-RG-400gal-X-three-field-rerun.md`](doc/prototypes/PR-RG-400gal-X-three-field-rerun.md)。
+
+## Abaqus CDP-compatible 本构开发
+
+`tools/abaqus/abaqus_cdp.py` 已提供第一阶段 `.inp` 材料提取、四表校验、等效塑性应变
+检查和可追溯 manifest 输出。它只使用 `.inp` 材料数据；ODB/CSV 保留为验证证据。
+当前状态为 `prototype`，生成的 `.i` 片段尚依赖后续 `AbaqusCDPStressUpdate`，不能据此
+声称 Abaqus CDP 已在 MOOSE 中实现。
+
+使用方法和范围见 [`tools/abaqus/README.md`](tools/abaqus/README.md)。系统需求、设计、
+任务和验收矩阵由 `damASR` 集成仓库维护。
