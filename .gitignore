@@ -21,6 +21,7 @@ unit/lib/
 *Revision.h
 .previous_test_results.json
 .failed_tests
+test/tests/**/elastic_out.csv
 
 # Runtime results
 outputs/
