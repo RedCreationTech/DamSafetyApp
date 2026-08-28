@@ -94,6 +94,9 @@ CDPMaterialTable::load(const std::string & file,
       if (y < 0.0 || y > damage_upper_bound)
         tableError(file + " damage must be in [0, damage_upper_bound] at data row " +
                    std::to_string(i + 1));
+      if (i > 0 && y < table.values[i - 1])
+        tableError(file + " damage must be nondecreasing at data row " +
+                   std::to_string(i + 1));
     }
     else if (y <= 0.0)
       tableError(file + " stress magnitude must be positive at data row " + std::to_string(i + 1));

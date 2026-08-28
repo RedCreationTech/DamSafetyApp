@@ -195,6 +195,19 @@ TEST(CDPMaterialTable, RejectsDamageAtOrAboveOne)
                std::invalid_argument);
 }
 
+TEST(CDPMaterialTable, RejectsDecreasingDamageHistory)
+{
+  const auto files = syntheticFiles("decreasing_damage");
+  writeFile(files.tension_damage,
+            "damage_t,cracking_strain\n0,0\n0.2,0.001\n0.1,0.002\n");
+  EXPECT_THROW(CDPMaterialTable(files.compression_hardening,
+                               files.compression_damage,
+                               files.tension_stiffening,
+                               files.tension_damage,
+                               1.0e9),
+               std::invalid_argument);
+}
+
 TEST(CDPMaterialTable, RejectsNegativeEquivalentPlasticStrain)
 {
   const auto files = syntheticFiles("negative_plastic");
