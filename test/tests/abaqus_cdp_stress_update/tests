@@ -1,0 +1,9 @@
+[Tests]
+  design = 'DES-CDPC-009'
+  issues = '#TASK-CDPC-009C'
+  [single_hex8_tension]
+    type = RunApp
+    input = single_hex8_tension.i
+    requirement = 'DamSafetyApp shall solve a one-element tensile problem with the table-driven Abaqus-CDP-compatible stress update and expose constitutive state as finite-element outputs.'
+  []
+[]
