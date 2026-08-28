@@ -45,10 +45,7 @@ AbaqusCDPStressUpdate::validParams()
                                     "minimum_line_search > 0 & minimum_line_search <= 1",
                                     "Minimum local line-search factor");
   params.addRangeCheckedParam<unsigned int>(
-      "maximum_substeps",
-      256,
-      "maximum_substeps > 0",
-      "Maximum local binary material-substep partition density");
+      "maximum_substeps", 256, "maximum_substeps > 0", "Maximum binary material substeps");
   params.addRangeCheckedParam<Real>("maximum_strain_increment",
                                     0.0,
                                     "maximum_strain_increment >= 0",

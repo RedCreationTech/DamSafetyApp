@@ -5,13 +5,11 @@
 #include <array>
 
 /**
- * Transactional local binary substepping and numerical reference tangent for B-009A.
+ * Transactional binary substepping and numerical reference tangent for B-009A.
  *
- * A proactive base partition enforces the strain-increment limit. If one
- * interval fails, only that interval is bisected; already converged prefix
- * intervals are preserved. This class differentiates the complete discrete
- * material-point map. The numerical matrix is a correctness reference, not
- * the B-009B production tangent intended for full-model performance.
+ * This class differentiates the complete discrete material-point map. The
+ * numerical matrix is a correctness reference, not the B-009B production
+ * tangent intended for full-model performance.
  */
 class AbaqusCDPSubstepIntegrator
 {
@@ -22,7 +20,7 @@ public:
 
   struct Parameters
   {
-    unsigned int maximum_substeps = 256; // maximum binary partition density
+    unsigned int maximum_substeps = 256;
     double maximum_strain_increment = 0.0;
     double tangent_perturbation = 1.0e-8;
   };
@@ -30,9 +28,9 @@ public:
   struct Result
   {
     AbaqusCDPStateIntegrator::Result final_result;
-    unsigned int accepted_substeps;    // accepted leaf intervals
-    unsigned int cutback_count;        // failed intervals that were bisected
-    unsigned int attempted_partitions; // one plus cutback_count, for compatibility
+    unsigned int accepted_substeps;
+    unsigned int cutback_count;
+    unsigned int attempted_partitions;
     unsigned int total_local_iterations;
     bool proactively_partitioned;
   };
