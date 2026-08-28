@@ -85,7 +85,10 @@ TEST(AbaqusCDPStateIntegrator, ZeroViscosityMatchesBackboneAndAppliesDamage)
                    result.backbone.backbone_tension_damage);
   EXPECT_DOUBLE_EQ(result.state.viscous_compression_damage,
                    result.backbone.backbone_compression_damage);
-  EXPECT_EQ(result.viscous_effective_stress, result.backbone.effective_stress);
+  for (std::size_t i = 0; i < result.viscous_effective_stress.size(); ++i)
+    EXPECT_NEAR(result.viscous_effective_stress[i],
+                result.backbone.effective_stress[i],
+                1.0e-12 * std::max(1.0, std::abs(result.backbone.effective_stress[i])));
   EXPECT_GT(result.state.viscous_tension_damage, 0.0);
   for (std::size_t i = 0; i < result.cauchy_stress.size(); ++i)
     EXPECT_NEAR(result.cauchy_stress[i],

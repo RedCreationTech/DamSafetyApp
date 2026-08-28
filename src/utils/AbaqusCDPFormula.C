@@ -245,6 +245,8 @@ duvautLionsUpdate(const double old_viscous_state,
     formulaError("time step and relaxation time must be nonnegative");
   if (relaxation_time == 0.0)
     return backbone_state;
+  if (time_step == 0.0)
+    return old_viscous_state;
   return (relaxation_time * old_viscous_state + time_step * backbone_state) /
          (relaxation_time + time_step);
 }
