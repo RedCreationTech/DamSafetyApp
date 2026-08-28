@@ -19,6 +19,9 @@ class AbaqusCDPLocalIntegrator
 {
 public:
   using SymmetricTensor = AbaqusCDPFormula::SymmetricTensor;
+  static constexpr std::size_t local_size = 9;
+  using LocalVector = std::array<double, local_size>;
+  using LocalMatrix = std::array<LocalVector, local_size>;
   static constexpr std::size_t transition_size = 14;
   using TransitionColumn = std::array<double, transition_size>;
   using TransitionJacobian = std::array<TransitionColumn, transition_size>;
@@ -43,6 +46,7 @@ public:
     double residual_tolerance = 1.0e-9;
     double finite_difference_step = 1.0e-7;
     double minimum_line_search = 1.0e-6;
+    bool use_automatic_differentiation_jacobian = true;
   };
 
   struct State
@@ -78,6 +82,12 @@ public:
     TransitionJacobian derivative;
   };
 
+  struct LocalJacobianDiagnostic
+  {
+    LocalMatrix automatic_differentiation;
+    LocalMatrix finite_difference;
+  };
+
   AbaqusCDPLocalIntegrator(const CDPMaterialTable & table, Parameters parameters);
 
   Result integrate(const SymmetricTensor & total_strain, const State & old_state) const;
@@ -87,14 +97,12 @@ public:
   SymmetricTensor elasticStrain(const SymmetricTensor & stress) const;
   CDPMaterialTable::Response materialResponse(CDPMaterialTable::Branch branch,
                                               double equivalent_plastic_strain) const;
+  LocalJacobianDiagnostic localJacobianDiagnostic(const SymmetricTensor & total_strain,
+                                                  const State & old_state) const;
 
   static std::string branchName(ActiveBranch branch);
 
 private:
-  static constexpr std::size_t local_size = 9;
-  using LocalVector = std::array<double, local_size>;
-  using LocalMatrix = std::array<LocalVector, local_size>;
-
   struct Evaluation
   {
     LocalVector residual;
@@ -117,6 +125,14 @@ private:
                                 const SymmetricTensor & total_strain,
                                 const State & old_state,
                                 double stress_scale) const;
+  LocalMatrix automaticDifferentiationJacobian(const LocalVector & unknown,
+                                               const SymmetricTensor & total_strain,
+                                               const State & old_state,
+                                               double stress_scale) const;
+  LocalMatrix localJacobian(const LocalVector & unknown,
+                            const SymmetricTensor & total_strain,
+                            const State & old_state,
+                            double stress_scale) const;
   static LocalVector solveLinearSystem(LocalMatrix matrix, LocalVector right_hand_side);
 
   const CDPMaterialTable & _table;

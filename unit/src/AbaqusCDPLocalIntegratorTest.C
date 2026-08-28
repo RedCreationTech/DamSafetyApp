@@ -23,18 +23,21 @@ referenceTable()
 }
 
 AbaqusCDPLocalIntegrator::Parameters
-parameters(const unsigned int maximum_iterations = 40)
+parameters(const unsigned int maximum_iterations = 40,
+           const bool use_automatic_differentiation_jacobian = true)
 {
-  return {youngs_modulus,
-          poissons_ratio,
-          36.31,
-          0.1,
-          1.16,
-          0.667,
-          maximum_iterations,
-          1.0e-9,
-          1.0e-7,
-          1.0e-6};
+  auto result = AbaqusCDPLocalIntegrator::Parameters{youngs_modulus,
+                                                     poissons_ratio,
+                                                     36.31,
+                                                     0.1,
+                                                     1.16,
+                                                     0.667,
+                                                     maximum_iterations,
+                                                     1.0e-9,
+                                                     1.0e-7,
+                                                     1.0e-6};
+  result.use_automatic_differentiation_jacobian = use_automatic_differentiation_jacobian;
+  return result;
 }
 
 AbaqusCDPLocalIntegrator::SymmetricTensor
@@ -152,4 +155,80 @@ TEST(AbaqusCDPLocalIntegrator, RejectsInvalidOldStateBeforeTrialEvaluation)
   AbaqusCDPLocalIntegrator::State invalid;
   invalid.tensile_equivalent_plastic_strain = -1.0;
   EXPECT_THROW(integrator.integrate({0, 0, 0, 0, 0, 0}, invalid), std::runtime_error);
+}
+
+TEST(AbaqusCDPLocalIntegrator, AutomaticDifferentiationJacobianMatchesFiniteDifference)
+{
+  const auto table = referenceTable();
+  const AbaqusCDPLocalIntegrator integrator(table, parameters());
+  const double initial_tension =
+      table.responseByEquivalentPlasticStrain(CDPMaterialTable::Branch::TENSION, 0.0).stress.value;
+  auto strain = uniaxialElasticStrain(1.08 * initial_tension);
+  strain[3] = 0.08 * initial_tension / youngs_modulus;
+
+  const auto diagnostic = integrator.localJacobianDiagnostic(strain, {});
+  double maximum_absolute_error = 0.0;
+  double maximum_scaled_error = 0.0;
+  for (std::size_t row = 0; row < AbaqusCDPLocalIntegrator::local_size; ++row)
+    for (std::size_t column = 0; column < AbaqusCDPLocalIntegrator::local_size; ++column)
+    {
+      const double automatic = diagnostic.automatic_differentiation[row][column];
+      const double reference = diagnostic.finite_difference[row][column];
+      const double difference = std::abs(automatic - reference);
+      maximum_absolute_error = std::max(maximum_absolute_error, difference);
+      maximum_scaled_error =
+          std::max(maximum_scaled_error, difference / std::max(1.0, std::abs(reference)));
+    }
+  EXPECT_LE(maximum_absolute_error, 1.0e-6);
+  EXPECT_LE(maximum_scaled_error, 5.0e-4);
+}
+
+TEST(AbaqusCDPLocalIntegrator, AutomaticDifferentiationAndFiniteDifferenceReachSameRoots)
+{
+  const auto table = referenceTable();
+  const AbaqusCDPLocalIntegrator automatic(table, parameters(40, true));
+  const AbaqusCDPLocalIntegrator finite_difference(table, parameters(40, false));
+  const double initial_tension =
+      table.responseByEquivalentPlasticStrain(CDPMaterialTable::Branch::TENSION, 0.0).stress.value;
+  const double initial_compression = table
+                                         .responseByEquivalentPlasticStrain(
+                                             CDPMaterialTable::Branch::COMPRESSION, 0.0)
+                                         .stress.value;
+  const std::array<AbaqusCDPLocalIntegrator::SymmetricTensor, 3> strains = {
+      uniaxialElasticStrain(1.05 * initial_tension),
+      uniaxialElasticStrain(-1.05 * initial_compression),
+      AbaqusCDPLocalIntegrator::SymmetricTensor{2.0e-4,
+                                               -8.0e-5,
+                                               -4.0e-5,
+                                               3.0e-5,
+                                               -1.0e-5,
+                                               2.0e-5}};
+
+  for (const auto & strain : strains)
+  {
+    const auto automatic_result = automatic.integrateLinearized(strain, {});
+    const auto reference_result = finite_difference.integrateLinearized(strain, {});
+    ASSERT_EQ(automatic_result.result.active_branch, reference_result.result.active_branch);
+    for (std::size_t i = 0; i < 6; ++i)
+    {
+      EXPECT_NEAR(automatic_result.result.effective_stress[i],
+                  reference_result.result.effective_stress[i],
+                  1.0e-7 * std::max(1.0, std::abs(reference_result.result.effective_stress[i])));
+      EXPECT_NEAR(automatic_result.result.state.plastic_strain[i],
+                  reference_result.result.state.plastic_strain[i],
+                  1.0e-10);
+    }
+    EXPECT_NEAR(automatic_result.result.state.tensile_equivalent_plastic_strain,
+                reference_result.result.state.tensile_equivalent_plastic_strain,
+                1.0e-10);
+    EXPECT_NEAR(automatic_result.result.state.compressive_equivalent_plastic_strain,
+                reference_result.result.state.compressive_equivalent_plastic_strain,
+                1.0e-10);
+    for (std::size_t input = 0; input < AbaqusCDPLocalIntegrator::transition_size; ++input)
+      for (std::size_t output = 0; output < AbaqusCDPLocalIntegrator::transition_size; ++output)
+        EXPECT_NEAR(automatic_result.derivative[input][output],
+                    reference_result.derivative[input][output],
+                    5.0e-3 *
+                        std::max(1.0, std::abs(reference_result.derivative[input][output])));
+  }
 }
