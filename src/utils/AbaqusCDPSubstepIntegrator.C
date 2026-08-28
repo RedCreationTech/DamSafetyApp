@@ -88,66 +88,83 @@ AbaqusCDPSubstepIntegrator::integrate(const SymmetricTensor & old_total_strain,
     substepError("time step must be finite and nonnegative");
 
   const auto total_increment = substepDifference(new_total_strain, old_total_strain);
-  unsigned int substeps = 1;
+  unsigned int base_substeps = 1;
   if (_parameters.maximum_strain_increment > 0.0)
-    while (maximumAbsoluteComponent(total_increment) / substeps >
+    while (maximumAbsoluteComponent(total_increment) / base_substeps >
            _parameters.maximum_strain_increment)
     {
-      if (substeps == _parameters.maximum_substeps)
+      if (base_substeps == _parameters.maximum_substeps)
         substepError("proactive strain-increment limit requires more than maximum_substeps");
-      substeps *= 2;
+      base_substeps *= 2;
     }
-  const bool proactively_partitioned = substeps > 1;
+  const bool proactively_partitioned = base_substeps > 1;
 
   unsigned int cutback_count = 0;
-  unsigned int attempted_partitions = 0;
+  unsigned int attempted_partitions = 1;
+  unsigned int accepted_substeps = 0;
+  unsigned int total_local_iterations = 0;
   std::string last_error;
   unsigned int last_failed_substep = 0;
-  unsigned int last_partition = substeps;
+  unsigned int last_partition = base_substeps;
+  State working_state = old_state;
+  std::optional<AbaqusCDPStateIntegrator::Result> final_result;
 
-  while (substeps <= _parameters.maximum_substeps)
+  const auto integrate_segment = [&](const auto & self,
+                                     const double start_fraction,
+                                     const double end_fraction,
+                                     const unsigned int partition) -> bool
   {
-    ++attempted_partitions;
-    State working_state = old_state;
-    std::optional<AbaqusCDPStateIntegrator::Result> final_result;
-    unsigned int total_local_iterations = 0;
-    bool partition_succeeded = true;
-
-    for (unsigned int i = 1; i <= substeps; ++i)
+    const auto target = substepInterpolate(old_total_strain, total_increment, end_fraction);
+    try
     {
-      const auto target = substepInterpolate(
-          old_total_strain, total_increment, static_cast<double>(i) / substeps);
-      try
-      {
-        auto step_result = _state_integrator.integrate(
-            target, time_step / static_cast<double>(substeps), working_state);
-        total_local_iterations += step_result.backbone.iterations;
-        working_state = step_result.state;
-        final_result = std::move(step_result);
-      }
-      catch (const std::exception & error)
-      {
-        partition_succeeded = false;
-        last_error = error.what();
-        last_failed_substep = i;
-        last_partition = substeps;
-        break;
-      }
+      auto step_result = _state_integrator.integrate(
+          target, time_step * (end_fraction - start_fraction), working_state);
+      total_local_iterations += step_result.backbone.iterations;
+      working_state = step_result.state;
+      final_result = std::move(step_result);
+      ++accepted_substeps;
+      return true;
+    }
+    catch (const std::exception & error)
+    {
+      last_error = error.what();
+      last_failed_substep = accepted_substeps + 1;
+      last_partition = partition;
     }
 
-    if (partition_succeeded && final_result)
-      return {std::move(*final_result),
-              substeps,
-              cutback_count,
-              attempted_partitions,
-              total_local_iterations,
-              proactively_partitioned};
+    if (partition == _parameters.maximum_substeps)
+      return false;
 
-    if (substeps == _parameters.maximum_substeps)
-      break;
-    substeps *= 2;
+    // Preserve the converged prefix and refine only this failed interval. This
+    // avoids replaying all earlier material-point updates after a local failure.
     ++cutback_count;
+    ++attempted_partitions;
+    const double midpoint = 0.5 * (start_fraction + end_fraction);
+    const unsigned int refined_partition = 2 * partition;
+    return self(self, start_fraction, midpoint, refined_partition) &&
+           self(self, midpoint, end_fraction, refined_partition);
+  };
+
+  bool integration_succeeded = true;
+  for (unsigned int i = 0; i < base_substeps; ++i)
+  {
+    const double start_fraction = static_cast<double>(i) / base_substeps;
+    const double end_fraction = static_cast<double>(i + 1) / base_substeps;
+    if (!integrate_segment(
+            integrate_segment, start_fraction, end_fraction, base_substeps))
+    {
+      integration_succeeded = false;
+      break;
+    }
   }
+
+  if (integration_succeeded && final_result)
+    return {std::move(*final_result),
+            accepted_substeps,
+            cutback_count,
+            attempted_partitions,
+            total_local_iterations,
+            proactively_partitioned};
 
   std::ostringstream message;
   message << "failed after partition=" << last_partition
@@ -169,101 +186,117 @@ AbaqusCDPSubstepIntegrator::integrateLinearized(const SymmetricTensor & old_tota
     substepError("time step must be finite and nonnegative");
 
   const auto total_increment = substepDifference(new_total_strain, old_total_strain);
-  unsigned int substeps = 1;
+  unsigned int base_substeps = 1;
   if (_parameters.maximum_strain_increment > 0.0)
-    while (maximumAbsoluteComponent(total_increment) / substeps >
+    while (maximumAbsoluteComponent(total_increment) / base_substeps >
            _parameters.maximum_strain_increment)
     {
-      if (substeps == _parameters.maximum_substeps)
+      if (base_substeps == _parameters.maximum_substeps)
         substepError("proactive strain-increment limit requires more than maximum_substeps");
-      substeps *= 2;
+      base_substeps *= 2;
     }
-  const bool proactively_partitioned = substeps > 1;
+  const bool proactively_partitioned = base_substeps > 1;
 
   unsigned int cutback_count = 0;
-  unsigned int attempted_partitions = 0;
+  unsigned int attempted_partitions = 1;
+  unsigned int accepted_substeps = 0;
+  unsigned int total_local_iterations = 0;
   std::string last_error;
   unsigned int last_failed_substep = 0;
-  unsigned int last_partition = substeps;
+  unsigned int last_partition = base_substeps;
+  State working_state = old_state;
+  std::optional<AbaqusCDPStateIntegrator::LinearizedResult> final_result;
+  std::array<std::array<double, AbaqusCDPStateIntegrator::state_size>, 6>
+      state_sensitivity = {};
+  TangentMatrix tangent = {};
 
-  while (substeps <= _parameters.maximum_substeps)
+  const auto integrate_segment = [&](const auto & self,
+                                     const double start_fraction,
+                                     const double end_fraction,
+                                     const unsigned int partition) -> bool
   {
-    ++attempted_partitions;
-    State working_state = old_state;
-    std::optional<AbaqusCDPStateIntegrator::LinearizedResult> final_result;
-    std::array<std::array<double, AbaqusCDPStateIntegrator::state_size>, 6>
-        state_sensitivity = {};
-    TangentMatrix tangent = {};
-    unsigned int total_local_iterations = 0;
-    bool partition_succeeded = true;
-
-    for (unsigned int i = 1; i <= substeps; ++i)
+    const auto target =
+        substepInterpolate(old_total_strain, total_increment, end_fraction);
+    try
     {
-      const double fraction = static_cast<double>(i) / substeps;
-      const auto target = substepInterpolate(old_total_strain, total_increment, fraction);
-      try
-      {
-        auto step_result = _state_integrator.integrateLinearized(
-            target, time_step / static_cast<double>(substeps), working_state);
-        total_local_iterations += step_result.result.backbone.iterations;
+      auto step_result = _state_integrator.integrateLinearized(
+          target, time_step * (end_fraction - start_fraction), working_state);
+      total_local_iterations += step_result.result.backbone.iterations;
 
-        std::array<std::array<double, AbaqusCDPStateIntegrator::state_size>, 6>
-            new_state_sensitivity = {};
-        TangentMatrix new_tangent = {};
-        for (std::size_t final_column = 0; final_column < 6; ++final_column)
-        {
-          std::array<double, AbaqusCDPStateIntegrator::transition_size> input_derivative = {};
-          input_derivative[final_column] = fraction;
-          for (std::size_t state_row = 0;
-               state_row < AbaqusCDPStateIntegrator::state_size;
-               ++state_row)
-            input_derivative[6 + state_row] = state_sensitivity[final_column][state_row];
-
-          for (std::size_t output_row = 0; output_row < 6; ++output_row)
-            for (std::size_t input = 0;
-                 input < AbaqusCDPStateIntegrator::transition_size;
-                 ++input)
-              new_tangent[final_column][output_row] +=
-                  step_result.derivative[input][output_row] * input_derivative[input];
-          for (std::size_t state_row = 0;
-               state_row < AbaqusCDPStateIntegrator::state_size;
-               ++state_row)
-            for (std::size_t input = 0;
-                 input < AbaqusCDPStateIntegrator::transition_size;
-                 ++input)
-              new_state_sensitivity[final_column][state_row] +=
-                  step_result.derivative[input][6 + state_row] * input_derivative[input];
-        }
-        state_sensitivity = new_state_sensitivity;
-        tangent = new_tangent;
-        working_state = step_result.result.state;
-        final_result = std::move(step_result);
-      }
-      catch (const std::exception & error)
+      std::array<std::array<double, AbaqusCDPStateIntegrator::state_size>, 6>
+          new_state_sensitivity = {};
+      TangentMatrix new_tangent = {};
+      for (std::size_t final_column = 0; final_column < 6; ++final_column)
       {
-        partition_succeeded = false;
-        last_error = error.what();
-        last_failed_substep = i;
-        last_partition = substeps;
-        break;
+        std::array<double, AbaqusCDPStateIntegrator::transition_size> input_derivative = {};
+        input_derivative[final_column] = end_fraction;
+        for (std::size_t state_row = 0;
+             state_row < AbaqusCDPStateIntegrator::state_size;
+             ++state_row)
+          input_derivative[6 + state_row] = state_sensitivity[final_column][state_row];
+
+        for (std::size_t output_row = 0; output_row < 6; ++output_row)
+          for (std::size_t input = 0;
+               input < AbaqusCDPStateIntegrator::transition_size;
+               ++input)
+            new_tangent[final_column][output_row] +=
+                step_result.derivative[input][output_row] * input_derivative[input];
+        for (std::size_t state_row = 0;
+             state_row < AbaqusCDPStateIntegrator::state_size;
+             ++state_row)
+          for (std::size_t input = 0;
+               input < AbaqusCDPStateIntegrator::transition_size;
+               ++input)
+            new_state_sensitivity[final_column][state_row] +=
+                step_result.derivative[input][6 + state_row] * input_derivative[input];
       }
+      state_sensitivity = new_state_sensitivity;
+      tangent = new_tangent;
+      working_state = step_result.result.state;
+      final_result = std::move(step_result);
+      ++accepted_substeps;
+      return true;
+    }
+    catch (const std::exception & error)
+    {
+      last_error = error.what();
+      last_failed_substep = accepted_substeps + 1;
+      last_partition = partition;
     }
 
-    if (partition_succeeded && final_result)
-    {
-      Result result{std::move(final_result->result),
-                    substeps,
-                    cutback_count,
-                    attempted_partitions,
-                    total_local_iterations,
-                    proactively_partitioned};
-      return {std::move(result), tangent};
-    }
+    if (partition == _parameters.maximum_substeps)
+      return false;
 
-    if (substeps == _parameters.maximum_substeps)
-      break;
-    substeps *= 2;
     ++cutback_count;
+    ++attempted_partitions;
+    const double midpoint = 0.5 * (start_fraction + end_fraction);
+    const unsigned int refined_partition = 2 * partition;
+    return self(self, start_fraction, midpoint, refined_partition) &&
+           self(self, midpoint, end_fraction, refined_partition);
+  };
+
+  bool integration_succeeded = true;
+  for (unsigned int i = 0; i < base_substeps; ++i)
+  {
+    const double start_fraction = static_cast<double>(i) / base_substeps;
+    const double end_fraction = static_cast<double>(i + 1) / base_substeps;
+    if (!integrate_segment(
+            integrate_segment, start_fraction, end_fraction, base_substeps))
+    {
+      integration_succeeded = false;
+      break;
+    }
+  }
+
+  if (integration_succeeded && final_result)
+  {
+    Result result{std::move(final_result->result),
+                  accepted_substeps,
+                  cutback_count,
+                  attempted_partitions,
+                  total_local_iterations,
+                  proactively_partitioned};
+    return {std::move(result), tangent};
   }
 
   std::ostringstream message;
