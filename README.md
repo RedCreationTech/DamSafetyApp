@@ -60,7 +60,13 @@
 ```bash
 ./scripts/cdp/build-app.sh
 ./scripts/cdp/run-tests.sh
+./scripts/cdp/run-unit-tests.sh
 ```
 
 构建产物为 `DamSafetyApp-opt`。开发目录中的二进制不得直接替换正式求解器；只有已提交、
 已推送并通过材料点和单单元门禁的 SHA 才能进入 C06 部署流程。
+
+`CDPMaterialTable` 是路线 B 的独立 C++ 输入层：读取 Python 转换器生成的四张 CSV，
+检查列名、有限数值、严格递增横坐标、正应力、损伤范围和等效塑性应变单调性，并提供
+常值端点外推、分段线性插值以及节点左右导数。它仍不包含 CDP 屈服面、流动势、损伤
+演化或应力积分逻辑。
