@@ -6,4 +6,34 @@
     input = single_hex8_tension.i
     requirement = 'DamSafetyApp shall solve a one-element tensile problem with the table-driven Abaqus-CDP-compatible stress update and expose constitutive state as finite-element outputs.'
   []
+  [single_hex8_compression]
+    type = RunApp
+    input = single_hex8_compression.i
+    requirement = 'DamSafetyApp shall solve a one-element monotonic compression diagnostic with the table-driven Abaqus-CDP-compatible stress update.'
+  []
+  [single_hex8_compression_cycle]
+    type = RunApp
+    input = single_hex8_compression_cycle.i
+    requirement = 'DamSafetyApp shall preserve accepted constitutive history through compression unloading and reloading.'
+  []
+  [single_hex8_tension_compression]
+    type = RunApp
+    input = single_hex8_tension_compression.i
+    requirement = 'DamSafetyApp shall solve a one-element tension-to-compression reversal diagnostic.'
+  []
+  [single_hex8_compression_tension]
+    type = RunApp
+    input = single_hex8_compression_tension.i
+    requirement = 'DamSafetyApp shall solve a one-element compression-to-tension reversal diagnostic.'
+  []
+  [single_hex8_biaxial_compression]
+    type = RunApp
+    input = single_hex8_biaxial_compression.i
+    requirement = 'DamSafetyApp shall solve a one-element biaxial compression diagnostic using the CDP meridian parameters.'
+  []
+  [single_hex8_shear]
+    type = RunApp
+    input = single_hex8_shear.i
+    requirement = 'DamSafetyApp shall solve a one-element shear diagnostic with the non-associated CDP flow potential.'
+  []
 []

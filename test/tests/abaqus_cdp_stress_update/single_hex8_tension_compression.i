@@ -3,8 +3,8 @@
 [Functions]
   [load_path]
     type = PiecewiseLinear
-    x = '0 1'
-    y = '0 2e-4'
+    x = '0 0.4 1'
+    y = '0 2e-4 -1.5e-3'
   []
 []
 
@@ -39,5 +39,5 @@
   exodus = true
   csv = true
   execute_on = 'initial timestep_end'
-  file_base = single_hex8_tension_out
+  file_base = single_hex8_tension_compression_out
 []

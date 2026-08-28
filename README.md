@@ -44,8 +44,10 @@
 
 `tools/abaqus/abaqus_cdp.py` 已提供第一阶段 `.inp` 材料提取、四表校验、等效塑性应变
 检查和可追溯 manifest 输出。它只使用 `.inp` 材料数据；ODB/CSV 保留为验证证据。
-当前状态为 `prototype`，生成的 `.i` 片段尚依赖后续 `AbaqusCDPStressUpdate`，不能据此
-声称 Abaqus CDP 已在 MOOSE 中实现。
+当前状态为 `prototype`。`AbaqusCDPStressUpdate` 已接入标准 MOOSE
+`ComputeMultipleInelasticStress` 链，并通过七类单 HEX8 自洽诊断；生成的 `.i` 片段可
+作为材料块接入该自有应用。由于 Abaqus 黄金材料点、自动稳定化、C3D8R 减缩积分/沙漏
+控制及正式 C30 数据尚未完成验收，不能据此声称与 Abaqus 商业实现一比一等价。
 
 使用方法和范围见 [`tools/abaqus/README.md`](tools/abaqus/README.md)。系统需求、设计、
 任务和验收矩阵由 `damASR` 集成仓库维护。
@@ -66,7 +68,7 @@
 构建产物为 `DamSafetyApp-opt`。开发目录中的二进制不得直接替换正式求解器；只有已提交、
 已推送并通过材料点和单单元门禁的 SHA 才能进入 C06 部署流程。
 
-`CDPMaterialTable` 是路线 B 的独立 C++ 输入层：读取 Python 转换器生成的四张 CSV，
+`CDPMaterialTable` 是路线 B 的 C++ 输入层：读取 Python 转换器生成的四张 CSV，
 检查列名、有限数值、严格递增横坐标、正应力、损伤范围和等效塑性应变单调性，并提供
-常值端点外推、分段线性插值以及节点左右导数。它仍不包含 CDP 屈服面、流动势、损伤
-演化或应力积分逻辑。
+常值端点外推、分段线性插值以及节点左右导数。本构公式、局部积分、损伤/恢复、黏性、
+事务式子步和算法切线由 `CDPConstitutiveModel`/`AbaqusCDPStressUpdate` 分层实现。

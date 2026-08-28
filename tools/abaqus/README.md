@@ -31,7 +31,8 @@ python3 tools/abaqus/abaqus_cdp.py \
 
 - 不支持温度、场变量和率依赖表；
 - 不支持 `TYPE=DISPLACEMENT` tension stiffening；
-- `.i` 片段依赖尚在开发的 `AbaqusCDPStressUpdate`，当前不能作为已完成求解器输入；
+- `.i` 片段面向本仓 `AbaqusCDPStressUpdate`，可作为材料块接入 DamSafetyApp 输入；
+  仍须由完整 `.i` 提供网格、变量、边界、执行器和输出；
 - Abaqus 自动稳定化和 C3D8R 沙漏控制不属于该材料转换器。
 
 运行单测：
@@ -168,7 +169,8 @@ Newmark 积分参数可用 `--newmark-gamma`/`--newmark-beta` 调整，默认 `0
 ## 已知边界
 
 - 转换器输出网格、集合、二维 sideset、附加质量清单及受控分析语义报告；MOOSE `.i` 仍由场景生成器生成，不能把 JSON 报告本身当作求解输入；
-- Abaqus CDP 参数不能机械映射为 BlackBear 损伤塑性参数；
+- Abaqus CDP 参数不能机械映射为 BlackBear DPM 参数；路线 B 使用独立的
+  `AbaqusCDPStressUpdate` 读取原 CDP 标量和四表，当前仍为行为兼容 prototype；
 - 三维 surface 到 Exodus side 编号仍沿用旧工具的 nodeset 行为，未在本次扩展中声明支持；
 - 转换成功不等于物理等价，必须继续做拓扑、质量合计、边界、反力和关键响应对比。
 - 2D 坝体已完成线弹性静力预载和完整 50 秒动力复算，但状态仍为 `prototype`；证据与限制见 [`../../doc/prototypes/abaqus-2d-static-dynamic-rerun.md`](../../doc/prototypes/abaqus-2d-static-dynamic-rerun.md)。
