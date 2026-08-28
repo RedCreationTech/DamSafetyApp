@@ -154,6 +154,21 @@ class AbaqusCDPTest(unittest.TestCase):
         with self.assertRaisesRegex(CDP.CDPInputError, "首行损伤必须为 0"):
             CDP.validate_material(material)
 
+    def test_rejects_decreasing_damage_history(self):
+        invalid = VALID_INPUT.replace(
+            "*Concrete Tension Damage, compression recovery=0.75\n"
+            "0.0, 0.0\n"
+            "0.1, 0.001",
+            "*Concrete Tension Damage, compression recovery=0.75\n"
+            "0.0, 0.0\n"
+            "0.1, 0.001\n"
+            "0.05, 0.002",
+        )
+        self.inp.write_text(invalid, encoding="utf-8")
+        material = CDP.choose_material(CDP.parse_materials(self.inp), None)
+        with self.assertRaisesRegex(CDP.CDPInputError, "损伤下降"):
+            CDP.validate_material(material)
+
     def test_requires_material_choice_for_multiple_cdp_materials(self):
         second = VALID_INPUT.replace("name=CONCRETE", "name=CONCRETE-2")
         self.inp.write_text(VALID_INPUT + second, encoding="utf-8")

@@ -2,7 +2,6 @@
 
 #include <algorithm>
 #include <cmath>
-#include <limits>
 #include <stdexcept>
 #include <string>
 
@@ -137,16 +136,16 @@ AbaqusCDPStateIntegrator::integrate(const SymmetricTensor & total_strain,
 
   const auto plastic_lag =
       subtractStateTensor(backbone.state.plastic_strain, new_state.viscous_plastic_strain);
+  const bool rate_independent = _parameters.relaxation_time == 0.0;
   const double dt_over_relaxation_time =
-      _parameters.relaxation_time == 0.0
-          ? std::numeric_limits<double>::infinity()
-          : time_step / _parameters.relaxation_time;
+      rate_independent ? 0.0 : time_step / _parameters.relaxation_time;
 
   return {backbone,
           viscous_effective_stress,
           cauchy_stress,
           new_state,
           damage,
+          rate_independent,
           dt_over_relaxation_time,
           stateTensorNorm(plastic_lag),
           backbone.backbone_tension_damage - new_state.viscous_tension_damage,

@@ -38,6 +38,7 @@ public:
     SymmetricTensor cauchy_stress;
     State state;
     AbaqusCDPFormula::DamageCombination damage;
+    bool rate_independent;
     double dt_over_relaxation_time;
     double plastic_strain_lag_norm;
     double tension_damage_lag;

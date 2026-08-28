@@ -313,10 +313,15 @@ def validate_material(material: CDPMaterial) -> dict[str, object]:
             if table[0][0] != 0:
                 raise CDPInputError(
                     f"{key} 首行损伤必须为 0，实际 {table[0][0]}")
+            previous_damage = -math.inf
             for index, (damage, _) in enumerate(table, 1):
                 if not 0 <= damage < 1:
                     raise CDPInputError(
                         f"{key} 第 {index} 行损伤 {damage} 不满足 0 <= d < 1")
+                if damage < previous_damage:
+                    raise CDPInputError(
+                        f"{key} 第 {index} 行损伤下降: {damage} < {previous_damage}")
+                previous_damage = damage
         else:
             for index, (stress, _) in enumerate(table, 1):
                 if stress <= 0:

@@ -94,7 +94,8 @@ TEST(AbaqusCDPStateIntegrator, ZeroViscosityMatchesBackboneAndAppliesDamage)
     EXPECT_NEAR(result.cauchy_stress[i],
                 result.damage.stiffness_factor * result.viscous_effective_stress[i],
                 1.0e-12 * std::max(1.0, std::abs(result.viscous_effective_stress[i])));
-  EXPECT_TRUE(std::isinf(result.dt_over_relaxation_time));
+  EXPECT_TRUE(result.rate_independent);
+  EXPECT_DOUBLE_EQ(result.dt_over_relaxation_time, 0.0);
   EXPECT_DOUBLE_EQ(result.plastic_strain_lag_norm, 0.0);
 }
 
@@ -123,6 +124,7 @@ TEST(AbaqusCDPStateIntegrator, AppliesBackwardEulerToPlasticStrainAndBothDamageB
               0.5 * result.backbone.backbone_tension_damage,
               1.0e-14);
   EXPECT_DOUBLE_EQ(result.dt_over_relaxation_time, 1.0);
+  EXPECT_FALSE(result.rate_independent);
   EXPECT_GT(result.plastic_strain_lag_norm, 0.0);
   EXPECT_GE(result.compression_damage_lag, 0.0);
 }
