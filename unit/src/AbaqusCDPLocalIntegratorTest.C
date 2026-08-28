@@ -114,7 +114,20 @@ TEST(AbaqusCDPLocalIntegrator, FailedSolveDoesNotMutateOldStateAndRetryIsDetermi
   const auto snapshot = old_state;
 
   const AbaqusCDPLocalIntegrator failing(table, parameters(0));
-  EXPECT_THROW(failing.integrate(strain, old_state), std::runtime_error);
+  try
+  {
+    failing.integrate(strain, old_state);
+    FAIL() << "expected local integration failure";
+  }
+  catch (const std::runtime_error & error)
+  {
+    const std::string diagnostic = error.what();
+    EXPECT_NE(diagnostic.find("residual="), std::string::npos);
+    EXPECT_NE(diagnostic.find("plastic_multiplier="), std::string::npos);
+    EXPECT_NE(diagnostic.find("kappa_t="), std::string::npos);
+    EXPECT_NE(diagnostic.find("kappa_c="), std::string::npos);
+    EXPECT_NE(diagnostic.find("branch="), std::string::npos);
+  }
   EXPECT_EQ(old_state.plastic_strain, snapshot.plastic_strain);
   EXPECT_DOUBLE_EQ(old_state.tensile_equivalent_plastic_strain,
                    snapshot.tensile_equivalent_plastic_strain);

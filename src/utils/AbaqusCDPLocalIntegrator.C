@@ -310,6 +310,14 @@ AbaqusCDPLocalIntegrator::integrate(const SymmetricTensor & total_strain,
 
   Evaluation current = evaluate(unknown);
   double residual_norm = infinityNorm(current.residual);
+  const auto currentBranch = [&](const Evaluation & evaluation) {
+    const double tolerance = 10.0 * std::numeric_limits<double>::epsilon() * _strain_scale;
+    if (evaluation.tensile_increment <= tolerance)
+      return ActiveBranch::COMPRESSION;
+    if (evaluation.compressive_increment <= tolerance)
+      return ActiveBranch::TENSION;
+    return ActiveBranch::MIXED;
+  };
   unsigned int iterations = 0;
   for (; iterations < _parameters.maximum_iterations &&
          residual_norm > _parameters.residual_tolerance;
@@ -359,8 +367,16 @@ AbaqusCDPLocalIntegrator::integrate(const SymmetricTensor & total_strain,
       }
     }
     if (!accepted)
-      integrationError("line search failed at iteration " + std::to_string(iterations + 1) +
-                       ", residual=" + std::to_string(residual_norm));
+    {
+      std::ostringstream message;
+      message << std::setprecision(16) << "line search failed at iteration " << iterations + 1
+              << ", residual=" << residual_norm
+              << ", plastic_multiplier=" << current.plastic_multiplier
+              << ", kappa_t=" << current.tensile_equivalent_plastic_strain
+              << ", kappa_c=" << current.compressive_equivalent_plastic_strain
+              << ", branch=" << branchName(currentBranch(current));
+      integrationError(message.str());
+    }
   }
 
   if (residual_norm > _parameters.residual_tolerance)
@@ -370,7 +386,8 @@ AbaqusCDPLocalIntegrator::integrate(const SymmetricTensor & total_strain,
             << " iterations, residual=" << residual_norm
             << ", plastic_multiplier=" << current.plastic_multiplier
             << ", kappa_t=" << current.tensile_equivalent_plastic_strain
-            << ", kappa_c=" << current.compressive_equivalent_plastic_strain;
+            << ", kappa_c=" << current.compressive_equivalent_plastic_strain
+            << ", branch=" << branchName(currentBranch(current));
     integrationError(message.str());
   }
 
@@ -384,16 +401,9 @@ AbaqusCDPLocalIntegrator::integrate(const SymmetricTensor & total_strain,
   const auto compression = _table.responseByEquivalentPlasticStrain(
       CDPMaterialTable::Branch::COMPRESSION, new_state.compressive_equivalent_plastic_strain);
 
-  const double branch_tolerance = 10.0 * std::numeric_limits<double>::epsilon() * _strain_scale;
-  ActiveBranch branch = ActiveBranch::MIXED;
-  if (current.tensile_increment <= branch_tolerance)
-    branch = ActiveBranch::COMPRESSION;
-  else if (current.compressive_increment <= branch_tolerance)
-    branch = ActiveBranch::TENSION;
-
   return {current.stress,
           new_state,
-          branch,
+          currentBranch(current),
           true,
           iterations,
           residual_norm,
