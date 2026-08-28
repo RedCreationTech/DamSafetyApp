@@ -33,6 +33,10 @@ public:
     unsigned int attempted_partitions;
     unsigned int total_local_iterations;
     unsigned int total_jacobian_fallbacks;
+    unsigned int total_automatic_jacobian_evaluations;
+    unsigned int total_finite_difference_jacobian_evaluations;
+    unsigned int total_local_factorizations;
+    unsigned int total_local_backsolves;
     bool proactively_partitioned;
   };
 

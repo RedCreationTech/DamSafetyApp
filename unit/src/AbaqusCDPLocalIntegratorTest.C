@@ -206,6 +206,12 @@ TEST(AbaqusCDPLocalIntegrator, AutomaticDifferentiationAndFiniteDifferenceReachS
     const auto automatic_result = automatic.integrateLinearized(strain, {});
     const auto reference_result = finite_difference.integrateLinearized(strain, {});
     ASSERT_EQ(automatic_result.result.active_branch, reference_result.result.active_branch);
+    EXPECT_GT(automatic_result.result.local_factorizations, 0u);
+    EXPECT_EQ(automatic_result.result.local_backsolves,
+              automatic_result.result.local_factorizations + 13u);
+    EXPECT_GT(reference_result.result.local_factorizations, 0u);
+    EXPECT_EQ(reference_result.result.local_backsolves,
+              reference_result.result.local_factorizations + 13u);
     for (std::size_t i = 0; i < 6; ++i)
     {
       EXPECT_NEAR(automatic_result.result.effective_stress[i],

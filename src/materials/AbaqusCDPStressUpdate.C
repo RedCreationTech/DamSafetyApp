@@ -3,6 +3,7 @@
 #include "MooseException.h"
 
 #include <array>
+#include <chrono>
 #include <exception>
 
 registerMooseObject("DamSafetyApp", AbaqusCDPStressUpdate);
@@ -54,11 +55,16 @@ AbaqusCDPStressUpdate::validParams()
                                     1.0e-8,
                                     "reference_tangent_perturbation > 0",
                                     "Diagnostic reference-tangent perturbation");
+  params.addParam<bool>("enable_performance_diagnostics",
+                        false,
+                        "Measure per-material-call elapsed time and expose detailed local solver "
+                        "counters as material properties");
   return params;
 }
 
 AbaqusCDPStressUpdate::AbaqusCDPStressUpdate(const InputParameters & parameters)
   : StressUpdateBase(parameters),
+    _enable_performance_diagnostics(getParam<bool>("enable_performance_diagnostics")),
     _table(getParam<FileName>("compression_hardening_file"),
            getParam<FileName>("compression_damage_file"),
            getParam<FileName>("tension_stiffening_file"),
@@ -106,7 +112,19 @@ AbaqusCDPStressUpdate::AbaqusCDPStressUpdate(const InputParameters & parameters)
     _stiffness_factor(declareProperty<Real>(_base_name + "cdp_stiffness_factor")),
     _local_iterations(declareProperty<Real>(_base_name + "cdp_local_iterations")),
     _jacobian_fallbacks(declareProperty<Real>(_base_name + "cdp_jacobian_fallbacks")),
-    _accepted_substeps(declareProperty<Real>(_base_name + "cdp_accepted_substeps"))
+    _accepted_substeps(declareProperty<Real>(_base_name + "cdp_accepted_substeps")),
+    _failed_material_calls(declareProperty<Real>(_base_name + "cdp_failed_material_calls")),
+    _attempted_partitions(declareProperty<Real>(_base_name + "cdp_attempted_partitions")),
+    _maximum_partition_depth(
+        declareProperty<Real>(_base_name + "cdp_maximum_partition_depth")),
+    _automatic_jacobian_evaluations(
+        declareProperty<Real>(_base_name + "cdp_automatic_jacobian_evaluations")),
+    _finite_difference_jacobian_evaluations(
+        declareProperty<Real>(_base_name + "cdp_finite_difference_jacobian_evaluations")),
+    _local_factorizations(declareProperty<Real>(_base_name + "cdp_local_factorizations")),
+    _local_backsolves(declareProperty<Real>(_base_name + "cdp_local_backsolves")),
+    _integration_microseconds(
+        declareProperty<Real>(_base_name + "cdp_integration_microseconds"))
 {
 }
 
@@ -124,6 +142,14 @@ AbaqusCDPStressUpdate::initQpStatefulProperties()
   _local_iterations[_qp] = 0.0;
   _jacobian_fallbacks[_qp] = 0.0;
   _accepted_substeps[_qp] = 1.0;
+  _failed_material_calls[_qp] = 0.0;
+  _attempted_partitions[_qp] = 1.0;
+  _maximum_partition_depth[_qp] = 0.0;
+  _automatic_jacobian_evaluations[_qp] = 0.0;
+  _finite_difference_jacobian_evaluations[_qp] = 0.0;
+  _local_factorizations[_qp] = 0.0;
+  _local_backsolves[_qp] = 0.0;
+  _integration_microseconds[_qp] = 0.0;
 }
 
 void
@@ -200,7 +226,8 @@ AbaqusCDPStressUpdate::oldState() const
 }
 
 void
-AbaqusCDPStressUpdate::storeState(const AbaqusCDPSubstepIntegrator::LinearizedResult & result)
+AbaqusCDPStressUpdate::storeState(const AbaqusCDPSubstepIntegrator::LinearizedResult & result,
+                                  const Real integration_microseconds)
 {
   const auto & state = result.result.final_result.state;
   _backbone_plastic_strain[_qp] = toRankTwo(state.backbone.plastic_strain);
@@ -215,6 +242,19 @@ AbaqusCDPStressUpdate::storeState(const AbaqusCDPSubstepIntegrator::LinearizedRe
   _local_iterations[_qp] = result.result.total_local_iterations;
   _jacobian_fallbacks[_qp] = result.result.total_jacobian_fallbacks;
   _accepted_substeps[_qp] = result.result.accepted_substeps;
+  _failed_material_calls[_qp] = result.result.cutback_count;
+  _attempted_partitions[_qp] = result.result.attempted_partitions;
+  unsigned int partition_depth = 0;
+  for (unsigned int substeps = result.result.accepted_substeps; substeps > 1; substeps /= 2)
+    ++partition_depth;
+  _maximum_partition_depth[_qp] = partition_depth;
+  _automatic_jacobian_evaluations[_qp] =
+      result.result.total_automatic_jacobian_evaluations;
+  _finite_difference_jacobian_evaluations[_qp] =
+      result.result.total_finite_difference_jacobian_evaluations;
+  _local_factorizations[_qp] = result.result.total_local_factorizations;
+  _local_backsolves[_qp] = result.result.total_local_backsolves;
+  _integration_microseconds[_qp] = integration_microseconds;
 }
 
 void
@@ -241,8 +281,15 @@ AbaqusCDPStressUpdate::updateState(RankTwoTensor & strain_increment,
 
   try
   {
+    const auto integration_start = std::chrono::steady_clock::now();
     const auto result =
         _substep_integrator.integrateLinearized(old_total_strain, new_total_strain, _dt, old_state);
+    const Real integration_microseconds =
+        _enable_performance_diagnostics
+            ? std::chrono::duration<Real, std::micro>(std::chrono::steady_clock::now() -
+                                                       integration_start)
+                  .count()
+            : 0.0;
     stress_new = toRankTwo(result.result.final_result.cauchy_stress);
     SymmetricTensor inelastic_increment_array;
     for (std::size_t i = 0; i < 6; ++i)
@@ -252,7 +299,7 @@ AbaqusCDPStressUpdate::updateState(RankTwoTensor & strain_increment,
     strain_increment -= inelastic_strain_increment;
     if (compute_full_tangent_operator)
       assignTangent(result.algorithmic_tangent, tangent_operator);
-    storeState(result);
+    storeState(result, integration_microseconds);
   }
   catch (const std::exception & error)
   {

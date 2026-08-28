@@ -7,6 +7,7 @@
 #include <limits>
 #include <sstream>
 #include <stdexcept>
+#include <utility>
 
 namespace
 {
@@ -617,38 +618,58 @@ AbaqusCDPLocalIntegrator::localJacobian(const LocalVector & unknown,
   return numericalJacobian(unknown, total_strain, old_state, stress_scale);
 }
 
-AbaqusCDPLocalIntegrator::LocalVector
-AbaqusCDPLocalIntegrator::solveLinearSystem(LocalMatrix matrix, LocalVector right_hand_side)
+AbaqusCDPLocalIntegrator::LocalFactorization
+AbaqusCDPLocalIntegrator::factorLinearSystem(LocalMatrix matrix)
 {
+  LocalFactorization factorization{std::move(matrix), {}};
   for (std::size_t column = 0; column < local_size; ++column)
   {
     std::size_t pivot = column;
     for (std::size_t row = column + 1; row < local_size; ++row)
-      if (std::abs(matrix[row][column]) > std::abs(matrix[pivot][column]))
+      if (std::abs(factorization.factors[row][column]) >
+          std::abs(factorization.factors[pivot][column]))
         pivot = row;
 
-    if (std::abs(matrix[pivot][column]) < 1.0e-14)
+    factorization.pivots[column] = pivot;
+    if (std::abs(factorization.factors[pivot][column]) < 1.0e-14)
       integrationError("singular local Jacobian");
     if (pivot != column)
-    {
-      std::swap(matrix[pivot], matrix[column]);
-      std::swap(right_hand_side[pivot], right_hand_side[column]);
-    }
+      std::swap(factorization.factors[pivot], factorization.factors[column]);
 
-    const double diagonal = matrix[column][column];
-    for (std::size_t entry = column; entry < local_size; ++entry)
-      matrix[column][entry] /= diagonal;
-    right_hand_side[column] /= diagonal;
-
-    for (std::size_t row = 0; row < local_size; ++row)
+    const double diagonal = factorization.factors[column][column];
+    for (std::size_t row = column + 1; row < local_size; ++row)
     {
-      if (row == column)
-        continue;
-      const double factor = matrix[row][column];
-      for (std::size_t entry = column; entry < local_size; ++entry)
-        matrix[row][entry] -= factor * matrix[column][entry];
-      right_hand_side[row] -= factor * right_hand_side[column];
+      factorization.factors[row][column] /= diagonal;
+      const double multiplier = factorization.factors[row][column];
+      for (std::size_t entry = column + 1; entry < local_size; ++entry)
+        factorization.factors[row][entry] -=
+            multiplier * factorization.factors[column][entry];
     }
+  }
+
+  return factorization;
+}
+
+AbaqusCDPLocalIntegrator::LocalVector
+AbaqusCDPLocalIntegrator::solveLinearSystem(const LocalFactorization & factorization,
+                                            LocalVector right_hand_side)
+{
+  for (std::size_t column = 0; column < local_size; ++column)
+    if (factorization.pivots[column] != column)
+      std::swap(right_hand_side[factorization.pivots[column]], right_hand_side[column]);
+
+  for (std::size_t row = 0; row < local_size; ++row)
+    for (std::size_t column = 0; column < row; ++column)
+      right_hand_side[row] -=
+          factorization.factors[row][column] * right_hand_side[column];
+
+  for (std::size_t offset = 0; offset < local_size; ++offset)
+  {
+    const std::size_t row = local_size - 1 - offset;
+    for (std::size_t column = row + 1; column < local_size; ++column)
+      right_hand_side[row] -=
+          factorization.factors[row][column] * right_hand_side[column];
+    right_hand_side[row] /= factorization.factors[row][row];
   }
   return right_hand_side;
 }
@@ -685,6 +706,10 @@ AbaqusCDPLocalIntegrator::integrate(const SymmetricTensor & total_strain,
             old_state,
             ActiveBranch::ELASTIC,
             false,
+            0,
+            0,
+            0,
+            0,
             0,
             0,
             0.0,
@@ -725,6 +750,10 @@ AbaqusCDPLocalIntegrator::integrate(const SymmetricTensor & total_strain,
   };
   unsigned int iterations = 0;
   unsigned int jacobian_fallbacks = 0;
+  unsigned int automatic_jacobian_evaluations = 0;
+  unsigned int finite_difference_jacobian_evaluations = 0;
+  unsigned int local_factorizations = 0;
+  unsigned int local_backsolves = 0;
   for (; iterations < _parameters.maximum_iterations &&
          residual_norm > _parameters.residual_tolerance;
        ++iterations)
@@ -763,7 +792,11 @@ AbaqusCDPLocalIntegrator::integrate(const SymmetricTensor & total_strain,
       {
         const auto automatic = automaticDifferentiationJacobian(
             unknown, total_strain, old_state, stress_scale);
-        accepted = try_increment(solveLinearSystem(automatic, right_hand_side));
+        ++automatic_jacobian_evaluations;
+        const auto factorization = factorLinearSystem(automatic);
+        ++local_factorizations;
+        accepted = try_increment(solveLinearSystem(factorization, right_hand_side));
+        ++local_backsolves;
       }
       catch (const std::runtime_error &)
       {
@@ -773,13 +806,21 @@ AbaqusCDPLocalIntegrator::integrate(const SymmetricTensor & total_strain,
       {
         ++jacobian_fallbacks;
         const auto reference = numericalJacobian(unknown, total_strain, old_state, stress_scale);
-        accepted = try_increment(solveLinearSystem(reference, right_hand_side));
+        ++finite_difference_jacobian_evaluations;
+        const auto factorization = factorLinearSystem(reference);
+        ++local_factorizations;
+        accepted = try_increment(solveLinearSystem(factorization, right_hand_side));
+        ++local_backsolves;
       }
     }
     else
     {
       const auto reference = numericalJacobian(unknown, total_strain, old_state, stress_scale);
-      accepted = try_increment(solveLinearSystem(reference, right_hand_side));
+      ++finite_difference_jacobian_evaluations;
+      const auto factorization = factorLinearSystem(reference);
+      ++local_factorizations;
+      accepted = try_increment(solveLinearSystem(factorization, right_hand_side));
+      ++local_backsolves;
     }
     if (!accepted)
     {
@@ -822,6 +863,10 @@ AbaqusCDPLocalIntegrator::integrate(const SymmetricTensor & total_strain,
           true,
           iterations,
           jacobian_fallbacks,
+          automatic_jacobian_evaluations,
+          finite_difference_jacobian_evaluations,
+          local_factorizations,
+          local_backsolves,
           residual_norm,
           trial_yield,
           current.yield,
@@ -872,6 +917,12 @@ AbaqusCDPLocalIntegrator::integrateLinearized(const SymmetricTensor & total_stra
                 old_state.compressive_equivalent_plastic_strain) /
                _strain_scale;
   const auto jacobian = localJacobian(unknown, total_strain, old_state, stress_scale);
+  if (_parameters.use_automatic_differentiation_jacobian)
+    ++linearized.result.automatic_jacobian_evaluations;
+  else
+    ++linearized.result.finite_difference_jacobian_evaluations;
+  const auto factorization = factorLinearSystem(jacobian);
+  ++linearized.result.local_factorizations;
 
   const auto tension = materialResponse(
       CDPMaterialTable::Branch::TENSION,
@@ -917,7 +968,8 @@ AbaqusCDPLocalIntegrator::integrateLinearized(const SymmetricTensor & total_stra
 
     for (double & value : direct)
       value = -value;
-    const auto unknown_derivative = solveLinearSystem(jacobian, direct);
+    const auto unknown_derivative = solveLinearSystem(factorization, direct);
+    ++linearized.result.local_backsolves;
 
     SymmetricTensor stress_derivative;
     for (std::size_t row = 0; row < 6; ++row)

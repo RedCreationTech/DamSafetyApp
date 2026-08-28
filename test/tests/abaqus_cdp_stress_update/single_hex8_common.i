@@ -52,6 +52,34 @@
     order = CONSTANT
     family = MONOMIAL
   []
+  [jacobian_fallbacks]
+    order = CONSTANT
+    family = MONOMIAL
+  []
+  [failed_material_calls]
+    order = CONSTANT
+    family = MONOMIAL
+  []
+  [attempted_partitions]
+    order = CONSTANT
+    family = MONOMIAL
+  []
+  [maximum_partition_depth]
+    order = CONSTANT
+    family = MONOMIAL
+  []
+  [local_factorizations]
+    order = CONSTANT
+    family = MONOMIAL
+  []
+  [local_backsolves]
+    order = CONSTANT
+    family = MONOMIAL
+  []
+  [integration_microseconds]
+    order = CONSTANT
+    family = MONOMIAL
+  []
 []
 
 [AuxKernels]
@@ -103,6 +131,48 @@
     property = cdp_accepted_substeps
     execute_on = 'initial timestep_end'
   []
+  [jacobian_fallbacks]
+    type = MaterialRealAux
+    variable = jacobian_fallbacks
+    property = cdp_jacobian_fallbacks
+    execute_on = 'initial timestep_end'
+  []
+  [failed_material_calls]
+    type = MaterialRealAux
+    variable = failed_material_calls
+    property = cdp_failed_material_calls
+    execute_on = 'initial timestep_end'
+  []
+  [attempted_partitions]
+    type = MaterialRealAux
+    variable = attempted_partitions
+    property = cdp_attempted_partitions
+    execute_on = 'initial timestep_end'
+  []
+  [maximum_partition_depth]
+    type = MaterialRealAux
+    variable = maximum_partition_depth
+    property = cdp_maximum_partition_depth
+    execute_on = 'initial timestep_end'
+  []
+  [local_factorizations]
+    type = MaterialRealAux
+    variable = local_factorizations
+    property = cdp_local_factorizations
+    execute_on = 'initial timestep_end'
+  []
+  [local_backsolves]
+    type = MaterialRealAux
+    variable = local_backsolves
+    property = cdp_local_backsolves
+    execute_on = 'initial timestep_end'
+  []
+  [integration_microseconds]
+    type = MaterialRealAux
+    variable = integration_microseconds
+    property = cdp_integration_microseconds
+    execute_on = 'initial timestep_end'
+  []
 []
 
 [Materials]
@@ -130,6 +200,7 @@
     tensile_meridian_ratio = 0.667
     viscosity = 0.0005
     maximum_strain_increment = 2.5e-5
+    enable_performance_diagnostics = true
   []
 []
 
@@ -185,6 +256,41 @@
   [average_accepted_substeps]
     type = ElementAverageValue
     variable = accepted_substeps
+  []
+  [maximum_jacobian_fallbacks]
+    type = ElementExtremeValue
+    variable = jacobian_fallbacks
+    value_type = max
+  []
+  [maximum_failed_material_calls]
+    type = ElementExtremeValue
+    variable = failed_material_calls
+    value_type = max
+  []
+  [maximum_attempted_partitions]
+    type = ElementExtremeValue
+    variable = attempted_partitions
+    value_type = max
+  []
+  [maximum_partition_depth]
+    type = ElementExtremeValue
+    variable = maximum_partition_depth
+    value_type = max
+  []
+  [maximum_local_factorizations]
+    type = ElementExtremeValue
+    variable = local_factorizations
+    value_type = max
+  []
+  [maximum_local_backsolves]
+    type = ElementExtremeValue
+    variable = local_backsolves
+    value_type = max
+  []
+  [maximum_integration_microseconds]
+    type = ElementExtremeValue
+    variable = integration_microseconds
+    value_type = max
   []
 []
 

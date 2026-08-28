@@ -64,6 +64,10 @@ public:
     bool plastic;
     unsigned int iterations;
     unsigned int jacobian_fallbacks;
+    unsigned int automatic_jacobian_evaluations;
+    unsigned int finite_difference_jacobian_evaluations;
+    unsigned int local_factorizations;
+    unsigned int local_backsolves;
     double residual_norm;
     double trial_yield;
     double final_yield;
@@ -104,6 +108,12 @@ public:
   static std::string branchName(ActiveBranch branch);
 
 private:
+  struct LocalFactorization
+  {
+    LocalMatrix factors;
+    std::array<std::size_t, local_size> pivots;
+  };
+
   struct Evaluation
   {
     LocalVector residual;
@@ -134,7 +144,9 @@ private:
                             const SymmetricTensor & total_strain,
                             const State & old_state,
                             double stress_scale) const;
-  static LocalVector solveLinearSystem(LocalMatrix matrix, LocalVector right_hand_side);
+  static LocalFactorization factorLinearSystem(LocalMatrix matrix);
+  static LocalVector solveLinearSystem(const LocalFactorization & factorization,
+                                       LocalVector right_hand_side);
 
   const CDPMaterialTable & _table;
   const Parameters _parameters;

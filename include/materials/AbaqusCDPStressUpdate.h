@@ -45,8 +45,10 @@ private:
   static void assignTangent(const AbaqusCDPSubstepIntegrator::TangentMatrix & source,
                             RankFourTensor & destination);
   CoreState oldState() const;
-  void storeState(const AbaqusCDPSubstepIntegrator::LinearizedResult & result);
+  void storeState(const AbaqusCDPSubstepIntegrator::LinearizedResult & result,
+                  Real integration_microseconds);
 
+  const bool _enable_performance_diagnostics;
   const CDPMaterialTable _table;
   const AbaqusCDPLocalIntegrator _local_integrator;
   const AbaqusCDPStateIntegrator _state_integrator;
@@ -70,4 +72,12 @@ private:
   MaterialProperty<Real> & _local_iterations;
   MaterialProperty<Real> & _jacobian_fallbacks;
   MaterialProperty<Real> & _accepted_substeps;
+  MaterialProperty<Real> & _failed_material_calls;
+  MaterialProperty<Real> & _attempted_partitions;
+  MaterialProperty<Real> & _maximum_partition_depth;
+  MaterialProperty<Real> & _automatic_jacobian_evaluations;
+  MaterialProperty<Real> & _finite_difference_jacobian_evaluations;
+  MaterialProperty<Real> & _local_factorizations;
+  MaterialProperty<Real> & _local_backsolves;
+  MaterialProperty<Real> & _integration_microseconds;
 };
