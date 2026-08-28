@@ -68,5 +68,6 @@ private:
   MaterialProperty<Real> & _combined_damage;
   MaterialProperty<Real> & _stiffness_factor;
   MaterialProperty<Real> & _local_iterations;
+  MaterialProperty<Real> & _jacobian_fallbacks;
   MaterialProperty<Real> & _accepted_substeps;
 };

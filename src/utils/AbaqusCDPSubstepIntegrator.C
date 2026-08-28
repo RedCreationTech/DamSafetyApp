@@ -111,6 +111,7 @@ AbaqusCDPSubstepIntegrator::integrate(const SymmetricTensor & old_total_strain,
     State working_state = old_state;
     std::optional<AbaqusCDPStateIntegrator::Result> final_result;
     unsigned int total_local_iterations = 0;
+    unsigned int total_jacobian_fallbacks = 0;
     bool partition_succeeded = true;
 
     for (unsigned int i = 1; i <= substeps; ++i)
@@ -122,6 +123,7 @@ AbaqusCDPSubstepIntegrator::integrate(const SymmetricTensor & old_total_strain,
         auto step_result = _state_integrator.integrate(
             target, time_step / static_cast<double>(substeps), working_state);
         total_local_iterations += step_result.backbone.iterations;
+        total_jacobian_fallbacks += step_result.backbone.jacobian_fallbacks;
         working_state = step_result.state;
         final_result = std::move(step_result);
       }
@@ -141,6 +143,7 @@ AbaqusCDPSubstepIntegrator::integrate(const SymmetricTensor & old_total_strain,
               cutback_count,
               attempted_partitions,
               total_local_iterations,
+              total_jacobian_fallbacks,
               proactively_partitioned};
 
     if (substeps == _parameters.maximum_substeps)
@@ -195,6 +198,7 @@ AbaqusCDPSubstepIntegrator::integrateLinearized(const SymmetricTensor & old_tota
         state_sensitivity = {};
     TangentMatrix tangent = {};
     unsigned int total_local_iterations = 0;
+    unsigned int total_jacobian_fallbacks = 0;
     bool partition_succeeded = true;
 
     for (unsigned int i = 1; i <= substeps; ++i)
@@ -206,6 +210,7 @@ AbaqusCDPSubstepIntegrator::integrateLinearized(const SymmetricTensor & old_tota
         auto step_result = _state_integrator.integrateLinearized(
             target, time_step / static_cast<double>(substeps), working_state);
         total_local_iterations += step_result.result.backbone.iterations;
+        total_jacobian_fallbacks += step_result.result.backbone.jacobian_fallbacks;
 
         std::array<std::array<double, AbaqusCDPStateIntegrator::state_size>, 6>
             new_state_sensitivity = {};
@@ -256,6 +261,7 @@ AbaqusCDPSubstepIntegrator::integrateLinearized(const SymmetricTensor & old_tota
                     cutback_count,
                     attempted_partitions,
                     total_local_iterations,
+                    total_jacobian_fallbacks,
                     proactively_partitioned};
       return {std::move(result), tangent};
     }

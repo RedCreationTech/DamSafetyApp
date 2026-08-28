@@ -32,6 +32,7 @@ public:
     unsigned int cutback_count;
     unsigned int attempted_partitions;
     unsigned int total_local_iterations;
+    unsigned int total_jacobian_fallbacks;
     bool proactively_partitioned;
   };
 

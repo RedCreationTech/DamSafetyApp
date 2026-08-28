@@ -105,6 +105,7 @@ AbaqusCDPStressUpdate::AbaqusCDPStressUpdate(const InputParameters & parameters)
     _combined_damage(declareProperty<Real>(_base_name + "cdp_combined_damage")),
     _stiffness_factor(declareProperty<Real>(_base_name + "cdp_stiffness_factor")),
     _local_iterations(declareProperty<Real>(_base_name + "cdp_local_iterations")),
+    _jacobian_fallbacks(declareProperty<Real>(_base_name + "cdp_jacobian_fallbacks")),
     _accepted_substeps(declareProperty<Real>(_base_name + "cdp_accepted_substeps"))
 {
 }
@@ -121,6 +122,7 @@ AbaqusCDPStressUpdate::initQpStatefulProperties()
   _combined_damage[_qp] = 0.0;
   _stiffness_factor[_qp] = 1.0;
   _local_iterations[_qp] = 0.0;
+  _jacobian_fallbacks[_qp] = 0.0;
   _accepted_substeps[_qp] = 1.0;
 }
 
@@ -211,6 +213,7 @@ AbaqusCDPStressUpdate::storeState(const AbaqusCDPSubstepIntegrator::LinearizedRe
   _combined_damage[_qp] = result.result.final_result.damage.damage;
   _stiffness_factor[_qp] = result.result.final_result.damage.stiffness_factor;
   _local_iterations[_qp] = result.result.total_local_iterations;
+  _jacobian_fallbacks[_qp] = result.result.total_jacobian_fallbacks;
   _accepted_substeps[_qp] = result.result.accepted_substeps;
 }
 
