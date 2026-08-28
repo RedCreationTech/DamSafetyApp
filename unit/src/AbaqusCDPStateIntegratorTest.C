@@ -173,6 +173,51 @@ TEST(AbaqusCDPStateIntegrator, TensionRecoveryControlsPreviouslyAccumulatedCompr
   EXPECT_GT(recovered.cauchy_stress[0], unrecovered.cauchy_stress[0]);
 }
 
+TEST(AbaqusCDPStateIntegrator, CompressionRecoveryControlsPreviouslyAccumulatedTensionDamage)
+{
+  const auto table = stateReferenceTable();
+  const AbaqusCDPLocalIntegrator local(table, localParameters());
+  const AbaqusCDPStateIntegrator accumulating(local, stateParameters(0.0));
+  const double initial_tension =
+      table.responseByEquivalentPlasticStrain(CDPMaterialTable::Branch::TENSION, 0.0).stress.value;
+  const auto tensioned = accumulating.integrate(
+      stateUniaxialElasticStrain(1.05 * initial_tension), 1.0e-3, {});
+  ASSERT_GT(tensioned.state.viscous_tension_damage, 0.0);
+
+  const auto reverse_compression = addStateStrain(
+      tensioned.state.backbone.plastic_strain, stateUniaxialElasticStrain(-1.0e6));
+  const AbaqusCDPStateIntegrator full_recovery(local, stateParameters(0.0, 0.0, 1.0));
+  const AbaqusCDPStateIntegrator no_recovery(local, stateParameters(0.0, 0.0, 0.0));
+  const auto recovered = full_recovery.integrate(reverse_compression, 1.0e-3, tensioned.state);
+  const auto unrecovered = no_recovery.integrate(reverse_compression, 1.0e-3, tensioned.state);
+
+  EXPECT_NEAR(recovered.damage.tension_weight, 0.0, 1.0e-12);
+  EXPECT_NEAR(recovered.damage.stiffness_factor, 1.0, 1.0e-12);
+  EXPECT_NEAR(unrecovered.damage.stiffness_factor,
+              1.0 - tensioned.state.viscous_tension_damage,
+              1.0e-12);
+  EXPECT_LT(recovered.cauchy_stress[0], unrecovered.cauchy_stress[0]);
+}
+
+TEST(AbaqusCDPStateIntegrator, ViscousDamageMonotonicallyRelaxesTowardFixedBackbone)
+{
+  const auto table = stateReferenceTable();
+  const AbaqusCDPLocalIntegrator local(table, localParameters());
+  const AbaqusCDPStateIntegrator integrator(local, stateParameters(5.0e-4));
+  const double initial_tension =
+      table.responseByEquivalentPlasticStrain(CDPMaterialTable::Branch::TENSION, 0.0).stress.value;
+  const auto strain = stateUniaxialElasticStrain(1.05 * initial_tension);
+  const auto first = integrator.integrate(strain, 1.0e-4, {});
+  const auto hold = integrator.integrate(strain, 1.0e-4, first.state);
+
+  EXPECT_GT(hold.state.viscous_tension_damage, first.state.viscous_tension_damage);
+  EXPECT_LE(hold.state.viscous_tension_damage,
+            hold.backbone.backbone_tension_damage + 1.0e-12);
+  EXPECT_LT(hold.tension_damage_lag, first.tension_damage_lag);
+  EXPECT_LE(hold.state.viscous_compression_damage,
+            hold.backbone.backbone_compression_damage + 1.0e-12);
+}
+
 TEST(AbaqusCDPStateIntegrator, FailedBackboneSolveDoesNotMutateOldState)
 {
   const auto table = stateReferenceTable();
@@ -203,5 +248,10 @@ TEST(AbaqusCDPStateIntegrator, RejectsInvalidStateAndParameters)
   EXPECT_THROW(integrator.integrate({0.0, 0.0, 0.0, 0.0, 0.0, 0.0}, 1.0e-4, invalid),
                std::runtime_error);
   EXPECT_THROW(integrator.integrate({0.0, 0.0, 0.0, 0.0, 0.0, 0.0}, -1.0, {}),
+               std::runtime_error);
+
+  AbaqusCDPStateIntegrator::State inconsistent;
+  inconsistent.viscous_tension_damage = 0.1;
+  EXPECT_THROW(integrator.integrate({0.0, 0.0, 0.0, 0.0, 0.0, 0.0}, 1.0e-4, inconsistent),
                std::runtime_error);
 }
