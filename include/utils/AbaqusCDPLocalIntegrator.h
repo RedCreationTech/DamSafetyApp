@@ -63,6 +63,7 @@ public:
     ActiveBranch active_branch;
     bool plastic;
     unsigned int iterations;
+    unsigned int jacobian_fallbacks;
     double residual_norm;
     double trial_yield;
     double final_yield;

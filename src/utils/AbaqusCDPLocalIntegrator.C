@@ -686,6 +686,7 @@ AbaqusCDPLocalIntegrator::integrate(const SymmetricTensor & total_strain,
             ActiveBranch::ELASTIC,
             false,
             0,
+            0,
             0.0,
             trial_yield,
             trial_yield,
@@ -723,38 +724,62 @@ AbaqusCDPLocalIntegrator::integrate(const SymmetricTensor & total_strain,
     return ActiveBranch::MIXED;
   };
   unsigned int iterations = 0;
+  unsigned int jacobian_fallbacks = 0;
   for (; iterations < _parameters.maximum_iterations &&
          residual_norm > _parameters.residual_tolerance;
        ++iterations)
   {
-    const auto jacobian = localJacobian(unknown, total_strain, old_state, stress_scale);
-
     LocalVector right_hand_side;
     for (std::size_t i = 0; i < local_size; ++i)
       right_hand_side[i] = -current.residual[i];
-    const auto increment = solveLinearSystem(jacobian, right_hand_side);
+    const auto try_increment = [&](const LocalVector & increment) {
+      for (double line_search = 1.0; line_search >= _parameters.minimum_line_search;
+           line_search *= 0.5)
+      {
+        auto candidate_unknown = unknown;
+        for (std::size_t i = 0; i < local_size; ++i)
+          candidate_unknown[i] += line_search * increment[i];
+        if (candidate_unknown[6] < 0.0 || candidate_unknown[7] < 0.0 ||
+            candidate_unknown[8] < 0.0)
+          continue;
+
+        auto candidate = evaluate(candidate_unknown, total_strain, old_state, stress_scale);
+        const double candidate_norm = infinityNorm(candidate.residual);
+        if (std::isfinite(candidate_norm) && candidate_norm < residual_norm)
+        {
+          unknown = candidate_unknown;
+          current = candidate;
+          residual_norm = candidate_norm;
+          return true;
+        }
+      }
+      return false;
+    };
 
     bool accepted = false;
-    for (double line_search = 1.0; line_search >= _parameters.minimum_line_search;
-         line_search *= 0.5)
+    if (_parameters.use_automatic_differentiation_jacobian)
     {
-      auto candidate_unknown = unknown;
-      for (std::size_t i = 0; i < local_size; ++i)
-        candidate_unknown[i] += line_search * increment[i];
-      if (candidate_unknown[6] < 0.0 || candidate_unknown[7] < 0.0 ||
-          candidate_unknown[8] < 0.0)
-        continue;
-
-      auto candidate = evaluate(candidate_unknown, total_strain, old_state, stress_scale);
-      const double candidate_norm = infinityNorm(candidate.residual);
-      if (std::isfinite(candidate_norm) && candidate_norm < residual_norm)
+      try
       {
-        unknown = candidate_unknown;
-        current = candidate;
-        residual_norm = candidate_norm;
-        accepted = true;
-        break;
+        const auto automatic = automaticDifferentiationJacobian(
+            unknown, total_strain, old_state, stress_scale);
+        accepted = try_increment(solveLinearSystem(automatic, right_hand_side));
       }
+      catch (const std::runtime_error &)
+      {
+        accepted = false;
+      }
+      if (!accepted)
+      {
+        ++jacobian_fallbacks;
+        const auto reference = numericalJacobian(unknown, total_strain, old_state, stress_scale);
+        accepted = try_increment(solveLinearSystem(reference, right_hand_side));
+      }
+    }
+    else
+    {
+      const auto reference = numericalJacobian(unknown, total_strain, old_state, stress_scale);
+      accepted = try_increment(solveLinearSystem(reference, right_hand_side));
     }
     if (!accepted)
     {
@@ -796,6 +821,7 @@ AbaqusCDPLocalIntegrator::integrate(const SymmetricTensor & total_strain,
           currentBranch(current),
           true,
           iterations,
+          jacobian_fallbacks,
           residual_norm,
           trial_yield,
           current.yield,
