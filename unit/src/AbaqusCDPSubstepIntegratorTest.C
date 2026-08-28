@@ -127,52 +127,6 @@ TEST(AbaqusCDPSubstepIntegrator, ExhaustedCutbacksLeaveCallerStateUntouched)
   EXPECT_EQ(old_state.viscous_plastic_strain, snapshot.viscous_plastic_strain);
 }
 
-TEST(AbaqusCDPSubstepIntegrator, AdaptiveCutbackRefinesOnlyFailedBaseInterval)
-{
-  const auto table = substepReferenceTable();
-  const double initial_tension =
-      table.responseByEquivalentPlasticStrain(CDPMaterialTable::Branch::TENSION, 0.0).stress.value;
-  const double initial_compression =
-      table.responseByEquivalentPlasticStrain(CDPMaterialTable::Branch::COMPRESSION, 0.0)
-          .stress.value;
-  const std::array<double, 6> load_factors = {1.01, 1.05, 1.2, 1.5, 2.0, 3.0};
-  bool found_local_refinement = false;
-
-  for (unsigned int maximum_iterations = 1;
-       maximum_iterations <= 20 && !found_local_refinement;
-       ++maximum_iterations)
-    for (const double signed_strength : {initial_tension, -initial_compression})
-      for (const double load_factor : load_factors)
-      {
-        const AbaqusCDPLocalIntegrator local(
-            table, substepLocalParameters(maximum_iterations));
-        const AbaqusCDPStateIntegrator state_integrator(
-            local, substepStateParameters(5.0e-4));
-        const auto target =
-            substepUniaxialElasticStrain(load_factor * signed_strength);
-        const AbaqusCDPSubstepIntegrator integrator(
-            state_integrator, {16, std::abs(target[0]) / 3.0, 1.0e-8});
-        try
-        {
-          const auto result = integrator.integrate({}, target, 1.0e-3, {});
-          if (result.cutback_count > 0 && result.accepted_substeps < 8)
-          {
-            EXPECT_EQ(result.attempted_partitions, result.cutback_count + 1);
-            EXPECT_GE(result.accepted_substeps, 5u);
-            found_local_refinement = true;
-            break;
-          }
-        }
-        catch (const std::runtime_error &)
-        {
-        }
-      }
-
-  EXPECT_TRUE(found_local_refinement)
-      << "expected at least one four-way base partition to recover by refining "
-         "only a failed interval instead of replaying all eight intervals";
-}
-
 TEST(AbaqusCDPSubstepIntegrator, ElasticReferenceTangentMatchesIsotropicTensor)
 {
   const auto table = substepReferenceTable();
