@@ -125,6 +125,35 @@ class AbaqusCDPTest(unittest.TestCase):
         with self.assertRaisesRegex(CDP.CDPInputError, "TYPE=STRAIN"):
             CDP.validate_material(material)
 
+    def test_rejects_kc_at_or_below_official_lower_bound(self):
+        for kc in (0.5, 0.25):
+            with self.subTest(kc=kc):
+                invalid = VALID_INPUT.replace(
+                    "36.31, 0.1, 1.16, 0.667, 0.0005",
+                    f"36.31, 0.1, 1.16, {kc}, 0.0005",
+                )
+                self.inp.write_text(invalid, encoding="utf-8")
+                material = CDP.choose_material(CDP.parse_materials(self.inp), None)
+                with self.assertRaisesRegex(CDP.CDPInputError, "Kc"):
+                    CDP.validate_material(material)
+
+    def test_rejects_nonzero_first_table_abscissa(self):
+        invalid = VALID_INPUT.replace("2.0e7, 0.0", "2.0e7, 0.0001")
+        self.inp.write_text(invalid, encoding="utf-8")
+        material = CDP.choose_material(CDP.parse_materials(self.inp), None)
+        with self.assertRaisesRegex(CDP.CDPInputError, "首行横坐标必须为 0"):
+            CDP.validate_material(material)
+
+    def test_rejects_nonzero_first_damage(self):
+        invalid = VALID_INPUT.replace(
+            "*Concrete Tension Damage, compression recovery=0.75\n0.0, 0.0",
+            "*Concrete Tension Damage, compression recovery=0.75\n0.01, 0.0",
+        )
+        self.inp.write_text(invalid, encoding="utf-8")
+        material = CDP.choose_material(CDP.parse_materials(self.inp), None)
+        with self.assertRaisesRegex(CDP.CDPInputError, "首行损伤必须为 0"):
+            CDP.validate_material(material)
+
     def test_requires_material_choice_for_multiple_cdp_materials(self):
         second = VALID_INPUT.replace("name=CONCRETE", "name=CONCRETE-2")
         self.inp.write_text(VALID_INPUT + second, encoding="utf-8")

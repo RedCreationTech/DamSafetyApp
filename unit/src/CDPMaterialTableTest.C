@@ -190,3 +190,29 @@ TEST(CDPMaterialTable, RejectsNegativeEquivalentPlasticStrain)
                                 3.0e10),
                std::invalid_argument);
 }
+
+TEST(CDPMaterialTable, RejectsNonzeroFirstStrainAbscissa)
+{
+  const auto files = syntheticFiles("nonzero_first_abscissa");
+  writeFile(files.tension_stiffening,
+            "stress_pa,cracking_strain\n10,0.0001\n8,0.001\n6,0.002\n");
+  EXPECT_THROW(CDPMaterialTable(files.compression_hardening,
+                                files.compression_damage,
+                                files.tension_stiffening,
+                                files.tension_damage,
+                                1.0e9),
+               std::invalid_argument);
+}
+
+TEST(CDPMaterialTable, RejectsNonzeroFirstDamage)
+{
+  const auto files = syntheticFiles("nonzero_first_damage");
+  writeFile(files.compression_damage,
+            "damage_c,inelastic_strain\n0.01,0\n0.1,0.001\n0.2,0.002\n");
+  EXPECT_THROW(CDPMaterialTable(files.compression_hardening,
+                                files.compression_damage,
+                                files.tension_stiffening,
+                                files.tension_damage,
+                                1.0e9),
+               std::invalid_argument);
+}

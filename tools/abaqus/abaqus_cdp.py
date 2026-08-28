@@ -216,6 +216,8 @@ def _table(block: KeywordBlock) -> list[tuple[float, float]]:
 
 
 def _validate_abscissa(name: str, table: list[tuple[float, float]]) -> None:
+    if table[0][1] != 0:
+        raise CDPInputError(f"{name} 首行横坐标必须为 0，实际 {table[0][1]}")
     previous = None
     for index, (_, x_value) in enumerate(table, 1):
         if x_value < 0:
@@ -301,13 +303,16 @@ def validate_material(material: CDPMaterial) -> dict[str, object]:
     dilation_angle, eccentricity, fb0_fc0, kc, viscosity = plasticity.rows[0][1]
     if not 0 <= dilation_angle < 90:
         raise CDPInputError("dilation angle 必须位于 [0, 90) 度")
-    if eccentricity <= 0 or fb0_fc0 <= 0 or not 0 < kc <= 1 or viscosity < 0:
+    if eccentricity <= 0 or fb0_fc0 <= 0 or not 0.5 < kc <= 1 or viscosity < 0:
         raise CDPInputError("eccentricity、fb0/fc0、Kc 或 viscosity 超出 P0 合法范围")
 
     tables = {key: _table(material.require(key)) for key in TABLE_SPECS}
     for key, table in tables.items():
         _validate_abscissa(key, table)
         if key.endswith("damage"):
+            if table[0][0] != 0:
+                raise CDPInputError(
+                    f"{key} 首行损伤必须为 0，实际 {table[0][0]}")
             for index, (damage, _) in enumerate(table, 1):
                 if not 0 <= damage < 1:
                     raise CDPInputError(

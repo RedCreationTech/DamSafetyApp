@@ -91,6 +91,11 @@ CDPMaterialTable::load(const std::string & file,
       tableError(file + " stress magnitude must be positive at data row " + std::to_string(i + 1));
   }
 
+  if (table.abscissa.front() != 0.0)
+    tableError(file + " first strain abscissa must be zero");
+  if (damage && table.values.front() != 0.0)
+    tableError(file + " first damage value must be zero");
+
   table.slopes.reserve(table.values.size() > 1 ? table.values.size() - 1 : 0);
   for (std::size_t i = 1; i < table.values.size(); ++i)
     table.slopes.push_back((table.values[i] - table.values[i - 1]) /
