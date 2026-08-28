@@ -7,10 +7,20 @@
 *.la
 *.lo
 *.o
+*.a
+*.so
+*.so.*
 *-dbg
 *-devel
 *-oprof
 *-opt
+build/
+lib/
+test/lib/
+unit/lib/
+*Revision.h
+.previous_test_results.json
+.failed_tests
 
 # Runtime results
 outputs/

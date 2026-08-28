@@ -1,0 +1,9 @@
+[Tests]
+  design = 'DES-CDPC-009'
+  issues = '#TASK-CDPC-002'
+  [elastic_hex8]
+    type = RunApp
+    input = elastic.i
+    requirement = 'DamSafetyApp shall solve a one-element three-dimensional linear-elastic problem and write Exodus and CSV outputs.'
+  []
+[]
