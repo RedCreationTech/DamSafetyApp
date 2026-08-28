@@ -108,6 +108,24 @@ TEST(CDPMaterialTable, ReadsReferencePythonBundlePointwise)
   EXPECT_EQ(table.equivalentPlasticStrain(CDPMaterialTable::Branch::COMPRESSION).size(), 55);
   EXPECT_EQ(table.equivalentPlasticStrain(CDPMaterialTable::Branch::TENSION).size(), 56);
 
+  const auto compression_plastic = table.responseByEquivalentPlasticStrain(
+      CDPMaterialTable::Branch::COMPRESSION,
+      table.equivalentPlasticStrain(CDPMaterialTable::Branch::COMPRESSION)[1]);
+  const auto compression_original = table.response(
+      CDPMaterialTable::Branch::COMPRESSION,
+      table.stressAbscissa(CDPMaterialTable::Branch::COMPRESSION)[1]);
+  EXPECT_DOUBLE_EQ(compression_plastic.stress.value, 12174200.0);
+  EXPECT_DOUBLE_EQ(compression_plastic.damage.value, compression_original.damage.value);
+
+  const auto tension_plastic = table.responseByEquivalentPlasticStrain(
+      CDPMaterialTable::Branch::TENSION,
+      table.equivalentPlasticStrain(CDPMaterialTable::Branch::TENSION)[1]);
+  const auto tension_original = table.response(
+      CDPMaterialTable::Branch::TENSION,
+      table.stressAbscissa(CDPMaterialTable::Branch::TENSION)[1]);
+  EXPECT_DOUBLE_EQ(tension_plastic.stress.value, 2298090.0);
+  EXPECT_DOUBLE_EQ(tension_plastic.damage.value, tension_original.damage.value);
+
   expectPointwiseEqual(readPythonBundleTable(data_dir + "compression_hardening.csv"),
                        table.stressValues(CDPMaterialTable::Branch::COMPRESSION),
                        table.stressAbscissa(CDPMaterialTable::Branch::COMPRESSION));

@@ -33,7 +33,15 @@ CDPMaterialTable::CDPMaterialTable(const std::string & compression_hardening_fil
     _compression_plastic_strain(deriveEquivalentPlasticStrain(
         _compression_hardening, _compression_damage, youngs_modulus, "compression")),
     _tension_plastic_strain(deriveEquivalentPlasticStrain(
-        _tension_stiffening, _tension_damage, youngs_modulus, "tension"))
+        _tension_stiffening, _tension_damage, youngs_modulus, "tension")),
+    _compression_stress_by_plastic_strain(reparameterizeByEquivalentPlasticStrain(
+        _compression_hardening, _compression_damage, _compression_plastic_strain, false, "compression")),
+    _compression_damage_by_plastic_strain(reparameterizeByEquivalentPlasticStrain(
+        _compression_hardening, _compression_damage, _compression_plastic_strain, true, "compression")),
+    _tension_stress_by_plastic_strain(reparameterizeByEquivalentPlasticStrain(
+        _tension_stiffening, _tension_damage, _tension_plastic_strain, false, "tension")),
+    _tension_damage_by_plastic_strain(reparameterizeByEquivalentPlasticStrain(
+        _tension_stiffening, _tension_damage, _tension_plastic_strain, true, "tension"))
 {
   if (!std::isfinite(youngs_modulus) || youngs_modulus <= 0.0)
     tableError("Young's modulus must be finite and positive");
@@ -175,6 +183,38 @@ CDPMaterialTable::deriveEquivalentPlasticStrain(const Table & stress,
   return result;
 }
 
+CDPMaterialTable::Table
+CDPMaterialTable::reparameterizeByEquivalentPlasticStrain(
+    const Table & stress,
+    const Table & damage,
+    const std::vector<Real> & plastic_strain,
+    const bool damage_values,
+    const std::string & label)
+{
+  if (plastic_strain.size() != stress.values.size())
+    tableError(label + " plastic strain and stress table sizes differ");
+
+  Table result;
+  result.file = label + (damage_values ? " damage" : " stress") +
+                " by equivalent plastic strain";
+  result.abscissa = plastic_strain;
+  result.values.reserve(stress.values.size());
+  for (std::size_t i = 0; i < stress.values.size(); ++i)
+  {
+    if (i > 0 && result.abscissa[i] <= result.abscissa[i - 1])
+      tableError(label + " equivalent plastic strain must be strictly increasing at data row " +
+                 std::to_string(i + 1));
+    result.values.push_back(damage_values ? evaluate(damage, stress.abscissa[i]).value
+                                          : stress.values[i]);
+  }
+
+  result.slopes.reserve(result.values.size() > 1 ? result.values.size() - 1 : 0);
+  for (std::size_t i = 1; i < result.values.size(); ++i)
+    result.slopes.push_back((result.values[i] - result.values[i - 1]) /
+                            (result.abscissa[i] - result.abscissa[i - 1]));
+  return result;
+}
+
 const CDPMaterialTable::Table &
 CDPMaterialTable::stressTable(const Branch branch) const
 {
@@ -192,6 +232,17 @@ CDPMaterialTable::response(const Branch branch, const Real strain_measure) const
 {
   return {evaluate(stressTable(branch), strain_measure),
           evaluate(damageTable(branch), strain_measure)};
+}
+
+CDPMaterialTable::Response
+CDPMaterialTable::responseByEquivalentPlasticStrain(const Branch branch,
+                                                    const Real equivalent_plastic_strain) const
+{
+  if (branch == Branch::COMPRESSION)
+    return {evaluate(_compression_stress_by_plastic_strain, equivalent_plastic_strain),
+            evaluate(_compression_damage_by_plastic_strain, equivalent_plastic_strain)};
+  return {evaluate(_tension_stress_by_plastic_strain, equivalent_plastic_strain),
+          evaluate(_tension_damage_by_plastic_strain, equivalent_plastic_strain)};
 }
 
 std::size_t

@@ -42,6 +42,7 @@ public:
                    Real damage_upper_bound = 1.0 - 1.0e-12);
 
   Response response(Branch branch, Real strain_measure) const;
+  Response responseByEquivalentPlasticStrain(Branch branch, Real equivalent_plastic_strain) const;
   std::size_t stressPointCount(Branch branch) const;
   std::size_t damagePointCount(Branch branch) const;
 
@@ -70,6 +71,11 @@ private:
                                                          const Table & damage,
                                                          Real youngs_modulus,
                                                          const std::string & label);
+  static Table reparameterizeByEquivalentPlasticStrain(const Table & stress,
+                                                       const Table & damage,
+                                                       const std::vector<Real> & plastic_strain,
+                                                       bool damage_values,
+                                                       const std::string & label);
 
   const Table & stressTable(Branch branch) const;
   const Table & damageTable(Branch branch) const;
@@ -80,4 +86,8 @@ private:
   const Table _tension_damage;
   const std::vector<Real> _compression_plastic_strain;
   const std::vector<Real> _tension_plastic_strain;
+  const Table _compression_stress_by_plastic_strain;
+  const Table _compression_damage_by_plastic_strain;
+  const Table _tension_stress_by_plastic_strain;
+  const Table _tension_damage_by_plastic_strain;
 };
