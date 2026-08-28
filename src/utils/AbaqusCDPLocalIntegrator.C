@@ -22,7 +22,7 @@ integrationError(const std::string & message)
 }
 
 void
-requireFinite(const double value, const std::string & name)
+requireIntegratorFinite(const double value, const std::string & name)
 {
   if (!std::isfinite(value))
     integrationError(name + " must be finite");
@@ -141,11 +141,11 @@ AbaqusCDPLocalIntegrator::AbaqusCDPLocalIntegrator(const CDPMaterialTable & tabl
          table.equivalentPlasticStrain(CDPMaterialTable::Branch::COMPRESSION).back(),
          1.0e-6}))
 {
-  requireFinite(_parameters.youngs_modulus, "Young's modulus");
-  requireFinite(_parameters.poissons_ratio, "Poisson's ratio");
-  requireFinite(_parameters.residual_tolerance, "residual tolerance");
-  requireFinite(_parameters.finite_difference_step, "finite-difference step");
-  requireFinite(_parameters.minimum_line_search, "minimum line-search factor");
+  requireIntegratorFinite(_parameters.youngs_modulus, "Young's modulus");
+  requireIntegratorFinite(_parameters.poissons_ratio, "Poisson's ratio");
+  requireIntegratorFinite(_parameters.residual_tolerance, "residual tolerance");
+  requireIntegratorFinite(_parameters.finite_difference_step, "finite-difference step");
+  requireIntegratorFinite(_parameters.minimum_line_search, "minimum line-search factor");
   if (_parameters.youngs_modulus <= 0.0)
     integrationError("Young's modulus must be positive");
   if (_parameters.poissons_ratio <= -1.0 || _parameters.poissons_ratio >= 0.5)
@@ -190,10 +190,10 @@ AbaqusCDPLocalIntegrator::integrate(const SymmetricTensor & total_strain,
 {
   if (!finiteTensor(total_strain) || !finiteTensor(old_state.plastic_strain))
     integrationError("total or plastic strain contains a non-finite component");
-  requireFinite(old_state.tensile_equivalent_plastic_strain,
-                "old tensile equivalent plastic strain");
-  requireFinite(old_state.compressive_equivalent_plastic_strain,
-                "old compressive equivalent plastic strain");
+  requireIntegratorFinite(old_state.tensile_equivalent_plastic_strain,
+                          "old tensile equivalent plastic strain");
+  requireIntegratorFinite(old_state.compressive_equivalent_plastic_strain,
+                          "old compressive equivalent plastic strain");
   if (old_state.tensile_equivalent_plastic_strain < 0.0 ||
       old_state.compressive_equivalent_plastic_strain < 0.0)
     integrationError("old equivalent plastic strains must be nonnegative");
