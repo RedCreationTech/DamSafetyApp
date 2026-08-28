@@ -171,6 +171,51 @@ TEST(AbaqusCDPSubstepIntegrator, PlasticReferenceTangentMatchesIndependentDirect
     EXPECT_NEAR(predicted[i], measured[i], 5.0e-3 * std::max(1.0, std::abs(measured[i])));
 }
 
+TEST(AbaqusCDPSubstepIntegrator, SingleStepAlgorithmicTangentMatchesReference)
+{
+  const auto table = substepReferenceTable();
+  const AbaqusCDPLocalIntegrator local(table, substepLocalParameters());
+  const AbaqusCDPStateIntegrator state_integrator(local, substepStateParameters(5.0e-4));
+  const AbaqusCDPSubstepIntegrator integrator(state_integrator, {8, 0.0, 1.0e-8});
+  const double initial_tension =
+      table.responseByEquivalentPlasticStrain(CDPMaterialTable::Branch::TENSION, 0.0).stress.value;
+  const auto target = substepUniaxialElasticStrain(1.05 * initial_tension);
+  const AbaqusCDPSubstepIntegrator::SymmetricTensor direction =
+      {1.0, -0.2, -0.2, 0.1, 0.0, 0.0};
+
+  const auto algorithmic = integrator.integrateLinearized({}, target, 1.0e-3, {});
+  const auto predicted =
+      AbaqusCDPSubstepIntegrator::applyTangent(algorithmic.algorithmic_tangent, direction);
+  const auto measured =
+      integrator.directionalDerivative({}, target, 1.0e-3, {}, direction, 1.0e-8);
+  EXPECT_EQ(algorithmic.result.accepted_substeps, 1u);
+  for (std::size_t i = 0; i < 6; ++i)
+    EXPECT_NEAR(predicted[i], measured[i], 1.0e-2 * std::max(1.0, std::abs(measured[i])));
+}
+
+TEST(AbaqusCDPSubstepIntegrator, SubstepAlgorithmicTangentPropagatesStateSensitivity)
+{
+  const auto table = substepReferenceTable();
+  const AbaqusCDPLocalIntegrator local(table, substepLocalParameters());
+  const AbaqusCDPStateIntegrator state_integrator(local, substepStateParameters(5.0e-4));
+  const double initial_tension =
+      table.responseByEquivalentPlasticStrain(CDPMaterialTable::Branch::TENSION, 0.0).stress.value;
+  const auto target = substepUniaxialElasticStrain(1.05 * initial_tension);
+  const AbaqusCDPSubstepIntegrator integrator(
+      state_integrator, {16, std::abs(target[0]) / 3.0, 1.0e-8});
+  const AbaqusCDPSubstepIntegrator::SymmetricTensor direction =
+      {1.0, -0.2, -0.2, 0.1, 0.0, 0.0};
+
+  const auto algorithmic = integrator.integrateLinearized({}, target, 1.0e-3, {});
+  const auto predicted =
+      AbaqusCDPSubstepIntegrator::applyTangent(algorithmic.algorithmic_tangent, direction);
+  const auto measured =
+      integrator.directionalDerivative({}, target, 1.0e-3, {}, direction, 1.0e-8);
+  EXPECT_EQ(algorithmic.result.accepted_substeps, 4u);
+  for (std::size_t i = 0; i < 6; ++i)
+    EXPECT_NEAR(predicted[i], measured[i], 1.0e-2 * std::max(1.0, std::abs(measured[i])));
+}
+
 TEST(AbaqusCDPSubstepIntegrator, RejectsInvalidConfigurationAndDirection)
 {
   const auto table = substepReferenceTable();

@@ -43,6 +43,12 @@ public:
     double perturbation;
   };
 
+  struct LinearizedResult
+  {
+    Result result;
+    TangentMatrix algorithmic_tangent;
+  };
+
   AbaqusCDPSubstepIntegrator(const AbaqusCDPStateIntegrator & state_integrator,
                              Parameters parameters);
 
@@ -55,6 +61,11 @@ public:
                                     const SymmetricTensor & new_total_strain,
                                     double time_step,
                                     const State & old_state) const;
+
+  LinearizedResult integrateLinearized(const SymmetricTensor & old_total_strain,
+                                       const SymmetricTensor & new_total_strain,
+                                       double time_step,
+                                       const State & old_state) const;
 
   SymmetricTensor directionalDerivative(const SymmetricTensor & old_total_strain,
                                         const SymmetricTensor & new_total_strain,

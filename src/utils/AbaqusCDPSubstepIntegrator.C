@@ -157,6 +157,123 @@ AbaqusCDPSubstepIntegrator::integrate(const SymmetricTensor & old_total_strain,
   substepError(message.str());
 }
 
+AbaqusCDPSubstepIntegrator::LinearizedResult
+AbaqusCDPSubstepIntegrator::integrateLinearized(const SymmetricTensor & old_total_strain,
+                                                const SymmetricTensor & new_total_strain,
+                                                const double time_step,
+                                                const State & old_state) const
+{
+  if (!finiteSubstepTensor(old_total_strain) || !finiteSubstepTensor(new_total_strain))
+    substepError("old or new total strain contains a non-finite value");
+  if (!std::isfinite(time_step) || time_step < 0.0)
+    substepError("time step must be finite and nonnegative");
+
+  const auto total_increment = substepDifference(new_total_strain, old_total_strain);
+  unsigned int substeps = 1;
+  if (_parameters.maximum_strain_increment > 0.0)
+    while (maximumAbsoluteComponent(total_increment) / substeps >
+           _parameters.maximum_strain_increment)
+    {
+      if (substeps == _parameters.maximum_substeps)
+        substepError("proactive strain-increment limit requires more than maximum_substeps");
+      substeps *= 2;
+    }
+  const bool proactively_partitioned = substeps > 1;
+
+  unsigned int cutback_count = 0;
+  unsigned int attempted_partitions = 0;
+  std::string last_error;
+  unsigned int last_failed_substep = 0;
+  unsigned int last_partition = substeps;
+
+  while (substeps <= _parameters.maximum_substeps)
+  {
+    ++attempted_partitions;
+    State working_state = old_state;
+    std::optional<AbaqusCDPStateIntegrator::LinearizedResult> final_result;
+    std::array<std::array<double, AbaqusCDPStateIntegrator::state_size>, 6>
+        state_sensitivity = {};
+    TangentMatrix tangent = {};
+    unsigned int total_local_iterations = 0;
+    bool partition_succeeded = true;
+
+    for (unsigned int i = 1; i <= substeps; ++i)
+    {
+      const double fraction = static_cast<double>(i) / substeps;
+      const auto target = substepInterpolate(old_total_strain, total_increment, fraction);
+      try
+      {
+        auto step_result = _state_integrator.integrateLinearized(
+            target, time_step / static_cast<double>(substeps), working_state);
+        total_local_iterations += step_result.result.backbone.iterations;
+
+        std::array<std::array<double, AbaqusCDPStateIntegrator::state_size>, 6>
+            new_state_sensitivity = {};
+        TangentMatrix new_tangent = {};
+        for (std::size_t final_column = 0; final_column < 6; ++final_column)
+        {
+          std::array<double, AbaqusCDPStateIntegrator::transition_size> input_derivative = {};
+          input_derivative[final_column] = fraction;
+          for (std::size_t state_row = 0;
+               state_row < AbaqusCDPStateIntegrator::state_size;
+               ++state_row)
+            input_derivative[6 + state_row] = state_sensitivity[final_column][state_row];
+
+          for (std::size_t output_row = 0; output_row < 6; ++output_row)
+            for (std::size_t input = 0;
+                 input < AbaqusCDPStateIntegrator::transition_size;
+                 ++input)
+              new_tangent[final_column][output_row] +=
+                  step_result.derivative[input][output_row] * input_derivative[input];
+          for (std::size_t state_row = 0;
+               state_row < AbaqusCDPStateIntegrator::state_size;
+               ++state_row)
+            for (std::size_t input = 0;
+                 input < AbaqusCDPStateIntegrator::transition_size;
+                 ++input)
+              new_state_sensitivity[final_column][state_row] +=
+                  step_result.derivative[input][6 + state_row] * input_derivative[input];
+        }
+        state_sensitivity = new_state_sensitivity;
+        tangent = new_tangent;
+        working_state = step_result.result.state;
+        final_result = std::move(step_result);
+      }
+      catch (const std::exception & error)
+      {
+        partition_succeeded = false;
+        last_error = error.what();
+        last_failed_substep = i;
+        last_partition = substeps;
+        break;
+      }
+    }
+
+    if (partition_succeeded && final_result)
+    {
+      Result result{std::move(final_result->result),
+                    substeps,
+                    cutback_count,
+                    attempted_partitions,
+                    total_local_iterations,
+                    proactively_partitioned};
+      return {std::move(result), tangent};
+    }
+
+    if (substeps == _parameters.maximum_substeps)
+      break;
+    substeps *= 2;
+    ++cutback_count;
+  }
+
+  std::ostringstream message;
+  message << "linearization failed after partition=" << last_partition
+          << ", failed_substep=" << last_failed_substep
+          << ", attempted_partitions=" << attempted_partitions
+          << ", last_error=" << last_error;
+  substepError(message.str());
+}
+
 AbaqusCDPSubstepIntegrator::ReferenceTangent
 AbaqusCDPSubstepIntegrator::referenceTangent(const SymmetricTensor & old_total_strain,
                                              const SymmetricTensor & new_total_strain,

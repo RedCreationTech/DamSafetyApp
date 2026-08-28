@@ -3,6 +3,7 @@
 #include "AbaqusCDPFormula.h"
 #include "CDPMaterialTable.h"
 
+#include <array>
 #include <string>
 
 /**
@@ -18,6 +19,9 @@ class AbaqusCDPLocalIntegrator
 {
 public:
   using SymmetricTensor = AbaqusCDPFormula::SymmetricTensor;
+  static constexpr std::size_t transition_size = 14;
+  using TransitionColumn = std::array<double, transition_size>;
+  using TransitionJacobian = std::array<TransitionColumn, transition_size>;
 
   enum class ActiveBranch
   {
@@ -63,14 +67,58 @@ public:
     double backbone_compression_damage;
   };
 
+  /**
+   * Linearization of {effective stress, new backbone state} with respect to
+   * {total strain, old backbone state}. Columns and rows use
+   * {six tensor components, six plastic-strain components, kappa_t, kappa_c}.
+   */
+  struct LinearizedResult
+  {
+    Result result;
+    TransitionJacobian derivative;
+  };
+
   AbaqusCDPLocalIntegrator(const CDPMaterialTable & table, Parameters parameters);
 
   Result integrate(const SymmetricTensor & total_strain, const State & old_state) const;
+  LinearizedResult integrateLinearized(const SymmetricTensor & total_strain,
+                                       const State & old_state) const;
   SymmetricTensor elasticStress(const SymmetricTensor & elastic_strain) const;
+  SymmetricTensor elasticStrain(const SymmetricTensor & stress) const;
+  CDPMaterialTable::Response materialResponse(CDPMaterialTable::Branch branch,
+                                              double equivalent_plastic_strain) const;
 
   static std::string branchName(ActiveBranch branch);
 
 private:
+  static constexpr std::size_t local_size = 9;
+  using LocalVector = std::array<double, local_size>;
+  using LocalMatrix = std::array<LocalVector, local_size>;
+
+  struct Evaluation
+  {
+    LocalVector residual;
+    SymmetricTensor stress;
+    SymmetricTensor plastic_increment;
+    double plastic_multiplier;
+    double tensile_equivalent_plastic_strain;
+    double compressive_equivalent_plastic_strain;
+    double tensile_increment;
+    double compressive_increment;
+    double yield;
+  };
+
+  double stressScale(const SymmetricTensor & total_strain, const State & old_state) const;
+  Evaluation evaluate(const LocalVector & unknown,
+                      const SymmetricTensor & total_strain,
+                      const State & old_state,
+                      double stress_scale) const;
+  LocalMatrix numericalJacobian(const LocalVector & unknown,
+                                const SymmetricTensor & total_strain,
+                                const State & old_state,
+                                double stress_scale) const;
+  static LocalVector solveLinearSystem(LocalMatrix matrix, LocalVector right_hand_side);
+
   const CDPMaterialTable & _table;
   const Parameters _parameters;
   const double _initial_tension_strength;

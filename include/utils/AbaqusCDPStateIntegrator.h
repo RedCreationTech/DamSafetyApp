@@ -14,6 +14,10 @@ class AbaqusCDPStateIntegrator
 {
 public:
   using SymmetricTensor = AbaqusCDPLocalIntegrator::SymmetricTensor;
+  static constexpr std::size_t state_size = 16;
+  static constexpr std::size_t transition_size = 6 + state_size;
+  using TransitionColumn = std::array<double, transition_size>;
+  using TransitionJacobian = std::array<TransitionColumn, transition_size>;
 
   struct Parameters
   {
@@ -45,12 +49,23 @@ public:
     double compression_damage_lag;
   };
 
+  /** Rows are {Cauchy stress[6], new state[16]}; columns are
+   * {total strain[6], old state[16]}. */
+  struct LinearizedResult
+  {
+    Result result;
+    TransitionJacobian derivative;
+  };
+
   AbaqusCDPStateIntegrator(const AbaqusCDPLocalIntegrator & backbone_integrator,
                            Parameters parameters);
 
   Result integrate(const SymmetricTensor & total_strain,
                    double time_step,
                    const State & old_state) const;
+  LinearizedResult integrateLinearized(const SymmetricTensor & total_strain,
+                                       double time_step,
+                                       const State & old_state) const;
 
 private:
   const AbaqusCDPLocalIntegrator & _backbone_integrator;

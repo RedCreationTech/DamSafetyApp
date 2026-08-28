@@ -151,3 +151,140 @@ AbaqusCDPStateIntegrator::integrate(const SymmetricTensor & total_strain,
           backbone.backbone_tension_damage - new_state.viscous_tension_damage,
           backbone.backbone_compression_damage - new_state.viscous_compression_damage};
 }
+
+AbaqusCDPStateIntegrator::LinearizedResult
+AbaqusCDPStateIntegrator::integrateLinearized(const SymmetricTensor & total_strain,
+                                              const double time_step,
+                                              const State & old_state) const
+{
+  const auto backbone =
+      _backbone_integrator.integrateLinearized(total_strain, old_state.backbone);
+  LinearizedResult linearized{integrate(total_strain, time_step, old_state), {}};
+
+  const double relaxation_factor =
+      _parameters.relaxation_time == 0.0
+          ? 1.0
+          : (time_step == 0.0 ? 0.0
+                              : time_step / (_parameters.relaxation_time + time_step));
+  const auto tension = _backbone_integrator.materialResponse(
+      CDPMaterialTable::Branch::TENSION,
+      linearized.result.state.backbone.tensile_equivalent_plastic_strain);
+  const auto compression = _backbone_integrator.materialResponse(
+      CDPMaterialTable::Branch::COMPRESSION,
+      linearized.result.state.backbone.compressive_equivalent_plastic_strain);
+
+  SymmetricTensor tension_weight_gradient;
+  double stress_scale = 1.0;
+  for (const double value : linearized.result.viscous_effective_stress)
+    stress_scale = std::max(stress_scale, std::abs(value));
+  const double weight_step = 1.0e-7 * stress_scale;
+  for (std::size_t column = 0; column < 6; ++column)
+  {
+    auto plus = linearized.result.viscous_effective_stress;
+    auto minus = linearized.result.viscous_effective_stress;
+    plus[column] += weight_step;
+    minus[column] -= weight_step;
+    tension_weight_gradient[column] =
+        (AbaqusCDPFormula::stressInvariants(plus).tension_weight -
+         AbaqusCDPFormula::stressInvariants(minus).tension_weight) /
+        (2.0 * weight_step);
+  }
+
+  const double tension_recovery_factor = linearized.result.damage.tensile_recovery_factor;
+  const double compression_recovery_factor =
+      linearized.result.damage.compressive_recovery_factor;
+  const double compression_factor =
+      1.0 - tension_recovery_factor * linearized.result.state.viscous_compression_damage;
+  const double tension_factor =
+      1.0 - compression_recovery_factor * linearized.result.state.viscous_tension_damage;
+
+  for (std::size_t input = 0; input < transition_size; ++input)
+  {
+    std::array<double, AbaqusCDPLocalIntegrator::transition_size> local_input = {};
+    if (input < 6)
+      local_input[input] = 1.0;
+    else if (input - 6 < 8)
+      local_input[6 + input - 6] = 1.0;
+
+    std::array<double, AbaqusCDPLocalIntegrator::transition_size> local_output = {};
+    for (std::size_t local_column = 0;
+         local_column < AbaqusCDPLocalIntegrator::transition_size;
+         ++local_column)
+      if (local_input[local_column] != 0.0)
+        for (std::size_t row = 0; row < AbaqusCDPLocalIntegrator::transition_size; ++row)
+          local_output[row] +=
+              backbone.derivative[local_column][row] * local_input[local_column];
+
+    SymmetricTensor strain_derivative = {0.0, 0.0, 0.0, 0.0, 0.0, 0.0};
+    if (input < 6)
+      strain_derivative[input] = 1.0;
+    SymmetricTensor old_viscous_plastic_derivative = {0.0, 0.0, 0.0, 0.0, 0.0, 0.0};
+    double old_tension_damage_derivative = 0.0;
+    double old_compression_damage_derivative = 0.0;
+    if (input >= 6)
+    {
+      const std::size_t old_state_index = input - 6;
+      if (old_state_index >= 8 && old_state_index < 14)
+        old_viscous_plastic_derivative[old_state_index - 8] = 1.0;
+      else if (old_state_index == 14)
+        old_tension_damage_derivative = 1.0;
+      else if (old_state_index == 15)
+        old_compression_damage_derivative = 1.0;
+    }
+
+    SymmetricTensor new_viscous_plastic_derivative;
+    for (std::size_t row = 0; row < 6; ++row)
+      new_viscous_plastic_derivative[row] =
+          (1.0 - relaxation_factor) * old_viscous_plastic_derivative[row] +
+          relaxation_factor * local_output[6 + row];
+    const double new_tension_damage_derivative =
+        (1.0 - relaxation_factor) * old_tension_damage_derivative +
+        relaxation_factor * tension.damage.right_derivative * local_output[12];
+    const double new_compression_damage_derivative =
+        (1.0 - relaxation_factor) * old_compression_damage_derivative +
+        relaxation_factor * compression.damage.right_derivative * local_output[13];
+
+    SymmetricTensor elastic_argument_derivative;
+    for (std::size_t row = 0; row < 6; ++row)
+      elastic_argument_derivative[row] =
+          strain_derivative[row] - new_viscous_plastic_derivative[row];
+    const auto effective_stress_derivative =
+        _backbone_integrator.elasticStress(elastic_argument_derivative);
+    double tension_weight_derivative = 0.0;
+    for (std::size_t row = 0; row < 6; ++row)
+      tension_weight_derivative +=
+          tension_weight_gradient[row] * effective_stress_derivative[row];
+
+    const double tension_recovery_derivative =
+        -_parameters.tension_recovery * tension_weight_derivative;
+    const double compression_recovery_derivative =
+        _parameters.compression_recovery * tension_weight_derivative;
+    const double compression_factor_derivative =
+        -(tension_recovery_derivative *
+              linearized.result.state.viscous_compression_damage +
+          tension_recovery_factor * new_compression_damage_derivative);
+    const double tension_factor_derivative =
+        -(compression_recovery_derivative *
+              linearized.result.state.viscous_tension_damage +
+          compression_recovery_factor * new_tension_damage_derivative);
+    const double stiffness_derivative =
+        compression_factor_derivative * tension_factor +
+        compression_factor * tension_factor_derivative;
+
+    for (std::size_t row = 0; row < 6; ++row)
+      linearized.derivative[input][row] =
+          linearized.result.damage.stiffness_factor * effective_stress_derivative[row] +
+          stiffness_derivative * linearized.result.viscous_effective_stress[row];
+    for (std::size_t row = 0; row < 6; ++row)
+    {
+      linearized.derivative[input][6 + row] = local_output[6 + row];
+      linearized.derivative[input][6 + 8 + row] =
+          new_viscous_plastic_derivative[row];
+    }
+    linearized.derivative[input][6 + 6] = local_output[12];
+    linearized.derivative[input][6 + 7] = local_output[13];
+    linearized.derivative[input][6 + 14] = new_tension_damage_derivative;
+    linearized.derivative[input][6 + 15] = new_compression_damage_derivative;
+  }
+  return linearized;
+}
