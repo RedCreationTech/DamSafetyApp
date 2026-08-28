@@ -22,6 +22,7 @@ unit/lib/
 .previous_test_results.json
 .failed_tests
 test/tests/**/elastic_out.csv
+!test/tests/cdp_material_table/data/*.csv
 
 # Runtime results
 outputs/

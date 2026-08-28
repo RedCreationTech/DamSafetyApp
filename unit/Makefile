@@ -36,7 +36,7 @@ NAVIER_STOKES             := no
 PHASE_FIELD               := no
 RDG                       := no
 STOCHASTIC_TOOLS          := no
-TENSOR_MECHANICS          := no
+SOLID_MECHANICS        := yes
 XFEM                      := no
 POROUS_FLOW               := no
 LEVEL_SET                 := no
@@ -50,11 +50,11 @@ ADDITIONAL_LIBS     := $(FRAMEWORK_DIR)/contrib/gtest/libgtest.la
 # dep apps
 CURRENT_DIR        := $(shell pwd)
 APPLICATION_DIR    := $(CURRENT_DIR)/..
-APPLICATION_NAME   := dam_safety
+APPLICATION_NAME   := DamSafetyApp
 include            $(FRAMEWORK_DIR)/app.mk
 
 APPLICATION_DIR    := $(CURRENT_DIR)
-APPLICATION_NAME   := dam_safety-unit
+APPLICATION_NAME   := DamSafetyApp-unit
 BUILD_EXEC         := yes
 
 DEP_APPS    ?= $(shell $(FRAMEWORK_DIR)/scripts/find_dep_apps.py $(APPLICATION_NAME))

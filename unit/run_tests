@@ -1,6 +1,6 @@
 #!/bin/bash
 
-APPLICATION_NAME=dam_safety
+APPLICATION_NAME=DamSafetyApp
 # If $METHOD is not set, use opt
 if [ -z $METHOD ]; then
   export METHOD=opt
