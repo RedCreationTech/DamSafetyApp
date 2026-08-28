@@ -155,7 +155,8 @@ TEST(AbaqusCDPSubstepIntegrator, PlasticReferenceTangentMatchesIndependentDirect
   const auto table = substepReferenceTable();
   const AbaqusCDPLocalIntegrator local(table, substepLocalParameters());
   const AbaqusCDPStateIntegrator state_integrator(local, substepStateParameters(5.0e-4));
-  const AbaqusCDPSubstepIntegrator integrator(state_integrator, {8, 0.0, 1.0e-7});
+  const double perturbation = 1.0e-8;
+  const AbaqusCDPSubstepIntegrator integrator(state_integrator, {8, 0.0, perturbation});
   const double initial_tension =
       table.responseByEquivalentPlasticStrain(CDPMaterialTable::Branch::TENSION, 0.0).stress.value;
   const auto target = substepUniaxialElasticStrain(1.05 * initial_tension);
@@ -165,7 +166,7 @@ TEST(AbaqusCDPSubstepIntegrator, PlasticReferenceTangentMatchesIndependentDirect
   const auto tangent = integrator.referenceTangent({}, target, 1.0e-3, {});
   const auto predicted = AbaqusCDPSubstepIntegrator::applyTangent(tangent.value, direction);
   const auto measured =
-      integrator.directionalDerivative({}, target, 1.0e-3, {}, direction, 5.0e-8);
+      integrator.directionalDerivative({}, target, 1.0e-3, {}, direction, perturbation);
   for (std::size_t i = 0; i < 6; ++i)
     EXPECT_NEAR(predicted[i], measured[i], 5.0e-3 * std::max(1.0, std::abs(measured[i])));
 }
