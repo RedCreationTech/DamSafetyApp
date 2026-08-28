@@ -129,6 +129,36 @@ TEST(AbaqusCDPStateIntegrator, AppliesBackwardEulerToPlasticStrainAndBothDamageB
   EXPECT_GE(result.compression_damage_lag, 0.0);
 }
 
+TEST(AbaqusCDPStateIntegrator, LinearizedResultMatchesStandaloneStateIntegration)
+{
+  const auto table = stateReferenceTable();
+  const AbaqusCDPLocalIntegrator local(table, localParameters());
+  const AbaqusCDPStateIntegrator integrator(local, stateParameters(5.0e-4));
+  const double initial_compression =
+      table.responseByEquivalentPlasticStrain(CDPMaterialTable::Branch::COMPRESSION, 0.0)
+          .stress.value;
+  const auto strain = stateUniaxialElasticStrain(-1.05 * initial_compression);
+
+  const auto standalone = integrator.integrate(strain, 2.5e-4, {});
+  const auto linearized = integrator.integrateLinearized(strain, 2.5e-4, {}).result;
+
+  EXPECT_EQ(linearized.backbone.state.plastic_strain,
+            standalone.backbone.state.plastic_strain);
+  EXPECT_EQ(linearized.state.viscous_plastic_strain,
+            standalone.state.viscous_plastic_strain);
+  EXPECT_EQ(linearized.viscous_effective_stress, standalone.viscous_effective_stress);
+  EXPECT_EQ(linearized.cauchy_stress, standalone.cauchy_stress);
+  EXPECT_DOUBLE_EQ(linearized.state.viscous_tension_damage,
+                   standalone.state.viscous_tension_damage);
+  EXPECT_DOUBLE_EQ(linearized.state.viscous_compression_damage,
+                   standalone.state.viscous_compression_damage);
+  EXPECT_DOUBLE_EQ(linearized.damage.stiffness_factor,
+                   standalone.damage.stiffness_factor);
+  EXPECT_EQ(linearized.backbone.iterations, standalone.backbone.iterations);
+  EXPECT_DOUBLE_EQ(linearized.backbone.residual_norm,
+                   standalone.backbone.residual_norm);
+}
+
 TEST(AbaqusCDPStateIntegrator, ZeroTimeStepKeepsViscousHistory)
 {
   const auto table = stateReferenceTable();

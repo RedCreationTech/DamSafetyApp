@@ -68,6 +68,11 @@ public:
                                        const State & old_state) const;
 
 private:
+  Result assembleResult(const SymmetricTensor & total_strain,
+                        double time_step,
+                        const State & old_state,
+                        const AbaqusCDPLocalIntegrator::Result & backbone) const;
+
   const AbaqusCDPLocalIntegrator & _backbone_integrator;
   const Parameters _parameters;
 };
