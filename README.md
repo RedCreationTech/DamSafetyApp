@@ -49,3 +49,18 @@
 
 使用方法和范围见 [`tools/abaqus/README.md`](tools/abaqus/README.md)。系统需求、设计、
 任务和验收矩阵由 `damASR` 集成仓库维护。
+
+### 计算节点隔离开发
+
+路线 B 在计算节点 `/home/kevin/DamSafetyApp-cdp-dev` 的
+`codex/abaqus-cdp-compatible` 分支开发和验证，正式部署目录
+`/home/kevin/DamSafetyApp` 不直接修改。构建脚本会校验锁定的 BlackBear/MOOSE SHA，
+并复用计算节点现有隔离编译环境：
+
+```bash
+./scripts/cdp/build-app.sh
+./scripts/cdp/run-tests.sh
+```
+
+构建产物为 `DamSafetyApp-opt`。开发目录中的二进制不得直接替换正式求解器；只有已提交、
+已推送并通过材料点和单单元门禁的 SHA 才能进入 C06 部署流程。
