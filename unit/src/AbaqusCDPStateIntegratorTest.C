@@ -4,6 +4,7 @@
 
 #include <algorithm>
 #include <cmath>
+#include <limits>
 #include <stdexcept>
 #include <string>
 
@@ -85,10 +86,17 @@ TEST(AbaqusCDPStateIntegrator, ZeroViscosityMatchesBackboneAndAppliesDamage)
                    result.backbone.backbone_tension_damage);
   EXPECT_DOUBLE_EQ(result.state.viscous_compression_damage,
                    result.backbone.backbone_compression_damage);
+  // The local Newton stress unknown obeys the elastic balance to its measured
+  // residual, not bitwise equality. Reconstructing C:(eps-eps_pl) can differ by
+  // that residual times the solver's stress scale, plus roundoff.
+  const double stress_scale = std::max(initial_tension,
+      table.responseByEquivalentPlasticStrain(CDPMaterialTable::Branch::COMPRESSION, 0.0).stress.value);
+  const double balance_tolerance = stress_scale *
+      (result.backbone.residual_norm + 64.0 * std::numeric_limits<double>::epsilon());
   for (std::size_t i = 0; i < result.viscous_effective_stress.size(); ++i)
     EXPECT_NEAR(result.viscous_effective_stress[i],
                 result.backbone.effective_stress[i],
-                1.0e-12 * initial_tension);
+                balance_tolerance);
   EXPECT_GT(result.state.viscous_tension_damage, 0.0);
   for (std::size_t i = 0; i < result.cauchy_stress.size(); ++i)
     EXPECT_NEAR(result.cauchy_stress[i],

@@ -54,6 +54,31 @@ python3 test/tools/test_abaqus_cdp.py
 
 ## 环境
 
+### 2026-08-30 单轴拉伸诊断
+
+`build_uniaxial_tension_diagnostic.py` 针对已审批的 `uniaxial_tension.inp`
+生成完整 `.i`、SI 材料四表、1000 单元网格和 LIMS submission manifest。
+工具锁定源 INP 哈希；换文件必须重新审查，不能作为通用耦合转换器使用。
+不读取 Abaqus 结果 CSV，不启动求解器。
+
+```bash
+python3 tools/abaqus/build_uniaxial_tension_diagnostic.py \
+  --inp /path/to/uniaxial_tension.inp --output /path/to/new-diagnostic
+```
+
+单位按用户批准的 mm–N–s / MPa 转成 SI。保留 `OP=NEW` 后的底面 Z 约束、
+顶面运动学耦合与 0.025 mm 拉伸；顶面 X/Y 零值仅固定自由整体平移的零基准。
+HEX8 未复现 C3D8R 减缩积分与沙漏控制，本算例只作诊断对照。
+
+通过 LIMS Facade 上传 `submission.json` 所列的完整 `input/` 文件后，由 C06
+执行 `--check-input` 和真实求解；不要通过 SSH 绕过 Job 创建。
+
+`compare_uniaxial_tension_diagnostic.py --reference EXPERT.csv --mesh INPUT_MESH.e
+--exodus RESULT.e --history RESULT.csv --output NEW_DIRECTORY` 只读取求解后输出，
+用原网格顶点/单元 ID 校验对应关系，按相同输出时间比较所有单元。
+应力统一为 MPa；近零场单列绝对误差，缺帧不插值补造；报告全场误差与逐点 ±5%
+覆盖率。它不把全局归一化误差通过等同于全部单元通过，也不验证缺失的 RP 历史。
+
 转换与梁时程求解工具使用独立环境，不修改 P0 锁定的 `.build/env`。环境包含 Python、NumPy、netCDF4 和 SciPy：
 
 ```bash

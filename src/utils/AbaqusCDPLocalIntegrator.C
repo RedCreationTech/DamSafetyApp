@@ -466,14 +466,14 @@ AbaqusCDPLocalIntegrator::evaluate(const LocalVector & unknown,
   result.compressive_increment = (1.0 - stress_invariants.tension_weight) *
                                  std::max(0.0, -increment_principal.front());
 
-  const auto tension = _table.responseByEquivalentPlasticStrain(
+  const auto tension = _table.effectiveStrengthByEquivalentPlasticStrain(
       CDPMaterialTable::Branch::TENSION, result.tensile_equivalent_plastic_strain);
-  const auto compression = _table.responseByEquivalentPlasticStrain(
+  const auto compression = _table.effectiveStrengthByEquivalentPlasticStrain(
       CDPMaterialTable::Branch::COMPRESSION, result.compressive_equivalent_plastic_strain);
   result.yield = AbaqusCDPFormula::yieldFunction(
       result.stress,
-      compression.stress.value,
-      tension.stress.value,
+      compression.value,
+      tension.value,
       _parameters.biaxial_to_uniaxial_compression_ratio,
       _parameters.tensile_meridian_ratio);
   result.residual[6] = result.yield / stress_scale;
@@ -572,9 +572,9 @@ AbaqusCDPLocalIntegrator::automaticDifferentiationJacobian(const LocalVector & u
       (1.0 - stress_invariants.tension_weight) *
       dualPositivePart(-increment_principal.front());
 
-  const auto tension = _table.responseByEquivalentPlasticStrain(
+  const auto tension = _table.effectiveStrengthByEquivalentPlasticStrain(
       CDPMaterialTable::Branch::TENSION, tensile_equivalent_plastic_strain.value);
-  const auto compression = _table.responseByEquivalentPlasticStrain(
+  const auto compression = _table.effectiveStrengthByEquivalentPlasticStrain(
       CDPMaterialTable::Branch::COMPRESSION, compressive_equivalent_plastic_strain.value);
   const auto lift_table_sample = [](const Dual9 & abscissa,
                                     const CDPMaterialTable::Sample & sample) {
@@ -584,9 +584,9 @@ AbaqusCDPLocalIntegrator::automaticDifferentiationJacobian(const LocalVector & u
     return result;
   };
   const Dual9 tension_strength = lift_table_sample(tensile_equivalent_plastic_strain,
-                                                   tension.stress);
+                                                   tension);
   const Dual9 compression_strength = lift_table_sample(compressive_equivalent_plastic_strain,
-                                                       compression.stress);
+                                                       compression);
   residual[6] = dualYieldFunction(stress,
                                   compression_strength,
                                   tension_strength,
@@ -689,16 +689,16 @@ AbaqusCDPLocalIntegrator::integrate(const SymmetricTensor & total_strain,
     integrationError("old equivalent plastic strains must be nonnegative");
 
   const auto trial_stress = elasticStress(subtract(total_strain, old_state.plastic_strain));
-  const auto old_tension = _table.responseByEquivalentPlasticStrain(
+  const auto old_tension = _table.effectiveStrengthByEquivalentPlasticStrain(
       CDPMaterialTable::Branch::TENSION, old_state.tensile_equivalent_plastic_strain);
-  const auto old_compression = _table.responseByEquivalentPlasticStrain(
+  const auto old_compression = _table.effectiveStrengthByEquivalentPlasticStrain(
       CDPMaterialTable::Branch::COMPRESSION, old_state.compressive_equivalent_plastic_strain);
   const double stress_scale = stressScale(total_strain, old_state);
 
   const double trial_yield = AbaqusCDPFormula::yieldFunction(
       trial_stress,
-      old_compression.stress.value,
-      old_tension.stress.value,
+      old_compression.value,
+      old_tension.value,
       _parameters.biaxial_to_uniaxial_compression_ratio,
       _parameters.tensile_meridian_ratio);
   if (trial_yield <= _parameters.residual_tolerance * stress_scale)
@@ -716,8 +716,10 @@ AbaqusCDPLocalIntegrator::integrate(const SymmetricTensor & total_strain,
             trial_yield,
             trial_yield,
             0.0,
-            old_tension.damage.value,
-            old_compression.damage.value};
+            materialResponse(CDPMaterialTable::Branch::TENSION,
+                             old_state.tensile_equivalent_plastic_strain).damage.value,
+            materialResponse(CDPMaterialTable::Branch::COMPRESSION,
+                             old_state.compressive_equivalent_plastic_strain).damage.value};
 
   LocalVector unknown = {0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0};
   const double initial_multiplier = std::max(trial_yield / _parameters.youngs_modulus, 1.0e-14);
@@ -924,10 +926,10 @@ AbaqusCDPLocalIntegrator::integrateLinearized(const SymmetricTensor & total_stra
   const auto factorization = factorLinearSystem(jacobian);
   ++linearized.result.local_factorizations;
 
-  const auto tension = materialResponse(
+  const auto tension = _table.effectiveStrengthByEquivalentPlasticStrain(
       CDPMaterialTable::Branch::TENSION,
       linearized.result.state.tensile_equivalent_plastic_strain);
-  const auto compression = materialResponse(
+  const auto compression = _table.effectiveStrengthByEquivalentPlasticStrain(
       CDPMaterialTable::Branch::COMPRESSION,
       linearized.result.state.compressive_equivalent_plastic_strain);
   const auto yield_with_strengths = [&](const double compression_strength,
@@ -939,15 +941,15 @@ AbaqusCDPLocalIntegrator::integrateLinearized(const SymmetricTensor & total_stra
         _parameters.biaxial_to_uniaxial_compression_ratio,
         _parameters.tensile_meridian_ratio);
   };
-  const double tension_step = 1.0e-7 * std::max(1.0, std::abs(tension.stress.value));
-  const double compression_step = 1.0e-7 * std::max(1.0, std::abs(compression.stress.value));
+  const double tension_step = 1.0e-7 * std::max(1.0, std::abs(tension.value));
+  const double compression_step = 1.0e-7 * std::max(1.0, std::abs(compression.value));
   const double yield_tension_derivative =
-      (yield_with_strengths(compression.stress.value, tension.stress.value + tension_step) -
-       yield_with_strengths(compression.stress.value, tension.stress.value - tension_step)) /
+      (yield_with_strengths(compression.value, tension.value + tension_step) -
+       yield_with_strengths(compression.value, tension.value - tension_step)) /
       (2.0 * tension_step);
   const double yield_compression_derivative =
-      (yield_with_strengths(compression.stress.value + compression_step, tension.stress.value) -
-       yield_with_strengths(compression.stress.value - compression_step, tension.stress.value)) /
+      (yield_with_strengths(compression.value + compression_step, tension.value) -
+       yield_with_strengths(compression.value - compression_step, tension.value)) /
       (2.0 * compression_step);
 
   for (std::size_t input = 0; input < transition_size; ++input)
@@ -961,10 +963,10 @@ AbaqusCDPLocalIntegrator::integrateLinearized(const SymmetricTensor & total_stra
         direct[row] = elastic_columns[input - 6][row] / stress_scale;
     else if (input == 12)
       direct[6] =
-          yield_tension_derivative * tension.stress.right_derivative / stress_scale;
+          yield_tension_derivative * tension.right_derivative / stress_scale;
     else
       direct[6] =
-          yield_compression_derivative * compression.stress.right_derivative / stress_scale;
+          yield_compression_derivative * compression.right_derivative / stress_scale;
 
     for (double & value : direct)
       value = -value;

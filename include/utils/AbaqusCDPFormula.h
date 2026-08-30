@@ -48,6 +48,8 @@ struct DamageCombination
 
 StressInvariants stressInvariants(const SymmetricTensor & effective_stress);
 
+// Both strengths below are effective cohesion magnitudes sigma/(1-d), not the
+// nominal stress ordinates in the Abaqus hardening/stiffening input tables.
 YieldCoefficients yieldCoefficients(double biaxial_to_uniaxial_compression_ratio,
                                     double tensile_meridian_ratio,
                                     double compression_strength,

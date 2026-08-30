@@ -30,6 +30,7 @@ public:
 
   struct Response
   {
+    // Nominal (Cauchy) uniaxial stress from the input table, NOT effective cohesion.
     Sample stress;
     Sample damage;
   };
@@ -43,6 +44,13 @@ public:
 
   Response response(Branch branch, Real strain_measure) const;
   Response responseByEquivalentPlasticStrain(Branch branch, Real equivalent_plastic_strain) const;
+  /**
+   * Effective uniaxial cohesion sigma_bar = sigma / (1-d) for yield evaluation.
+   * Query nominal stress and damage at the same kappa, then apply the quotient
+   * rule to both one-sided derivatives. Original input tables are unchanged.
+   */
+  Sample effectiveStrengthByEquivalentPlasticStrain(Branch branch,
+                                                   Real equivalent_plastic_strain) const;
   std::size_t stressPointCount(Branch branch) const;
   std::size_t damagePointCount(Branch branch) const;
 

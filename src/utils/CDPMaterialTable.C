@@ -248,6 +248,25 @@ CDPMaterialTable::responseByEquivalentPlasticStrain(const Branch branch,
           evaluate(_tension_damage_by_plastic_strain, equivalent_plastic_strain)};
 }
 
+CDPMaterialTable::Sample
+CDPMaterialTable::effectiveStrengthByEquivalentPlasticStrain(
+    const Branch branch, const Real equivalent_plastic_strain) const
+{
+  const auto nominal = responseByEquivalentPlasticStrain(branch, equivalent_plastic_strain);
+  const Real remaining = 1.0 - nominal.damage.value;
+  const Real strength = nominal.stress.value / remaining;
+  // Do not linearly interpolate pre-divided node strengths: the quotient of
+  // interpolated nominal stress and damage has its own (nonlinear) derivative.
+  const Sample result = {
+      strength,
+      (nominal.stress.left_derivative + strength * nominal.damage.left_derivative) / remaining,
+      (nominal.stress.right_derivative + strength * nominal.damage.right_derivative) / remaining};
+  if (!std::isfinite(result.value) || !std::isfinite(result.left_derivative) ||
+      !std::isfinite(result.right_derivative))
+    tableError("effective cohesion or its derivative is non-finite");
+  return result;
+}
+
 std::size_t
 CDPMaterialTable::stressPointCount(const Branch branch) const
 {
