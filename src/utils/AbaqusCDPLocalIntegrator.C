@@ -1,3 +1,4 @@
+#include "CDPDiagnostics.h"
 #include "AbaqusCDPLocalIntegrator.h"
 
 #include <algorithm>
@@ -136,6 +137,7 @@ using DualTensor = std::array<Dual9, 6>;
 std::array<Dual9, 3>
 dualPrincipalStress(const DualTensor & stress)
 {
+  CDPDiagnostics::Scope diagnostic_scope(CDPDiagnostics::AD_SPECTRUM);
   constexpr double pi = 3.141592653589793238462643383279502884;
   const Dual9 & xx = stress[0];
   const Dual9 & yy = stress[1];
@@ -438,6 +440,7 @@ AbaqusCDPLocalIntegrator::evaluate(const LocalVector & unknown,
                                    const State & old_state,
                                    const double stress_scale) const
 {
+  CDPDiagnostics::Scope diagnostic_scope(CDPDiagnostics::RESIDUAL);
   Evaluation result;
   const auto trial_stress = elasticStress(subtract(total_strain, old_state.plastic_strain));
   for (std::size_t i = 0; i < 6; ++i)
@@ -494,6 +497,7 @@ AbaqusCDPLocalIntegrator::numericalJacobian(const LocalVector & unknown,
                                             const State & old_state,
                                             const double stress_scale) const
 {
+  CDPDiagnostics::Scope diagnostic_scope(CDPDiagnostics::FD_JACOBIAN);
   LocalMatrix jacobian;
   for (std::size_t column = 0; column < local_size; ++column)
   {
@@ -518,6 +522,7 @@ AbaqusCDPLocalIntegrator::automaticDifferentiationJacobian(const LocalVector & u
                                                            const State & old_state,
                                                            const double stress_scale) const
 {
+  CDPDiagnostics::Scope diagnostic_scope(CDPDiagnostics::AD_JACOBIAN);
   const auto trial_stress = elasticStress(subtract(total_strain, old_state.plastic_strain));
   DualTensor stress;
   for (std::size_t i = 0; i < 6; ++i)
@@ -621,6 +626,7 @@ AbaqusCDPLocalIntegrator::localJacobian(const LocalVector & unknown,
 AbaqusCDPLocalIntegrator::LocalFactorization
 AbaqusCDPLocalIntegrator::factorLinearSystem(LocalMatrix matrix)
 {
+  CDPDiagnostics::Scope diagnostic_scope(CDPDiagnostics::FACTOR);
   LocalFactorization factorization{std::move(matrix), {}};
   for (std::size_t column = 0; column < local_size; ++column)
   {
@@ -654,6 +660,7 @@ AbaqusCDPLocalIntegrator::LocalVector
 AbaqusCDPLocalIntegrator::solveLinearSystem(const LocalFactorization & factorization,
                                             LocalVector right_hand_side)
 {
+  CDPDiagnostics::Scope diagnostic_scope(CDPDiagnostics::BACKSOLVE);
   for (std::size_t column = 0; column < local_size; ++column)
     if (factorization.pivots[column] != column)
       std::swap(right_hand_side[factorization.pivots[column]], right_hand_side[column]);
@@ -678,6 +685,7 @@ AbaqusCDPLocalIntegrator::Result
 AbaqusCDPLocalIntegrator::integrate(const SymmetricTensor & total_strain,
                                     const State & old_state) const
 {
+  CDPDiagnostics::Scope diagnostic_scope(CDPDiagnostics::LOCAL);
   if (!finiteTensor(total_strain) || !finiteTensor(old_state.plastic_strain))
     integrationError("total or plastic strain contains a non-finite component");
   requireIntegratorFinite(old_state.tensile_equivalent_plastic_strain,
@@ -750,6 +758,46 @@ AbaqusCDPLocalIntegrator::integrate(const SymmetricTensor & total_strain,
       return ActiveBranch::TENSION;
     return ActiveBranch::MIXED;
   };
+  const auto diagnose_failure = [&]() {
+    if (!CDPDiagnostics::sampleFailure()) return;
+    std::ostringstream payload;
+    try
+    {
+      {
+        CDPDiagnostics::Binding exclude_diagnostic_cost(nullptr);
+        payload<<"\"target\":";CDPDiagnostics::json(payload,total_strain);
+        payload<<",\"old_plastic\":";CDPDiagnostics::json(payload,old_state.plastic_strain);
+        payload<<",\"old_kappa_t\":";CDPDiagnostics::json(payload,old_state.tensile_equivalent_plastic_strain);
+        payload<<",\"old_kappa_c\":";CDPDiagnostics::json(payload,old_state.compressive_equivalent_plastic_strain);
+        payload<<",\"unknown\":";CDPDiagnostics::json(payload,unknown);
+        payload<<",\"residual\":";CDPDiagnostics::json(payload,current.residual);
+        payload<<",\"stress_scale\":";CDPDiagnostics::json(payload,stress_scale);
+        payload<<",\"strain_scale\":";CDPDiagnostics::json(payload,_strain_scale);
+        const auto ad=automaticDifferentiationJacobian(unknown,total_strain,old_state,stress_scale);
+        payload<<",\"ad\":";CDPDiagnostics::json(payload,ad);
+        payload<<",\"difference_sweep\":[";
+        bool first=true;
+        for (double h : {1e-5,1e-6,1e-7,1e-8})
+        {
+          LocalMatrix centered={}, forward={};
+          for (std::size_t column=0;column<local_size;++column)
+          {
+            auto plus=unknown,minus=unknown;plus[column]+=h;minus[column]-=h;
+            const auto rp=evaluate(plus,total_strain,old_state,stress_scale).residual;
+            const auto rm=evaluate(minus,total_strain,old_state,stress_scale).residual;
+            for (std::size_t row=0;row<local_size;++row)
+            { centered[row][column]=(rp[row]-rm[row])/(2*h);forward[row][column]=(rp[row]-current.residual[row])/h; }
+          }
+          if(!first)payload<<',';first=false;
+          payload<<"{\"h\":"<<h<<",\"centered\":";CDPDiagnostics::json(payload,centered);
+          payload<<",\"forward\":";CDPDiagnostics::json(payload,forward);payload<<'}';
+        }
+        payload<<']';
+      }
+      CDPDiagnostics::event("local_failure_jacobian",payload.str());
+    }
+    catch (const std::exception &) { CDPDiagnostics::event("local_failure_jacobian","\"diagnostic_error\":true"); }
+  };
   unsigned int iterations = 0;
   unsigned int jacobian_fallbacks = 0;
   unsigned int automatic_jacobian_evaluations = 0;
@@ -760,6 +808,7 @@ AbaqusCDPLocalIntegrator::integrate(const SymmetricTensor & total_strain,
          residual_norm > _parameters.residual_tolerance;
        ++iterations)
   {
+    CDPDiagnostics::Scope newton_scope(CDPDiagnostics::NEWTON_STEP);
     LocalVector right_hand_side;
     for (std::size_t i = 0; i < local_size; ++i)
       right_hand_side[i] = -current.residual[i];
@@ -833,6 +882,7 @@ AbaqusCDPLocalIntegrator::integrate(const SymmetricTensor & total_strain,
               << ", kappa_t=" << current.tensile_equivalent_plastic_strain
               << ", kappa_c=" << current.compressive_equivalent_plastic_strain
               << ", branch=" << branchName(currentBranch(current));
+      diagnose_failure();
       integrationError(message.str());
     }
   }
@@ -846,6 +896,7 @@ AbaqusCDPLocalIntegrator::integrate(const SymmetricTensor & total_strain,
             << ", kappa_t=" << current.tensile_equivalent_plastic_strain
             << ", kappa_c=" << current.compressive_equivalent_plastic_strain
             << ", branch=" << branchName(currentBranch(current));
+    diagnose_failure();
     integrationError(message.str());
   }
 
@@ -881,6 +932,7 @@ AbaqusCDPLocalIntegrator::LinearizedResult
 AbaqusCDPLocalIntegrator::integrateLinearized(const SymmetricTensor & total_strain,
                                               const State & old_state) const
 {
+  CDPDiagnostics::Scope diagnostic_scope(CDPDiagnostics::LOCAL_LINEARIZED);
   LinearizedResult linearized{integrate(total_strain, old_state), {}};
 
   // The first six columns of the elastic stiffness use the same physical

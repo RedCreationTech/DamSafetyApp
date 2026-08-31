@@ -1,3 +1,4 @@
+#include "CDPDiagnostics.h"
 #include "AbaqusCDPFormula.h"
 
 #include <algorithm>
@@ -31,6 +32,7 @@ positivePart(const double value)
 std::array<double, 3>
 principalStress(const AbaqusCDPFormula::SymmetricTensor & stress)
 {
+  CDPDiagnostics::Scope diagnostic_scope(CDPDiagnostics::SPECTRUM);
   const double xx = stress[0];
   const double yy = stress[1];
   const double zz = stress[2];

@@ -1,3 +1,4 @@
+#include "CDPDiagnostics.h"
 #include "AbaqusCDPStateIntegrator.h"
 
 #include <algorithm>
@@ -78,6 +79,7 @@ AbaqusCDPStateIntegrator::integrate(const SymmetricTensor & total_strain,
                                     const double time_step,
                                     const State & old_state) const
 {
+  CDPDiagnostics::Scope diagnostic_scope(CDPDiagnostics::STATE);
   if (!finiteStateTensor(total_strain) || !finiteStateTensor(old_state.viscous_plastic_strain))
     stateIntegrationError("total strain or old viscous plastic strain contains a non-finite value");
   if (!std::isfinite(time_step) || time_step < 0.0)
@@ -167,6 +169,7 @@ AbaqusCDPStateIntegrator::integrateLinearized(const SymmetricTensor & total_stra
                                               const double time_step,
                                               const State & old_state) const
 {
+  CDPDiagnostics::Scope diagnostic_scope(CDPDiagnostics::STATE_LINEARIZED);
   if (!finiteStateTensor(total_strain) || !finiteStateTensor(old_state.viscous_plastic_strain))
     stateIntegrationError("total strain or old viscous plastic strain contains a non-finite value");
   if (!std::isfinite(time_step) || time_step < 0.0)

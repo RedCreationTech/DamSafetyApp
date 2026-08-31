@@ -1,3 +1,4 @@
+#include "CDPDiagnostics.h"
 #include "AbaqusCDPSubstepIntegrator.h"
 
 #include "gtest/gtest.h"
@@ -230,4 +231,54 @@ TEST(AbaqusCDPSubstepIntegrator, RejectsInvalidConfigurationAndDirection)
   EXPECT_THROW(integrator.directionalDerivative(
                    {}, {}, 1.0e-3, {}, {1.0, 0.0, 0.0, 0.0, 0.0, 0.0}, 0.0),
                std::runtime_error);
+}
+
+TEST(AbaqusCDPSubstepIntegrator, DiagnosticsRetainFailedPartitionsAndPreserveState)
+{
+  const auto table=substepReferenceTable();
+  const AbaqusCDPLocalIntegrator failing_local(table,substepLocalParameters(0));
+  const AbaqusCDPStateIntegrator state(failing_local,substepStateParameters());
+  const AbaqusCDPSubstepIntegrator integrator(state,{4,0.0,1e-8});
+  AbaqusCDPSubstepIntegrator::State old;
+  const auto snapshot=old;
+  const double ft=table.responseByEquivalentPlasticStrain(CDPMaterialTable::Branch::TENSION,0).stress.value;
+  CDPDiagnostics::Counters costs{};
+  CDPDiagnostics::Context context;context.counters=&costs;
+  {
+    CDPDiagnostics::Binding binding(&context);
+    EXPECT_THROW(integrator.integrateLinearized({},substepUniaxialElasticStrain(1.05*ft),1e-3,old),std::runtime_error);
+  }
+  EXPECT_EQ(CDPDiagnostics::current,nullptr);
+  EXPECT_EQ(costs[CDPDiagnostics::PARTITION].calls,3u);
+  EXPECT_EQ(costs[CDPDiagnostics::PARTITION].failed,3u);
+  EXPECT_GE(costs[CDPDiagnostics::LOCAL].failed,3u);
+  EXPECT_GT(costs[CDPDiagnostics::LOCAL].calls,costs[CDPDiagnostics::LOCAL].failed);
+  EXPECT_EQ(old.backbone.plastic_strain,snapshot.backbone.plastic_strain);
+  EXPECT_EQ(old.viscous_plastic_strain,snapshot.viscous_plastic_strain);
+}
+
+TEST(AbaqusCDPSubstepIntegrator, DiagnosticsDoNotChangePlasticMapOrTangent)
+{
+  const auto table=substepReferenceTable();
+  const AbaqusCDPLocalIntegrator local(table,substepLocalParameters());
+  const AbaqusCDPStateIntegrator state(local,substepStateParameters(5e-4));
+  const double ft=table.responseByEquivalentPlasticStrain(CDPMaterialTable::Branch::TENSION,0).stress.value;
+  const auto target=substepUniaxialElasticStrain(1.05*ft);
+  const AbaqusCDPSubstepIntegrator integrator(state,{16,std::abs(target[0])/3,1e-8});
+  const auto reference=integrator.integrateLinearized({},target,1e-3,{});
+  CDPDiagnostics::Counters costs{};
+  CDPDiagnostics::Context context;context.counters=&costs;
+  CDPDiagnostics::Binding binding(&context);
+  const auto observed=integrator.integrateLinearized({},target,1e-3,{});
+  EXPECT_EQ(reference.algorithmic_tangent,observed.algorithmic_tangent);
+  EXPECT_EQ(reference.result.final_result.cauchy_stress,observed.result.final_result.cauchy_stress);
+  EXPECT_EQ(reference.result.final_result.state.backbone.plastic_strain,observed.result.final_result.state.backbone.plastic_strain);
+  EXPECT_GT(costs[CDPDiagnostics::AD_JACOBIAN].calls,0u);
+  EXPECT_GT(costs[CDPDiagnostics::STATE_CHAIN].calls,0u);
+  const auto before=costs[CDPDiagnostics::LOCAL].calls;
+  {
+    CDPDiagnostics::Binding excluded(nullptr);
+    integrator.integrateLinearized({},target,1e-3,{});
+  }
+  EXPECT_EQ(costs[CDPDiagnostics::LOCAL].calls,before);
 }
