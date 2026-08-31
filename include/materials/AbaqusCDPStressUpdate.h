@@ -2,6 +2,8 @@
 
 #include "AbaqusCDPSubstepIntegrator.h"
 #include "StressUpdateBase.h"
+#include "CDPDiagnostics.h"
+#include <fstream>
 
 /**
  * MOOSE StressUpdateBase adapter for the table-driven Abaqus-CDP-compatible
@@ -17,6 +19,7 @@ public:
   static InputParameters validParams();
 
   AbaqusCDPStressUpdate(const InputParameters & parameters);
+  ~AbaqusCDPStressUpdate() override;
 
   void updateState(RankTwoTensor & strain_increment,
                    RankTwoTensor & inelastic_strain_increment,
@@ -47,8 +50,18 @@ private:
   CoreState oldState() const;
   void storeState(const AbaqusCDPSubstepIntegrator::LinearizedResult & result,
                   Real integration_microseconds);
+  void writeCostSummary();
+  void auditTangent(const SymmetricTensor & old_strain, const SymmetricTensor & new_strain,
+                    const CoreState & old_state,
+                    const AbaqusCDPSubstepIntegrator::LinearizedResult & result);
 
   const bool _enable_performance_diagnostics;
+  const bool _enable_path_diagnostics;
+  CDPDiagnostics::Counters _diagnostic_cost{};
+  std::ofstream _diagnostic_trace;
+  std::string _diagnostic_cost_file;
+  unsigned int _failure_samples=0, _trace_calls=0, _tangent_checks=0;
+  std::uint64_t _diagnostic_calls=0;
   const CDPMaterialTable _table;
   const AbaqusCDPLocalIntegrator _local_integrator;
   const AbaqusCDPStateIntegrator _state_integrator;

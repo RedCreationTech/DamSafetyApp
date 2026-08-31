@@ -1,3 +1,4 @@
+#include "CDPDiagnostics.h"
 #include "AbaqusCDPSubstepIntegrator.h"
 
 #include <algorithm>
@@ -107,6 +108,8 @@ AbaqusCDPSubstepIntegrator::integrate(const SymmetricTensor & old_total_strain,
 
   while (substeps <= _parameters.maximum_substeps)
   {
+    CDPDiagnostics::Scope partition_scope(CDPDiagnostics::PARTITION);
+    if (CDPDiagnostics::current) CDPDiagnostics::current->partition=substeps;
     ++attempted_partitions;
     State working_state = old_state;
     std::optional<AbaqusCDPStateIntegrator::Result> final_result;
@@ -122,6 +125,7 @@ AbaqusCDPSubstepIntegrator::integrate(const SymmetricTensor & old_total_strain,
     {
       const auto target = substepInterpolate(
           old_total_strain, total_increment, static_cast<double>(i) / substeps);
+      if (CDPDiagnostics::current) CDPDiagnostics::current->substep=i;
       try
       {
         auto step_result = _state_integrator.integrate(
@@ -160,6 +164,7 @@ AbaqusCDPSubstepIntegrator::integrate(const SymmetricTensor & old_total_strain,
               total_local_backsolves,
               proactively_partitioned};
 
+    partition_scope.failed();
     if (substeps == _parameters.maximum_substeps)
       break;
     substeps *= 2;
@@ -205,6 +210,8 @@ AbaqusCDPSubstepIntegrator::integrateLinearized(const SymmetricTensor & old_tota
 
   while (substeps <= _parameters.maximum_substeps)
   {
+    CDPDiagnostics::Scope partition_scope(CDPDiagnostics::PARTITION);
+    if (CDPDiagnostics::current) CDPDiagnostics::current->partition=substeps;
     ++attempted_partitions;
     State working_state = old_state;
     std::optional<AbaqusCDPStateIntegrator::LinearizedResult> final_result;
@@ -223,6 +230,7 @@ AbaqusCDPSubstepIntegrator::integrateLinearized(const SymmetricTensor & old_tota
     {
       const double fraction = static_cast<double>(i) / substeps;
       const auto target = substepInterpolate(old_total_strain, total_increment, fraction);
+      if (CDPDiagnostics::current) CDPDiagnostics::current->substep=i;
       try
       {
         auto step_result = _state_integrator.integrateLinearized(
@@ -239,6 +247,8 @@ AbaqusCDPSubstepIntegrator::integrateLinearized(const SymmetricTensor & old_tota
         std::array<std::array<double, AbaqusCDPStateIntegrator::state_size>, 6>
             new_state_sensitivity = {};
         TangentMatrix new_tangent = {};
+        {
+        CDPDiagnostics::Scope chain_scope(CDPDiagnostics::STATE_CHAIN);
         for (std::size_t final_column = 0; final_column < 6; ++final_column)
         {
           std::array<double, AbaqusCDPStateIntegrator::transition_size> input_derivative = {};
@@ -262,6 +272,20 @@ AbaqusCDPSubstepIntegrator::integrateLinearized(const SymmetricTensor & old_tota
                  ++input)
               new_state_sensitivity[final_column][state_row] +=
                   step_result.derivative[input][6 + state_row] * input_derivative[input];
+        }
+        }
+        if (CDPDiagnostics::current && CDPDiagnostics::current->trace)
+        {
+          std::ostringstream payload;
+          payload<<"\"target\":";CDPDiagnostics::json(payload,target);
+          payload<<",\"old_state\":";CDPDiagnostics::stateJson(payload,working_state);
+          payload<<",\"new_state\":";CDPDiagnostics::stateJson(payload,step_result.result.state);
+          payload<<",\"backbone_stress\":";CDPDiagnostics::json(payload,step_result.result.backbone.effective_stress);
+          payload<<",\"viscous_stress\":";CDPDiagnostics::json(payload,step_result.result.viscous_effective_stress);
+          payload<<",\"yield\":";CDPDiagnostics::json(payload,step_result.result.backbone.final_yield);
+          payload<<",\"residual\":";CDPDiagnostics::json(payload,step_result.result.backbone.residual_norm);
+          payload<<",\"multiplier\":";CDPDiagnostics::json(payload,step_result.result.backbone.plastic_multiplier);
+          CDPDiagnostics::event("substep",payload.str());
         }
         state_sensitivity = new_state_sensitivity;
         tangent = new_tangent;
@@ -294,6 +318,7 @@ AbaqusCDPSubstepIntegrator::integrateLinearized(const SymmetricTensor & old_tota
       return {std::move(result), tangent};
     }
 
+    partition_scope.failed();
     if (substeps == _parameters.maximum_substeps)
       break;
     substeps *= 2;

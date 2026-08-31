@@ -5,6 +5,9 @@
 #include <array>
 #include <chrono>
 #include <exception>
+#include <algorithm>
+#include <cctype>
+#include <sstream>
 
 registerMooseObject("DamSafetyApp", AbaqusCDPStressUpdate);
 
@@ -59,12 +62,20 @@ AbaqusCDPStressUpdate::validParams()
                         false,
                         "Measure per-material-call elapsed time and expose detailed local solver "
                         "counters as material properties");
+  params.addParam<bool>("enable_path_diagnostics",false,"Opt-in complete costs and bounded path/tangent diagnostics");
+  params.addParam<std::vector<unsigned int>>("diagnostic_trace_elements",{},"MOOSE zero-based element IDs for bounded substep traces");
+  params.addParam<Real>("diagnostic_time_begin",0.015,"First time for selected path/tangent samples");
+  params.addParam<Real>("diagnostic_time_end",0.05,"Last time for selected path/tangent samples");
+  params.addParam<unsigned int>("diagnostic_max_trace_calls",2,"Maximum traced material calls per rank/thread object");
+  params.addParam<unsigned int>("diagnostic_max_tangent_checks",2,"Maximum plastic tangent samples per rank/thread object");
+  params.addParam<unsigned int>("diagnostic_max_failure_samples",4,"Maximum local-failure Jacobian samples per rank/thread object");
   return params;
 }
 
 AbaqusCDPStressUpdate::AbaqusCDPStressUpdate(const InputParameters & parameters)
   : StressUpdateBase(parameters),
     _enable_performance_diagnostics(getParam<bool>("enable_performance_diagnostics")),
+    _enable_path_diagnostics(getParam<bool>("enable_path_diagnostics")),
     _table(getParam<FileName>("compression_hardening_file"),
            getParam<FileName>("compression_damage_file"),
            getParam<FileName>("tension_stiffening_file"),
@@ -126,6 +137,33 @@ AbaqusCDPStressUpdate::AbaqusCDPStressUpdate(const InputParameters & parameters)
     _integration_microseconds(
         declareProperty<Real>(_base_name + "cdp_integration_microseconds"))
 {
+  if (_enable_path_diagnostics)
+  {
+    std::string label=name();
+    for(char & c:label) if(!std::isalnum(static_cast<unsigned char>(c)) && c!='_') c='_';
+    const auto suffix=label+"_rank"+std::to_string(processor_id())+"_thread"+std::to_string(_tid);
+    _diagnostic_cost_file="cdp_cost_"+suffix+".csv";
+    _diagnostic_trace.open("logs/cdp_trace_"+suffix+".jsonl");
+    if(!_diagnostic_trace) mooseError("Cannot open CDP diagnostic trace under Job logs/");
+  }
+}
+
+AbaqusCDPStressUpdate::~AbaqusCDPStressUpdate()
+{
+  if (_enable_path_diagnostics) writeCostSummary();
+}
+
+void
+AbaqusCDPStressUpdate::writeCostSummary()
+{
+  std::ofstream out(_diagnostic_cost_file);
+  out<<"category,calls,failed_calls,inclusive_microseconds,failed_inclusive_microseconds\n";
+  for(std::size_t i=0;i<CDPDiagnostics::COUNT;++i)
+  {
+    const auto & c=_diagnostic_cost[i];
+    out<<CDPDiagnostics::names[i]<<','<<c.calls<<','<<c.failed<<','<<std::setprecision(17)
+       <<c.microseconds<<','<<c.failed_microseconds<<'\n';
+  }
 }
 
 void
@@ -279,17 +317,47 @@ AbaqusCDPStressUpdate::updateState(RankTwoTensor & strain_increment,
     new_total_strain[i] = old_total_strain[i] + increment[i];
   }
 
+  CDPDiagnostics::Context context;
+  context.counters=&_diagnostic_cost;context.stream=&_diagnostic_trace;
+  context.failure_samples=&_failure_samples;
+  context.maximum_failure_samples=getParam<unsigned int>("diagnostic_max_failure_samples");
+  context.time=_t;context.dt=_dt;context.step=_t_step;
+  context.element=_current_elem->id();context.qp=_qp;context.call=++_diagnostic_calls;
+  const auto & elements=getParam<std::vector<unsigned int>>("diagnostic_trace_elements");
+  const bool selected=_enable_path_diagnostics && _t>=getParam<Real>("diagnostic_time_begin") &&
+      _t<=getParam<Real>("diagnostic_time_end") &&
+      std::find(elements.begin(),elements.end(),context.element)!=elements.end();
+  context.trace=selected && _trace_calls<getParam<unsigned int>("diagnostic_max_trace_calls");
+  if(context.trace) ++_trace_calls;
+  CDPDiagnostics::Binding binding(_enable_path_diagnostics ? &context : nullptr);
+  if(context.trace)
+  {
+    std::ostringstream payload;
+    payload<<"\"old_strain\":";CDPDiagnostics::json(payload,old_total_strain);
+    payload<<",\"new_strain\":";CDPDiagnostics::json(payload,new_total_strain);
+    payload<<",\"old_state\":";CDPDiagnostics::stateJson(payload,old_state);
+    CDPDiagnostics::event("material_input",payload.str());
+  }
   try
   {
     const auto integration_start = std::chrono::steady_clock::now();
-    const auto result =
-        _substep_integrator.integrateLinearized(old_total_strain, new_total_strain, _dt, old_state);
+    const auto result = [&]() {
+      CDPDiagnostics::Scope material_scope(CDPDiagnostics::MATERIAL);
+      return _substep_integrator.integrateLinearized(old_total_strain,new_total_strain,_dt,old_state);
+    }();
     const Real integration_microseconds =
         _enable_performance_diagnostics
             ? std::chrono::duration<Real, std::micro>(std::chrono::steady_clock::now() -
                                                        integration_start)
                   .count()
             : 0.0;
+    if(selected && result.result.final_result.backbone.plastic &&
+        _tangent_checks<getParam<unsigned int>("diagnostic_max_tangent_checks"))
+    {
+      ++_tangent_checks;
+      auditTangent(old_total_strain,new_total_strain,old_state,result);
+    }
+    if(_enable_path_diagnostics && _diagnostic_calls%1000==0) writeCostSummary();
     stress_new = toRankTwo(result.result.final_result.cauchy_stress);
     SymmetricTensor inelastic_increment_array;
     for (std::size_t i = 0; i < 6; ++i)
@@ -303,6 +371,81 @@ AbaqusCDPStressUpdate::updateState(RankTwoTensor & strain_increment,
   }
   catch (const std::exception & error)
   {
+    if(_enable_path_diagnostics)
+    {
+      std::ostringstream payload;
+      payload<<"\"old_strain\":";CDPDiagnostics::json(payload,old_total_strain);
+      payload<<",\"new_strain\":";CDPDiagnostics::json(payload,new_total_strain);
+      payload<<",\"old_state\":";CDPDiagnostics::stateJson(payload,old_state);
+      CDPDiagnostics::event("material_failure",payload.str());
+      writeCostSummary();
+    }
     throw MooseException(error.what());
   }
+}
+
+void
+AbaqusCDPStressUpdate::auditTangent(
+    const SymmetricTensor & old_strain,const SymmetricTensor & new_strain,
+    const CoreState & old_state,const AbaqusCDPSubstepIntegrator::LinearizedResult & result)
+{
+  std::ostringstream payload;
+  payload<<"\"old_strain\":";CDPDiagnostics::json(payload,old_strain);
+  payload<<",\"new_strain\":";CDPDiagnostics::json(payload,new_strain);
+  payload<<",\"old_state\":";CDPDiagnostics::stateJson(payload,old_state);
+  payload<<",\"base_partition\":"<<result.result.accepted_substeps;
+  payload<<",\"algorithmic_tangent_columns\":";CDPDiagnostics::json(payload,result.algorithmic_tangent);
+  payload<<",\"samples\":[";
+  bool first=true;
+  // No diagnostic recomputation is counted as a production material call.
+  {
+    CDPDiagnostics::Binding exclude_diagnostic_cost(nullptr);
+    for(double h : {1e-8,1e-9,1e-10})
+      for(std::size_t column=0;column<6;++column)
+      {
+        if(!first)payload<<',';first=false;
+        payload<<"{\"h\":"<<h<<",\"column\":"<<column;
+        auto plus=new_strain,minus=new_strain;plus[column]+=h;minus[column]-=h;
+        try
+        {
+          const auto rp=_substep_integrator.integrateLinearized(old_strain,plus,_dt,old_state);
+          const auto rm=_substep_integrator.integrateLinearized(old_strain,minus,_dt,old_state);
+          double diff2=0,norm2=0;
+          SymmetricTensor centered={},forward={},backward={};
+          for(std::size_t row=0;row<6;++row)
+          {
+            const double p=rp.result.final_result.cauchy_stress[row];
+            const double m=rm.result.final_result.cauchy_stress[row];
+            const double b=result.result.final_result.cauchy_stress[row];
+            centered[row]=(p-m)/(2*h);forward[row]=(p-b)/h;backward[row]=(b-m)/h;
+            const double error=centered[row]-result.algorithmic_tangent[column][row];
+            diff2+=error*error;norm2+=centered[row]*centered[row];
+          }
+          payload<<",\"ok\":true,\"plus_partition\":"<<rp.result.accepted_substeps
+                 <<",\"minus_partition\":"<<rm.result.accepted_substeps
+                 <<",\"same_final_branch\":"
+                 <<((rp.result.final_result.backbone.active_branch==result.result.final_result.backbone.active_branch &&
+                     rm.result.final_result.backbone.active_branch==result.result.final_result.backbone.active_branch)?"true":"false")
+                 <<",\"relative_error\":";
+          CDPDiagnostics::json(payload,std::sqrt(diff2)/std::max(std::sqrt(norm2),getParam<Real>("youngs_modulus")*1e-12));
+          payload<<",\"centered\":";CDPDiagnostics::json(payload,centered);
+          payload<<",\"forward\":";CDPDiagnostics::json(payload,forward);
+          payload<<",\"backward\":";CDPDiagnostics::json(payload,backward);
+        }
+        catch(const std::exception &) { payload<<",\"ok\":false"; }
+        payload<<'}';
+      }
+    // Repeat exactly the original call after perturbations: old state must be unchanged.
+    try
+    {
+      const auto repeat=_substep_integrator.integrateLinearized(old_strain,new_strain,_dt,old_state);
+      double error=0;
+      for(std::size_t i=0;i<6;++i)
+        error=std::max(error,std::abs(repeat.result.final_result.cauchy_stress[i]-result.result.final_result.cauchy_stress[i]));
+      payload<<"],\"repeat_max_stress_error\":";CDPDiagnostics::json(payload,error);
+      payload<<",\"repeat_same_partition\":"<<(repeat.result.accepted_substeps==result.result.accepted_substeps?"true":"false");
+    }
+    catch(const std::exception &) { payload<<"],\"repeat_failed\":true"; }
+  }
+  CDPDiagnostics::event("material_tangent",payload.str());
 }
