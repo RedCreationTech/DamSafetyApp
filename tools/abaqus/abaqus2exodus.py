@@ -9,7 +9,7 @@ DamSafetyApp 版本源自 demo-process@0cc241b8dbee6b7eb9594e9f7538fbd493d1f7a8�
 
 将 Abaqus 输入卡（.inp）解析并转换为 MOOSE 可直接读取的 Exodus II 网格文件：
   - Part/Instance 装配（含平移 + 旋转）
-  - C3D8R → HEX8 实体单元块（按 part × material 分块）
+  - C3D8/C3D8R → HEX8 实体单元块（拓扑映射；不复现 C3D8R 沙漏控制）
   - CPS4/CPS4R/CPS3 → QUAD4/TRI3 二维实体单元块
   - T3D2  → TRUSS 钢筋单元块
   - Nset / Elset / Surface → Exodus nodesets（供 BC / 荷载 / 后处理引用）
@@ -128,6 +128,7 @@ C3D8_FACES = {
 ELEMENT_TYPE_MAP = {
     'B31': ('BEAM2', 2),
     'C3D8R': ('HEX8', 8),
+    'C3D8': ('HEX8', 8),
     'T3D2': ('TRUSS', 2),
     'CPS4': ('QUAD4', 4),
     'CPS4R': ('QUAD4', 4),
@@ -140,6 +141,7 @@ ELEMENT_FACES = {
     'CPS4R': {'S1': (1, 2), 'S2': (2, 3), 'S3': (3, 4), 'S4': (4, 1)},
     'CPS3': {'S1': (1, 2), 'S2': (2, 3), 'S3': (3, 1)},
     'C3D8R': C3D8_FACES,
+    'C3D8': C3D8_FACES,
 }
 
 EXODUS_SIDE_MAP = {

@@ -43,18 +43,19 @@ def material_si(source: Path) -> tuple[dict, dict]:
     return original, validate_material(converted)
 
 
-def make_mesh(source: Path, destination: Path) -> dict:
+def make_mesh(source: Path, destination: Path, *, expected_type: str = "C3D8R",
+              expected_displacement: float = 0.025, title: str | None = None) -> dict:
     model = parse_inp(source)
     check(len(model.parts) == len(model.instances) == len(model.steps) == 1, "Expected one part/instance/step")
     part = model.parts["concrete_cube"]
     check(len(part.nodes) == 1331 and len(part.elems) == 1000, "Unexpected topology")
-    check(set(part.elem_types.values()) == {"C3D8R"}, "Expected C3D8R")
+    check(set(part.elem_types.values()) == {expected_type}, f"Expected {expected_type}")
     check(model.steps[0]["static"] == [0.01, 1.0, 1e-15, 1.0], "Unexpected Static parameters")
     boundaries = model.steps[0]["boundaries"]
     check(all(b["op"] == "NEW" for b in boundaries), "OP=NEW must be preserved")
     translations = {(b["set"], b["dof1"], b["dof2"], b["value"])
                     for b in boundaries if b["dof1"] <= 3}
-    check(translations == {("_PickedSet14", 3, 3, 0.025), ("_PickedSet16", 3, 3, 0.0)},
+    check(translations == {("_PickedSet14", 3, 3, expected_displacement), ("_PickedSet16", 3, 3, 0.0)},
           "Unexpected translations: do not silently clamp transverse DOFs")
     gm, blocks, types, meta, node_sets, _ = build_global_mesh(model, 1e-9)
     check(len(gm.coords) == 1331, "No disconnected RP node may enter the solve")
@@ -83,7 +84,7 @@ def make_mesh(source: Path, destination: Path) -> dict:
     check(np.all(determinants > 0), "Nonpositive Jacobian")
     check(np.isclose(determinants.sum(), .15**3, rtol=1e-10), "Wrong total volume")
     write_exodus(destination, gm, blocks, types, meta, {"top": top, "bottom": bottom}, {},
-                  "uniaxial_tension: mm->m; original IDs; diagnostic HEX8, not C3D8R")
+                  title or "uniaxial_tension: mm->m; original IDs; diagnostic HEX8, not C3D8R")
     return {"nodes": 1331, "elements": 1000, "block": block, "element_id_mapping": "identity",
             "node_id_mapping": "identity", "minimum_gauss_detJ_m3": float(determinants.min()),
             "volume_m3": float(determinants.sum()), "bounds_m": [xyz.min(0).tolist(), xyz.max(0).tolist()],
