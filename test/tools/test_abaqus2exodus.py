@@ -15,6 +15,19 @@ SPEC.loader.exec_module(CONVERTER)
 
 
 class Abaqus2Exodus2DTest(unittest.TestCase):
+    def test_c3d8_full_integration_topology_and_surface(self):
+        source = self.work / 'hex.inp'
+        source.write_text('*Part, name=CUBE\n*Node\n1,0,0,0\n2,1,0,0\n3,1,1,0\n4,0,1,0\n'
+                          '5,0,0,1\n6,1,0,1\n7,1,1,1\n8,0,1,1\n*Element, type=C3D8\n'
+                          '1,1,2,3,4,5,6,7,8\n*End Part\n*Assembly, name=A\n'
+                          '*Instance, name=CUBE-1, part=CUBE\n*End Instance\n'
+                          '*Elset, elset=TOP, instance=CUBE-1\n1\n'
+                          '*Surface, type=ELEMENT, name=TOP_SURF\nTOP, S2\n*End Assembly\n')
+        gm, blocks, types, meta, nodesets, sidesets = CONVERTER.build_global_mesh(CONVERTER.parse_inp(source), 1e-9)
+        self.assertEqual(list(types.values()), ['HEX8'])
+        self.assertEqual(next(iter(blocks.values()))[0][1], list(range(1, 9)))
+        self.assertEqual(set(nodesets['SURF_TOP_SURF']), {5, 6, 7, 8})
+
     def setUp(self):
         self.temp = tempfile.TemporaryDirectory()
         self.work = Path(self.temp.name)
