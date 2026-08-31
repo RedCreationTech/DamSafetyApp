@@ -819,6 +819,16 @@ AbaqusCDPLocalIntegrator::integrate(const SymmetricTensor & total_strain,
         auto candidate_unknown = unknown;
         for (std::size_t i = 0; i < local_size; ++i)
           candidate_unknown[i] += line_search * increment[i];
+        if (_parameters.use_bound_feasible_line_search)
+        {
+          if (!std::all_of(candidate_unknown.begin(), candidate_unknown.end(),
+                           [](const double value) { return std::isfinite(value); }))
+            continue;
+          // Project trial multiplier/history increments, never the accepted history.
+          // Acceptance below still requires descent in the complete original residual.
+          for (std::size_t i = 6; i < local_size; ++i)
+            candidate_unknown[i] = std::max(0.0, candidate_unknown[i]);
+        }
         if (candidate_unknown[6] < 0.0 || candidate_unknown[7] < 0.0 ||
             candidate_unknown[8] < 0.0)
           continue;

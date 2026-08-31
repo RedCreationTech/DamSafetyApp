@@ -48,6 +48,10 @@ AbaqusCDPStressUpdate::validParams()
                                     1.0e-6,
                                     "minimum_line_search > 0 & minimum_line_search <= 1",
                                     "Minimum local line-search factor");
+  params.addParam<bool>("use_bound_feasible_line_search",
+                        false,
+                        "Candidate projected trial line search for nonnegative multiplier/history "
+                        "increments; retains the original residual and convergence tolerance");
   params.addRangeCheckedParam<unsigned int>(
       "maximum_substeps", 256, "maximum_substeps > 0", "Maximum binary material substeps");
   params.addRangeCheckedParam<Real>("maximum_strain_increment",
@@ -91,7 +95,9 @@ AbaqusCDPStressUpdate::AbaqusCDPStressUpdate(const InputParameters & parameters)
                        getParam<unsigned int>("maximum_local_iterations"),
                        getParam<Real>("local_residual_tolerance"),
                        getParam<Real>("local_finite_difference_step"),
-                       getParam<Real>("minimum_line_search")}),
+                       getParam<Real>("minimum_line_search"),
+                       true,
+                       getParam<bool>("use_bound_feasible_line_search")}),
     _state_integrator(_local_integrator,
                       {getParam<Real>("tension_recovery"),
                        getParam<Real>("compression_recovery"),

@@ -47,6 +47,8 @@ public:
     double finite_difference_step = 1.0e-7;
     double minimum_line_search = 1.0e-6;
     bool use_automatic_differentiation_jacobian = true;
+    // Candidate globalization only; the accepted state still solves the original residual.
+    bool use_bound_feasible_line_search = false;
   };
 
   struct State
