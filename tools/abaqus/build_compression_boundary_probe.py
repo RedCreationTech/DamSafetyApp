@@ -50,6 +50,7 @@ def prepare(parent_root, root, label, audit_path):
     (inp / 'release-audit.json').write_bytes(audit_path.read_bytes())
     diagnostic = {
         'test_id': 'TEST-CDPC-BOUND-001/' + label,
+        'test_variant': json.loads((parent / 'input' / 'diagnostic-manifest.json').read_text())['test_variant'],
         'parent_job_id': json.loads((parent / 'manifest.json').read_text())['job_id'],
         'parent_input_sha256': old['input_sha256'],
         'solver_sha': audit['solver_sha'],
