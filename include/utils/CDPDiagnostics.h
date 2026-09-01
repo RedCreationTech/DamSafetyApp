@@ -97,7 +97,8 @@ template<class T> void stateJson(std::ostream & out,const T & state)
   out<<",\"kappa_c\":";json(out,state.backbone.compressive_equivalent_plastic_strain);
   out<<",\"viscous_plastic\":";json(out,state.viscous_plastic_strain);
   out<<",\"damage_t\":";json(out,state.viscous_tension_damage);
-  out<<",\"damage_c\":";json(out,state.viscous_compression_damage);out<<'}';
+  out<<",\"damage_c\":";json(out,state.viscous_compression_damage);
+  out<<",\"combined_damage\":";json(out,state.viscous_combined_damage);out<<'}';
 }
 inline void event(const std::string & kind,const std::string & payload)
 {

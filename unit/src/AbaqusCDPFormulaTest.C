@@ -118,6 +118,22 @@ TEST(AbaqusCDPFormula, AppliesDuvautLionsBackwardEulerUpdate)
     EXPECT_DOUBLE_EQ(updated[i], old_state[i] + 1.0);
 }
 
+TEST(AbaqusCDPFormula, CombinedDamageRelaxationDoesNotCommuteWithBranchRelaxation)
+{
+  const double compression_damage = 0.4;
+  const double tension_damage = 0.2;
+  const double tension_weight = 0.25;
+  const auto backbone = AbaqusCDPFormula::combineDamage(
+      compression_damage, tension_damage, 0.0, 1.0, tension_weight);
+  const double official_scalar =
+      AbaqusCDPFormula::duvautLionsUpdate(0.0, backbone.damage, 0.5, 0.5);
+  const auto independently_relaxed_branches = AbaqusCDPFormula::combineDamage(
+      0.5 * compression_damage, 0.5 * tension_damage, 0.0, 1.0, tension_weight);
+
+  EXPECT_NE(official_scalar, independently_relaxed_branches.damage);
+  EXPECT_NEAR(official_scalar, 0.5 * backbone.damage, 1.0e-14);
+}
+
 TEST(AbaqusCDPFormula, RejectsInvalidOfficialParameters)
 {
   EXPECT_THROW(AbaqusCDPFormula::yieldCoefficients(1.16, 0.5, 30.0, 3.0),

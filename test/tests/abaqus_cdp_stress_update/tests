@@ -36,4 +36,22 @@
     input = single_hex8_shear.i
     requirement = 'DamSafetyApp shall solve a one-element shear diagnostic with the non-associated CDP flow potential.'
   []
+  [scalar_damage_viscosity_tension]
+    type = RunApp
+    input = single_hex8_tension.i
+    cli_args = 'Materials/cdp/use_scalar_damage_viscosity=true Outputs/file_base=scalar_damage_viscosity_tension_out'
+    requirement = 'The opt-in combined scalar damage viscosity candidate shall solve the tensile material path.'
+  []
+  [scalar_damage_viscosity_compression]
+    type = RunApp
+    input = single_hex8_compression.i
+    cli_args = 'Materials/cdp/use_scalar_damage_viscosity=true Outputs/file_base=scalar_damage_viscosity_compression_out'
+    requirement = 'The opt-in combined scalar damage viscosity candidate shall solve the compressive material path.'
+  []
+  [scalar_damage_viscosity_mixed]
+    type = RunApp
+    input = single_hex8_shear.i
+    cli_args = 'Materials/cdp/use_scalar_damage_viscosity=true Outputs/file_base=scalar_damage_viscosity_mixed_out'
+    requirement = 'The opt-in combined scalar damage viscosity candidate shall solve a mixed principal-stress path.'
+  []
 []

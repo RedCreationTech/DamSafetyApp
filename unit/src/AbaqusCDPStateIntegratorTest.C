@@ -42,9 +42,14 @@ localParameters(const unsigned int maximum_iterations = 40)
 AbaqusCDPStateIntegrator::Parameters
 stateParameters(const double relaxation_time,
                 const double tension_recovery = 1.0,
-                const double compression_recovery = 0.0)
+                const double compression_recovery = 0.0,
+                const bool use_scalar_damage_viscosity = false)
 {
-  return {tension_recovery, compression_recovery, relaxation_time, 1.0e-12};
+  return {tension_recovery,
+          compression_recovery,
+          relaxation_time,
+          1.0e-12,
+          use_scalar_damage_viscosity};
 }
 
 AbaqusCDPStateIntegrator::SymmetricTensor
@@ -135,6 +140,62 @@ TEST(AbaqusCDPStateIntegrator, AppliesBackwardEulerToPlasticStrainAndBothDamageB
   EXPECT_FALSE(result.rate_independent);
   EXPECT_GT(result.plastic_strain_lag_norm, 0.0);
   EXPECT_GE(result.compression_damage_lag, 0.0);
+}
+
+TEST(AbaqusCDPStateIntegrator, ScalarDamageCandidateRelaxesOfficialCombinedBackboneDamage)
+{
+  const auto table = stateReferenceTable();
+  const AbaqusCDPLocalIntegrator local(table, localParameters());
+  const double mu = 5.0e-4;
+  const double dt = 2.5e-4;
+  const AbaqusCDPStateIntegrator integrator(
+      local, stateParameters(mu, 0.0, 1.0, true));
+  const double initial_compression =
+      table.responseByEquivalentPlasticStrain(CDPMaterialTable::Branch::COMPRESSION, 0.0)
+          .stress.value;
+
+  const auto result =
+      integrator.integrate(stateUniaxialElasticStrain(-1.05 * initial_compression), dt, {});
+  const double relaxation_factor = dt / (mu + dt);
+
+  EXPECT_NEAR(result.state.viscous_combined_damage,
+              relaxation_factor * result.backbone_combined_damage,
+              1.0e-14);
+  EXPECT_DOUBLE_EQ(result.damage.damage, result.state.viscous_combined_damage);
+  EXPECT_DOUBLE_EQ(result.damage.stiffness_factor,
+                   1.0 - result.state.viscous_combined_damage);
+}
+
+TEST(AbaqusCDPStateIntegrator, ScalarDamageCandidateTangentMatchesFiniteDifference)
+{
+  const auto table = stateReferenceTable();
+  const AbaqusCDPLocalIntegrator local(table, localParameters());
+  const AbaqusCDPStateIntegrator integrator(
+      local, stateParameters(5.0e-4, 0.0, 1.0, true));
+  const double initial_tension =
+      table.responseByEquivalentPlasticStrain(CDPMaterialTable::Branch::TENSION, 0.0)
+          .stress.value;
+  const auto strain = stateUniaxialElasticStrain(1.05 * initial_tension);
+  const auto linearized = integrator.integrateLinearized(strain, 2.5e-4, {});
+  const double h = 1.0e-10;
+
+  for (std::size_t column = 0; column < 6; ++column)
+  {
+    auto plus = strain;
+    auto minus = strain;
+    plus[column] += h;
+    minus[column] -= h;
+    const auto plus_result = integrator.integrate(plus, 2.5e-4, {});
+    const auto minus_result = integrator.integrate(minus, 2.5e-4, {});
+    for (std::size_t row = 0; row < 6; ++row)
+    {
+      const double finite_difference =
+          (plus_result.cauchy_stress[row] - minus_result.cauchy_stress[row]) / (2.0 * h);
+      EXPECT_NEAR(linearized.derivative[column][row],
+                  finite_difference,
+                  2.0e-5 * youngs_modulus);
+    }
+  }
 }
 
 TEST(AbaqusCDPStateIntegrator, LinearizedResultMatchesStandaloneStateIntegration)

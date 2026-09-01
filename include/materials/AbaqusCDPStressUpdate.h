@@ -81,6 +81,7 @@ private:
   const MaterialProperty<Real> & _damage_c_old;
 
   MaterialProperty<Real> & _combined_damage;
+  const MaterialProperty<Real> & _combined_damage_old;
   MaterialProperty<Real> & _stiffness_factor;
   MaterialProperty<Real> & _local_iterations;
   MaterialProperty<Real> & _jacobian_fallbacks;
