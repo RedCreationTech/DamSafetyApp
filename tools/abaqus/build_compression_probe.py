@@ -67,6 +67,7 @@ def build(parent, output, variant, case_name):
     assert sha(src) == old['input_sha256']
     text = src.read_text()
     extra_evidence = None
+    extra_evidence_name = 'replay-targets.json'
     if variant == 'observe':
         assert '[VectorPostprocessors/ip_states]' not in text
         text = text.replace('[Executioner]\n',
@@ -81,6 +82,49 @@ def build(parent, output, variant, case_name):
             "type = ElementMaterialSampler\n  elem_ids = '0 291 401 410 460 496 555 791 896'\n")
         text='# Diagnostic observation window 0-0.1s; original loading RATE and boundary conditions retained.\n'+text+'\n'+observe
         change='Original 1000 HEX8 / original BC / original numerics: only shorten to 0.1s and observe 9 fixed MOOSE element indices at all IPs'
+    elif variant == 'dual-ip-path-trace':
+        # Keep the formal 1000-HEX8 behavior and original adaptive stepping,
+        # but bound the diagnostic to the first-divergence window and the two
+        # physical points whose full-FE DamageT errors have opposite signs.
+        text, n = re.subn(r'(?m)^(\s+)end_time = 0\.1$', r'\1end_time = 0.03', text)
+        assert n == 2  # Executioner and output Times; loading rate is unchanged.
+        text, n = re.subn(
+            r"(?m)^  elem_ids = '[^']+'$",
+            "  elem_ids = '54 94'",
+            text,
+        )
+        assert n == 1
+        marker = '    enable_performance_diagnostics = true\n'
+        assert text.count(marker) == 1
+        text = text.replace(
+            marker,
+            marker
+            + '    enable_path_diagnostics = true\n'
+            + "    diagnostic_trace_elements = '54 94'\n"
+            + '    diagnostic_time_begin = 0.01\n'
+            + '    diagnostic_time_end = 0.03\n'
+            + '    diagnostic_max_trace_calls = 2000\n',
+        )
+        text = (
+            '# Dual-IP accepted-path trace: Abaqus 55/IP7 -> MOOSE 54/qp6; '
+            'Abaqus 95/IP1 -> MOOSE 94/qp0.\n'
+            + text
+        )
+        extra_evidence = {
+            'parent_job': json.loads((parent/'manifest.json').read_text())['job_id'],
+            'window_s': [0.01, 0.03],
+            'targets': [
+                {'abaqus_element': 55, 'abaqus_ip': 7, 'moose_element': 54, 'moose_qp': 6,
+                 'full_fe_error_sign': 'positive'},
+                {'abaqus_element': 95, 'abaqus_ip': 1, 'moose_element': 94, 'moose_qp': 0,
+                 'full_fe_error_sign': 'negative'},
+            ],
+            'purpose': 'Locate the first accepted-state strain/history divergence for two opposite-sign DamageT points; observation only',
+        }
+        extra_evidence_name = 'dual-ip-targets.json'
+        change = ('Only shorten the observation horizon to 0.03 s and enable bounded path diagnostics '
+                  'for MOOSE elements 54/94; material, mesh, boundary, loading rate, tolerances and '
+                  'IterationAdaptiveDT behavior remain unchanged')
     elif variant == 'tight-abs':
         text, n = re.subn(r'(?m)^  nl_abs_tol = 1e-8$', '  nl_abs_tol = 1e-13', text)
         assert n == 1
@@ -177,7 +221,7 @@ def build(parent, output, variant, case_name):
         'limitations': 'IP samples are accepted global states only; no failed local states or complete wall-time counters'}
     (inp/'diagnostic-manifest.json').write_text(json.dumps(record,ensure_ascii=False,indent=2)+'\n')
     if extra_evidence:
-        (inp/'replay-targets.json').write_text(json.dumps(extra_evidence,ensure_ascii=False,indent=2)+'\n')
+        (inp/extra_evidence_name).write_text(json.dumps(extra_evidence,ensure_ascii=False,indent=2)+'\n')
     manifest = dict(old, case_name=case_name, input_file=filename,
         input_sha256=sha(inp/filename),
         command='DamSafetyApp-opt -i '+filename,
@@ -191,7 +235,7 @@ if __name__ == '__main__':
     p = argparse.ArgumentParser(description=__doc__)
     p.add_argument('--parent',type=Path,required=True)
     p.add_argument('--output',type=Path,required=True)
-    p.add_argument('--variant',choices=['observe','tight-abs','no-scaling','top-clamp','early-window','dt001','dt0001','replay-path','early-refined-grid','full-short-observe'],required=True)
+    p.add_argument('--variant',choices=['observe','tight-abs','no-scaling','top-clamp','early-window','dt001','dt0001','replay-path','early-refined-grid','full-short-observe','dual-ip-path-trace'],required=True)
     p.add_argument('--case-name',required=True)
     args = p.parse_args()
     result = build(args.parent,args.output,args.variant,args.case_name)

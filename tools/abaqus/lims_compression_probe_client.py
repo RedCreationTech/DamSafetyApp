@@ -41,11 +41,12 @@ def main():
     p=argparse.ArgumentParser();p.add_argument('action',choices=['prepare','submit','status','files','download-all'])
     p.add_argument('--root', required=True, type=Path)
     p.add_argument('--solver-sha', default=SHA)
+    p.add_argument('--ssh-alias', default='demo-process-138')
     a=p.parse_args(); ROOT=a.root.resolve(); SHA=a.solver_sha
     assert len(SHA)==40 and all(c in '0123456789abcdef' for c in SHA)
     if a.action=='prepare':
         assert not (ROOT/'submission-attempt.json').exists()
-        raw=subprocess.check_output(['ssh','-o','BatchMode=yes','-o','ConnectTimeout=8','demo-process-121',
+        raw=subprocess.check_output(['ssh','-o','BatchMode=yes','-o','ConnectTimeout=8',a.ssh_alias,
              'cat /home/kevin/DamSafetyApp-cdp-releases/'+SHA+'/release-audit.json'])
         audit=json.loads(raw);assert audit['solver_sha']==SHA
         (ROOT/'input/release-audit.json').write_bytes(raw)
