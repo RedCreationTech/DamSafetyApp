@@ -267,7 +267,8 @@ TEST(AbaqusCDPSubstepIntegrator, DiagnosticsDoNotChangePlasticMapOrTangent)
   const AbaqusCDPSubstepIntegrator integrator(state,{16,std::abs(target[0])/3,1e-8});
   const auto reference=integrator.integrateLinearized({},target,1e-3,{});
   CDPDiagnostics::Counters costs{};
-  CDPDiagnostics::Context context;context.counters=&costs;
+  std::ostringstream trace;
+  CDPDiagnostics::Context context;context.counters=&costs;context.stream=&trace;context.trace=true;
   CDPDiagnostics::Binding binding(&context);
   const auto observed=integrator.integrateLinearized({},target,1e-3,{});
   EXPECT_EQ(reference.algorithmic_tangent,observed.algorithmic_tangent);
@@ -275,6 +276,17 @@ TEST(AbaqusCDPSubstepIntegrator, DiagnosticsDoNotChangePlasticMapOrTangent)
   EXPECT_EQ(reference.result.final_result.state.backbone.plastic_strain,observed.result.final_result.state.backbone.plastic_strain);
   EXPECT_GT(costs[CDPDiagnostics::AD_JACOBIAN].calls,0u);
   EXPECT_GT(costs[CDPDiagnostics::STATE_CHAIN].calls,0u);
+  const auto trace_text=trace.str();
+  EXPECT_NE(trace_text.find("\"plastic_increment\":"),std::string::npos);
+  EXPECT_NE(trace_text.find("\"delta_kappa_t\":"),std::string::npos);
+  EXPECT_NE(trace_text.find("\"delta_kappa_c\":"),std::string::npos);
+  EXPECT_NE(trace_text.find("\"backbone_tension_weight\":"),std::string::npos);
+  EXPECT_NE(trace_text.find("\"viscous_tension_weight\":"),std::string::npos);
+  EXPECT_NE(trace_text.find("\"active_branch\":"),std::string::npos);
+  EXPECT_NE(trace_text.find("\"backbone_damage_t\":"),std::string::npos);
+  EXPECT_NE(trace_text.find("\"backbone_damage_c\":"),std::string::npos);
+  EXPECT_NE(trace_text.find("\"viscous_damage_t\":"),std::string::npos);
+  EXPECT_NE(trace_text.find("\"viscous_damage_c\":"),std::string::npos);
   const auto before=costs[CDPDiagnostics::LOCAL].calls;
   {
     CDPDiagnostics::Binding excluded(nullptr);

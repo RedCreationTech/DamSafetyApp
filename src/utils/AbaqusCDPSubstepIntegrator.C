@@ -276,12 +276,42 @@ AbaqusCDPSubstepIntegrator::integrateLinearized(const SymmetricTensor & old_tota
         }
         if (CDPDiagnostics::current && CDPDiagnostics::current->trace)
         {
+          const auto plastic_increment = substepDifference(
+              step_result.result.state.backbone.plastic_strain,
+              working_state.backbone.plastic_strain);
+          const double delta_kappa_t =
+              step_result.result.state.backbone.tensile_equivalent_plastic_strain -
+              working_state.backbone.tensile_equivalent_plastic_strain;
+          const double delta_kappa_c =
+              step_result.result.state.backbone.compressive_equivalent_plastic_strain -
+              working_state.backbone.compressive_equivalent_plastic_strain;
+          const double backbone_tension_weight =
+              AbaqusCDPFormula::stressInvariants(step_result.result.backbone.effective_stress)
+                  .tension_weight;
+          const double viscous_tension_weight =
+              AbaqusCDPFormula::stressInvariants(step_result.result.viscous_effective_stress)
+                  .tension_weight;
           std::ostringstream payload;
           payload<<"\"target\":";CDPDiagnostics::json(payload,target);
           payload<<",\"old_state\":";CDPDiagnostics::stateJson(payload,working_state);
           payload<<",\"new_state\":";CDPDiagnostics::stateJson(payload,step_result.result.state);
           payload<<",\"backbone_stress\":";CDPDiagnostics::json(payload,step_result.result.backbone.effective_stress);
           payload<<",\"viscous_stress\":";CDPDiagnostics::json(payload,step_result.result.viscous_effective_stress);
+          payload<<",\"plastic_increment\":";CDPDiagnostics::json(payload,plastic_increment);
+          payload<<",\"delta_kappa_t\":";CDPDiagnostics::json(payload,delta_kappa_t);
+          payload<<",\"delta_kappa_c\":";CDPDiagnostics::json(payload,delta_kappa_c);
+          payload<<",\"backbone_tension_weight\":";CDPDiagnostics::json(payload,backbone_tension_weight);
+          payload<<",\"viscous_tension_weight\":";CDPDiagnostics::json(payload,viscous_tension_weight);
+          payload<<",\"active_branch\":\""<<AbaqusCDPLocalIntegrator::branchName(step_result.result.backbone.active_branch)<<"\"";
+          payload<<",\"backbone_damage_t\":";CDPDiagnostics::json(payload,step_result.result.backbone.backbone_tension_damage);
+          payload<<",\"backbone_damage_c\":";CDPDiagnostics::json(payload,step_result.result.backbone.backbone_compression_damage);
+          payload<<",\"viscous_damage_t\":";CDPDiagnostics::json(payload,step_result.result.state.viscous_tension_damage);
+          payload<<",\"viscous_damage_c\":";CDPDiagnostics::json(payload,step_result.result.state.viscous_compression_damage);
+          payload<<",\"combined_damage\":";CDPDiagnostics::json(payload,step_result.result.damage.damage);
+          payload<<",\"plastic_strain_lag_norm\":";CDPDiagnostics::json(payload,step_result.result.plastic_strain_lag_norm);
+          payload<<",\"tension_damage_lag\":";CDPDiagnostics::json(payload,step_result.result.tension_damage_lag);
+          payload<<",\"compression_damage_lag\":";CDPDiagnostics::json(payload,step_result.result.compression_damage_lag);
+          payload<<",\"dt_over_relaxation_time\":";CDPDiagnostics::json(payload,step_result.result.dt_over_relaxation_time);
           payload<<",\"yield\":";CDPDiagnostics::json(payload,step_result.result.backbone.final_yield);
           payload<<",\"residual\":";CDPDiagnostics::json(payload,step_result.result.backbone.residual_norm);
           payload<<",\"multiplier\":";CDPDiagnostics::json(payload,step_result.result.backbone.plastic_multiplier);
