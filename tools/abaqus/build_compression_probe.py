@@ -125,6 +125,37 @@ def build(parent, output, variant, case_name):
         change = ('Only shorten the observation horizon to 0.03 s and enable bounded path diagnostics '
                   'for MOOSE elements 54/94; material, mesh, boundary, loading rate, tolerances and '
                   'IterationAdaptiveDT behavior remain unchanged')
+    elif variant == 'state-dt-dual-ip':
+        assert "elem_ids = '54 94'" in text
+        material_marker = '    maximum_strain_increment = 2.5e-5\n'
+        assert text.count(material_marker) == 1
+        text = text.replace(
+            material_marker,
+            material_marker + '    maximum_tensile_history_increment = 5e-8\n',
+        )
+        timestep_marker = '    cutback_factor = 0.5\n'
+        assert text.count(timestep_marker) == 1
+        text = text.replace(
+            timestep_marker,
+            timestep_marker
+            + '    timestep_limiting_postprocessor = material_state_dt\n'
+            + '    reject_large_step = true\n'
+            + '    reject_large_step_threshold = 0.999\n',
+        )
+        postprocessor_marker = '[Postprocessors]\n'
+        assert text.count(postprocessor_marker) == 1
+        text = text.replace(
+            postprocessor_marker,
+            postprocessor_marker
+            + '  [material_state_dt]\n'
+            + '    type = MaterialTimeStepPostprocessor\n'
+            + '    maximum_value = 1\n'
+            + '  []\n',
+        )
+        text = '# H07 state-driven tensile-history timestep candidate; default-off code path.\n' + text
+        change = ('Enable only the default-off cdp_kappa_t increment limit at 5e-8 and connect its '
+                  'MOOSE material timestep estimate to IterationAdaptiveDT step rejection; all '
+                  'constitutive equations, tables, mesh, BC/loading and nonlinear tolerances remain unchanged')
     elif variant == 'tight-abs':
         text, n = re.subn(r'(?m)^  nl_abs_tol = 1e-8$', '  nl_abs_tol = 1e-13', text)
         assert n == 1
@@ -235,7 +266,7 @@ if __name__ == '__main__':
     p = argparse.ArgumentParser(description=__doc__)
     p.add_argument('--parent',type=Path,required=True)
     p.add_argument('--output',type=Path,required=True)
-    p.add_argument('--variant',choices=['observe','tight-abs','no-scaling','top-clamp','early-window','dt001','dt0001','replay-path','early-refined-grid','full-short-observe','dual-ip-path-trace'],required=True)
+    p.add_argument('--variant',choices=['observe','tight-abs','no-scaling','top-clamp','early-window','dt001','dt0001','replay-path','early-refined-grid','full-short-observe','dual-ip-path-trace','state-dt-dual-ip'],required=True)
     p.add_argument('--case-name',required=True)
     args = p.parse_args()
     result = build(args.parent,args.output,args.variant,args.case_name)
