@@ -14,6 +14,8 @@ namespace
 constexpr double substep_youngs_modulus = 3.04e10;
 constexpr double substep_poissons_ratio = 0.2;
 const std::string substep_data_dir = "test/tests/cdp_material_table/data/";
+const std::string captured_history_data_dir =
+    "test/tests/cdp_material_table/uniaxial_tension_20260830/";
 
 CDPMaterialTable
 substepReferenceTable()
@@ -23,6 +25,16 @@ substepReferenceTable()
                           substep_data_dir + "tension_stiffening.csv",
                           substep_data_dir + "tension_damage.csv",
                           substep_youngs_modulus);
+}
+
+CDPMaterialTable
+capturedHistoryTable()
+{
+  return CDPMaterialTable(captured_history_data_dir + "compression_hardening.csv",
+                          captured_history_data_dir + "compression_damage.csv",
+                          captured_history_data_dir + "tension_stiffening.csv",
+                          captured_history_data_dir + "tension_damage.csv",
+                          2.97915e10);
 }
 
 AbaqusCDPLocalIntegrator::Parameters
@@ -293,4 +305,60 @@ TEST(AbaqusCDPSubstepIntegrator, DiagnosticsDoNotChangePlasticMapOrTangent)
     integrator.integrateLinearized({},target,1e-3,{});
   }
   EXPECT_EQ(costs[CDPDiagnostics::LOCAL].calls,before);
+}
+
+TEST(AbaqusCDPSubstepIntegrator, ReproducesCapturedFirstMixedHistoryState)
+{
+  const auto table = capturedHistoryTable();
+  const AbaqusCDPLocalIntegrator local(
+      table, {2.97915e10, 0.2, 36.0, 0.1, 1.16, 0.667, 40, 1.0e-9, 1.0e-7, 1.0e-6});
+  const AbaqusCDPStateIntegrator state(local, {0.0, 1.0, 5.0e-4, 1.0e-12});
+  const AbaqusCDPSubstepIntegrator integrator(state, {256, 2.5e-5, 1.0e-8});
+  const AbaqusCDPSubstepIntegrator::SymmetricTensor old_strain = {
+      5.3299999999999995e-05,
+      5.4550000000000005e-05,
+      -2.5200000000000000e-04,
+      6.8250000000002650e-09,
+      -1.7362500000000293e-07,
+      2.6949999999999980e-07};
+  const AbaqusCDPSubstepIntegrator::SymmetricTensor target_strain = {
+      5.5330000000000010e-05,
+      5.6615000000000006e-05,
+      -2.6050000000000004e-04,
+      8.5225000000008130e-09,
+      -1.9431250000000086e-07,
+      2.4759999999999684e-07};
+
+  const auto captured = integrator.integrateLinearized(
+      old_strain, target_strain, 5.000000000000004e-4, {});
+  const auto repeated = integrator.integrateLinearized(
+      old_strain, target_strain, 5.000000000000004e-4, {});
+  const auto & result = captured.result.final_result;
+
+  EXPECT_EQ(captured.result.accepted_substeps, 1u);
+  EXPECT_EQ(result.backbone.active_branch, AbaqusCDPLocalIntegrator::ActiveBranch::MIXED);
+  EXPECT_EQ(captured.algorithmic_tangent, repeated.algorithmic_tangent);
+  EXPECT_EQ(result.state.backbone.plastic_strain,
+            repeated.result.final_result.state.backbone.plastic_strain);
+  EXPECT_NEAR(result.state.backbone.tensile_equivalent_plastic_strain,
+              1.7178914856632633e-8,
+              1.0e-18);
+  EXPECT_NEAR(result.state.backbone.compressive_equivalent_plastic_strain,
+              4.6402351272531570e-7,
+              1.0e-17);
+  EXPECT_NEAR(result.backbone.backbone_tension_damage, 1.491809600909809e-4, 1.0e-14);
+  EXPECT_NEAR(result.backbone.backbone_compression_damage, 1.0516310501558594e-3, 1.0e-13);
+  EXPECT_NEAR(result.state.viscous_tension_damage, 7.459048004549048e-5, 1.0e-14);
+  EXPECT_NEAR(result.state.viscous_compression_damage, 5.258155250779299e-4, 1.0e-14);
+  EXPECT_NEAR(result.backbone.residual_norm, 1.4034050595512285e-12, 1.0e-12);
+
+  const AbaqusCDPSubstepIntegrator::SymmetricTensor expected_effective_stress = {
+      136541.21892040689,
+      168394.9119111658,
+      -7692526.374286844,
+      211.26311168386522,
+      -4816.786551958619,
+      6137.723256429379};
+  for (std::size_t i = 0; i < expected_effective_stress.size(); ++i)
+    EXPECT_NEAR(result.viscous_effective_stress[i], expected_effective_stress[i], 1.0e-6);
 }
