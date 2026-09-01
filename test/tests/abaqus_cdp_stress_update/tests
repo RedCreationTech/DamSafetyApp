@@ -36,4 +36,9 @@
     input = single_hex8_shear.i
     requirement = 'DamSafetyApp shall solve a one-element shear diagnostic with the non-associated CDP flow potential.'
   []
+  [single_hex8_state_timestep_limit]
+    type = RunApp
+    input = single_hex8_state_timestep_limit.i
+    requirement = 'DamSafetyApp shall optionally reject and retry a converged global step when its tensile CDP history increment exceeds a configured bound.'
+  []
 []

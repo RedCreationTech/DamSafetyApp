@@ -33,6 +33,7 @@ public:
 
   bool requiresIsotropicTensor() override { return true; }
   bool isIsotropic() override { return true; }
+  Real computeTimeStepLimit() override;
   TangentCalculationMethod getTangentCalculationMethod() override;
 
 protected:
@@ -57,6 +58,9 @@ private:
 
   const bool _enable_performance_diagnostics;
   const bool _enable_path_diagnostics;
+  const Real _maximum_tensile_history_increment;
+  const Real _minimum_state_timestep_limit;
+  Real _state_timestep_limit;
   CDPDiagnostics::Counters _diagnostic_cost{};
   std::ofstream _diagnostic_trace;
   std::string _diagnostic_cost_file;

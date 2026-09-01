@@ -7,6 +7,7 @@
 #include <exception>
 #include <algorithm>
 #include <cctype>
+#include <limits>
 #include <sstream>
 
 registerMooseObject("DamSafetyApp", AbaqusCDPStressUpdate);
@@ -63,6 +64,18 @@ AbaqusCDPStressUpdate::validParams()
                         "Measure per-material-call elapsed time and expose detailed local solver "
                         "counters as material properties");
   params.addParam<bool>("enable_path_diagnostics",false,"Opt-in complete costs and bounded path/tangent diagnostics");
+  params.addRangeCheckedParam<Real>(
+      "maximum_tensile_history_increment",
+      0.0,
+      "maximum_tensile_history_increment >= 0",
+      "Opt-in upper bound for the accepted cdp_kappa_t increment. A positive value exposes a "
+      "material_timestep_limit for IterationAdaptiveDT/MaterialTimeStepPostprocessor without "
+      "changing the constitutive update.");
+  params.addRangeCheckedParam<Real>(
+      "minimum_state_timestep_limit",
+      1.0e-8,
+      "minimum_state_timestep_limit > 0",
+      "Lower bound for the opt-in tensile-history timestep estimate");
   params.addParam<std::vector<unsigned int>>("diagnostic_trace_elements",{},"MOOSE zero-based element IDs for bounded substep traces");
   params.addParam<Real>("diagnostic_time_begin",0.015,"First time for selected path/tangent samples");
   params.addParam<Real>("diagnostic_time_end",0.05,"Last time for selected path/tangent samples");
@@ -76,6 +89,10 @@ AbaqusCDPStressUpdate::AbaqusCDPStressUpdate(const InputParameters & parameters)
   : StressUpdateBase(parameters),
     _enable_performance_diagnostics(getParam<bool>("enable_performance_diagnostics")),
     _enable_path_diagnostics(getParam<bool>("enable_path_diagnostics")),
+    _maximum_tensile_history_increment(
+        getParam<Real>("maximum_tensile_history_increment")),
+    _minimum_state_timestep_limit(getParam<Real>("minimum_state_timestep_limit")),
+    _state_timestep_limit(std::numeric_limits<Real>::max()),
     _table(getParam<FileName>("compression_hardening_file"),
            getParam<FileName>("compression_damage_file"),
            getParam<FileName>("tension_stiffening_file"),
@@ -188,6 +205,7 @@ AbaqusCDPStressUpdate::initQpStatefulProperties()
   _local_factorizations[_qp] = 0.0;
   _local_backsolves[_qp] = 0.0;
   _integration_microseconds[_qp] = 0.0;
+  _state_timestep_limit = std::numeric_limits<Real>::max();
 }
 
 void
@@ -199,6 +217,13 @@ AbaqusCDPStressUpdate::propagateQpStatefulProperties()
   _viscous_plastic_strain[_qp] = _viscous_plastic_strain_old[_qp];
   _damage_t[_qp] = _damage_t_old[_qp];
   _damage_c[_qp] = _damage_c_old[_qp];
+  _state_timestep_limit = std::numeric_limits<Real>::max();
+}
+
+Real
+AbaqusCDPStressUpdate::computeTimeStepLimit()
+{
+  return _state_timestep_limit;
 }
 
 TangentCalculationMethod
@@ -293,6 +318,18 @@ AbaqusCDPStressUpdate::storeState(const AbaqusCDPSubstepIntegrator::LinearizedRe
   _local_factorizations[_qp] = result.result.total_local_factorizations;
   _local_backsolves[_qp] = result.result.total_local_backsolves;
   _integration_microseconds[_qp] = integration_microseconds;
+  _state_timestep_limit = std::numeric_limits<Real>::max();
+  if (_maximum_tensile_history_increment > 0.0 && _dt > 0.0)
+  {
+    const Real tensile_history_increment = std::max(
+        0.0,
+        state.backbone.tensile_equivalent_plastic_strain -
+            _tensile_equivalent_plastic_strain_old[_qp]);
+    if (tensile_history_increment > _maximum_tensile_history_increment)
+      _state_timestep_limit =
+          std::max(_minimum_state_timestep_limit,
+                   _dt * _maximum_tensile_history_increment / tensile_history_increment);
+  }
 }
 
 void
