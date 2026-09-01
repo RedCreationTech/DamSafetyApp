@@ -25,6 +25,12 @@
 
 具体版本、命令和完成证据见 [`doc/p0/`](doc/p0/)。当前状态不代表求解器已通过工程验收。
 
+## 在其他电脑部署运行
+
+在 Windows（WSL2）或其他已有 MOOSE 开发环境的机器上，从源码编译、验证并运行
+DamSafetyApp，请参阅 [`部署运行.md`](部署运行.md)。该流程不依赖当前
+`192.168.0.138` 计算机。
+
 ## Abaqus 二维转换原型
 
 `tools/abaqus/abaqus2exodus.py` 是从锁定的 `demo-process` 转换器派生的项目内原型，现已支持同一 Part 中混合 `CPS4/CPS4R/CPS3`、二维 sideset，以及 `*Include` 中各向异性节点附加质量的分方向 CSV 导出。
