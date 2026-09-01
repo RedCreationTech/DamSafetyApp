@@ -48,7 +48,9 @@ def main():
         assert not (ROOT/'submission-attempt.json').exists()
         raw=subprocess.check_output(['ssh','-o','BatchMode=yes','-o','ConnectTimeout=8',a.ssh_alias,
              'cat /home/kevin/DamSafetyApp-cdp-releases/'+SHA+'/release-audit.json'])
-        audit=json.loads(raw);assert audit['solver_sha']==SHA
+        audit=json.loads(raw)
+        actual_sha=audit.get('solver_sha') or audit.get('dam_safety_app_sha')
+        assert actual_sha==SHA,(actual_sha,SHA)
         (ROOT/'input/release-audit.json').write_bytes(raw)
         s=json.loads((ROOT/'submission.json').read_text())
         s['extra_files']=[f for f in s['extra_files'] if f['name']!='release-audit.json']
