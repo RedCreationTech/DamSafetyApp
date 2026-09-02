@@ -41,4 +41,10 @@
     input = single_hex8_state_timestep_limit.i
     requirement = 'DamSafetyApp shall optionally reject and retry a converged global step when its tensile CDP history increment exceeds a configured bound.'
   []
+  [single_hex8_tension_damage_secant_tangent]
+    type = RunApp
+    input = single_hex8_tension.i
+    cli_args = 'Materials/cdp/use_damage_t_secant_tangent=true Outputs/file_base=single_hex8_tension_damage_secant_tangent_out'
+    requirement = 'DamSafetyApp shall optionally return a degraded elastic secant tangent while tensile damage grows without changing the constitutive state-update algorithm.'
+  []
 []

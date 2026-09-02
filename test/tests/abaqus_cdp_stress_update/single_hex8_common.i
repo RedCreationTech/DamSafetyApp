@@ -36,6 +36,10 @@
     order = CONSTANT
     family = MONOMIAL
   []
+  [damage_t_secant_tangent_active]
+    order = CONSTANT
+    family = MONOMIAL
+  []
   [kappa_t]
     order = CONSTANT
     family = MONOMIAL
@@ -105,6 +109,12 @@
     type = MaterialRealAux
     variable = stiffness_factor
     property = cdp_stiffness_factor
+    execute_on = 'initial timestep_end'
+  []
+  [damage_t_secant_tangent_active]
+    type = MaterialRealAux
+    variable = damage_t_secant_tangent_active
+    property = cdp_damage_t_secant_tangent_active
     execute_on = 'initial timestep_end'
   []
   [kappa_t]
@@ -240,6 +250,11 @@
   [average_stiffness_factor]
     type = ElementAverageValue
     variable = stiffness_factor
+  []
+  [maximum_damage_t_secant_tangent_active]
+    type = ElementExtremeValue
+    variable = damage_t_secant_tangent_active
+    value_type = max
   []
   [average_kappa_t]
     type = ElementAverageValue

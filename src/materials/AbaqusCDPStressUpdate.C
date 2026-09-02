@@ -64,6 +64,12 @@ AbaqusCDPStressUpdate::validParams()
                         "Measure per-material-call elapsed time and expose detailed local solver "
                         "counters as material properties");
   params.addParam<bool>("enable_path_diagnostics",false,"Opt-in complete costs and bounded path/tangent diagnostics");
+  params.addParam<bool>(
+      "use_damage_t_secant_tangent",
+      false,
+      "Diagnostic-only tangent switch. When enabled, a material evaluation that increases "
+      "DamageT returns cdp_stiffness_factor times the undamaged elastic tensor to the global "
+      "Newton solve. The stress and all constitutive state updates remain unchanged.");
   params.addRangeCheckedParam<Real>(
       "maximum_tensile_history_increment",
       0.0,
@@ -89,6 +95,7 @@ AbaqusCDPStressUpdate::AbaqusCDPStressUpdate(const InputParameters & parameters)
   : StressUpdateBase(parameters),
     _enable_performance_diagnostics(getParam<bool>("enable_performance_diagnostics")),
     _enable_path_diagnostics(getParam<bool>("enable_path_diagnostics")),
+    _use_damage_t_secant_tangent(getParam<bool>("use_damage_t_secant_tangent")),
     _maximum_tensile_history_increment(
         getParam<Real>("maximum_tensile_history_increment")),
     _minimum_state_timestep_limit(getParam<Real>("minimum_state_timestep_limit")),
@@ -138,6 +145,8 @@ AbaqusCDPStressUpdate::AbaqusCDPStressUpdate(const InputParameters & parameters)
     _damage_c_old(getMaterialPropertyOld<Real>(_base_name + "DamageC")),
     _combined_damage(declareProperty<Real>(_base_name + "cdp_combined_damage")),
     _stiffness_factor(declareProperty<Real>(_base_name + "cdp_stiffness_factor")),
+    _damage_t_secant_tangent_active(
+        declareProperty<Real>(_base_name + "cdp_damage_t_secant_tangent_active")),
     _local_iterations(declareProperty<Real>(_base_name + "cdp_local_iterations")),
     _jacobian_fallbacks(declareProperty<Real>(_base_name + "cdp_jacobian_fallbacks")),
     _accepted_substeps(declareProperty<Real>(_base_name + "cdp_accepted_substeps")),
@@ -194,6 +203,7 @@ AbaqusCDPStressUpdate::initQpStatefulProperties()
   _damage_c[_qp] = 0.0;
   _combined_damage[_qp] = 0.0;
   _stiffness_factor[_qp] = 1.0;
+  _damage_t_secant_tangent_active[_qp] = 0.0;
   _local_iterations[_qp] = 0.0;
   _jacobian_fallbacks[_qp] = 0.0;
   _accepted_substeps[_qp] = 1.0;
@@ -217,6 +227,7 @@ AbaqusCDPStressUpdate::propagateQpStatefulProperties()
   _viscous_plastic_strain[_qp] = _viscous_plastic_strain_old[_qp];
   _damage_t[_qp] = _damage_t_old[_qp];
   _damage_c[_qp] = _damage_c_old[_qp];
+  _damage_t_secant_tangent_active[_qp] = 0.0;
   _state_timestep_limit = std::numeric_limits<Real>::max();
 }
 
@@ -338,7 +349,7 @@ AbaqusCDPStressUpdate::updateState(RankTwoTensor & strain_increment,
                                    const RankTwoTensor & /*rotation_increment*/,
                                    RankTwoTensor & stress_new,
                                    const RankTwoTensor & /*stress_old*/,
-                                   const RankFourTensor & /*elasticity_tensor*/,
+                                   const RankFourTensor & elasticity_tensor,
                                    const RankTwoTensor & elastic_strain_old,
                                    const bool compute_full_tangent_operator,
                                    RankFourTensor & tangent_operator)
@@ -402,8 +413,21 @@ AbaqusCDPStressUpdate::updateState(RankTwoTensor & strain_increment,
                                      old_state.viscous_plastic_strain[i];
     inelastic_strain_increment = toRankTwo(inelastic_increment_array);
     strain_increment -= inelastic_strain_increment;
+    const bool damage_t_secant_tangent_active =
+        _use_damage_t_secant_tangent &&
+        result.result.final_result.state.viscous_tension_damage >
+            old_state.viscous_tension_damage + 1.0e-12;
+    _damage_t_secant_tangent_active[_qp] = damage_t_secant_tangent_active ? 1.0 : 0.0;
     if (compute_full_tangent_operator)
-      assignTangent(result.algorithmic_tangent, tangent_operator);
+    {
+      if (damage_t_secant_tangent_active)
+      {
+        tangent_operator = elasticity_tensor;
+        tangent_operator *= result.result.final_result.damage.stiffness_factor;
+      }
+      else
+        assignTangent(result.algorithmic_tangent, tangent_operator);
+    }
     storeState(result, integration_microseconds);
   }
   catch (const std::exception & error)

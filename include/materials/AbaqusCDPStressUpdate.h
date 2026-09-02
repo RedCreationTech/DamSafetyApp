@@ -58,6 +58,7 @@ private:
 
   const bool _enable_performance_diagnostics;
   const bool _enable_path_diagnostics;
+  const bool _use_damage_t_secant_tangent;
   const Real _maximum_tensile_history_increment;
   const Real _minimum_state_timestep_limit;
   Real _state_timestep_limit;
@@ -86,6 +87,7 @@ private:
 
   MaterialProperty<Real> & _combined_damage;
   MaterialProperty<Real> & _stiffness_factor;
+  MaterialProperty<Real> & _damage_t_secant_tangent_active;
   MaterialProperty<Real> & _local_iterations;
   MaterialProperty<Real> & _jacobian_fallbacks;
   MaterialProperty<Real> & _accepted_substeps;
