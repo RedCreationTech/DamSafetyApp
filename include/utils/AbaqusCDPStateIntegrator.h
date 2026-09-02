@@ -67,6 +67,10 @@ public:
                                        double time_step,
                                        const State & old_state) const;
 
+  /** Undamaged elastic stress associated with total_strain and backbone plastic history. */
+  SymmetricTensor backboneEffectiveStress(const SymmetricTensor & total_strain,
+                                          const State & state) const;
+
 private:
   Result assembleResult(const SymmetricTensor & total_strain,
                         double time_step,

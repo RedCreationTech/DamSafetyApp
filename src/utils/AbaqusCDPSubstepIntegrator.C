@@ -276,6 +276,11 @@ AbaqusCDPSubstepIntegrator::integrateLinearized(const SymmetricTensor & old_tota
         }
         if (CDPDiagnostics::current && CDPDiagnostics::current->trace)
         {
+          const double start_fraction = static_cast<double>(i - 1) / substeps;
+          const auto start_target =
+              substepInterpolate(old_total_strain, total_increment, start_fraction);
+          const auto start_backbone_stress =
+              _state_integrator.backboneEffectiveStress(start_target, working_state);
           const auto plastic_increment = substepDifference(
               step_result.result.state.backbone.plastic_strain,
               working_state.backbone.plastic_strain);
@@ -285,22 +290,54 @@ AbaqusCDPSubstepIntegrator::integrateLinearized(const SymmetricTensor & old_tota
           const double delta_kappa_c =
               step_result.result.state.backbone.compressive_equivalent_plastic_strain -
               working_state.backbone.compressive_equivalent_plastic_strain;
-          const double backbone_tension_weight =
-              AbaqusCDPFormula::stressInvariants(step_result.result.backbone.effective_stress)
-                  .tension_weight;
+          const auto start_invariants = AbaqusCDPFormula::stressInvariants(start_backbone_stress);
+          const auto end_invariants =
+              AbaqusCDPFormula::stressInvariants(step_result.result.backbone.effective_stress);
+          const auto plastic_increment_principal =
+              AbaqusCDPFormula::stressInvariants(plastic_increment).principal_stress;
+          const double positive_plastic_principal_increment =
+              std::max(0.0, plastic_increment_principal[2]);
+          const double start_backbone_tension_weight = start_invariants.tension_weight;
+          const double backbone_tension_weight = end_invariants.tension_weight;
+          const bool maximum_principal_zero_crossing =
+              (start_invariants.maximum_principal_stress < 0.0 &&
+               end_invariants.maximum_principal_stress >= 0.0) ||
+              (start_invariants.maximum_principal_stress > 0.0 &&
+               end_invariants.maximum_principal_stress <= 0.0);
+          double maximum_principal_zero_crossing_fraction = -1.0;
+          if (maximum_principal_zero_crossing)
+          {
+            const double denominator = start_invariants.maximum_principal_stress -
+                                       end_invariants.maximum_principal_stress;
+            if (std::abs(denominator) > 0.0)
+              maximum_principal_zero_crossing_fraction =
+                  start_invariants.maximum_principal_stress / denominator;
+          }
           const double viscous_tension_weight =
               AbaqusCDPFormula::stressInvariants(step_result.result.viscous_effective_stress)
                   .tension_weight;
           std::ostringstream payload;
           payload<<"\"target\":";CDPDiagnostics::json(payload,target);
+          payload<<",\"start_target\":";CDPDiagnostics::json(payload,start_target);
           payload<<",\"old_state\":";CDPDiagnostics::stateJson(payload,working_state);
           payload<<",\"new_state\":";CDPDiagnostics::stateJson(payload,step_result.result.state);
+          payload<<",\"history_integration_rule\":\"end\"";
+          payload<<",\"start_backbone_stress\":";CDPDiagnostics::json(payload,start_backbone_stress);
           payload<<",\"backbone_stress\":";CDPDiagnostics::json(payload,step_result.result.backbone.effective_stress);
+          payload<<",\"start_principal_stress\":";CDPDiagnostics::json(payload,start_invariants.principal_stress);
+          payload<<",\"end_principal_stress\":";CDPDiagnostics::json(payload,end_invariants.principal_stress);
           payload<<",\"viscous_stress\":";CDPDiagnostics::json(payload,step_result.result.viscous_effective_stress);
           payload<<",\"plastic_increment\":";CDPDiagnostics::json(payload,plastic_increment);
+          payload<<",\"plastic_increment_principal\":";CDPDiagnostics::json(payload,plastic_increment_principal);
+          payload<<",\"positive_plastic_principal_increment\":";CDPDiagnostics::json(payload,positive_plastic_principal_increment);
           payload<<",\"delta_kappa_t\":";CDPDiagnostics::json(payload,delta_kappa_t);
+          payload<<",\"delta_kappa_t_end_rule\":";CDPDiagnostics::json(payload,delta_kappa_t);
           payload<<",\"delta_kappa_c\":";CDPDiagnostics::json(payload,delta_kappa_c);
+          payload<<",\"start_backbone_tension_weight\":";CDPDiagnostics::json(payload,start_backbone_tension_weight);
           payload<<",\"backbone_tension_weight\":";CDPDiagnostics::json(payload,backbone_tension_weight);
+          payload<<",\"end_backbone_tension_weight\":";CDPDiagnostics::json(payload,backbone_tension_weight);
+          payload<<",\"maximum_principal_zero_crossing\":"<<(maximum_principal_zero_crossing ? "true" : "false");
+          payload<<",\"maximum_principal_zero_crossing_fraction\":";CDPDiagnostics::json(payload,maximum_principal_zero_crossing_fraction);
           payload<<",\"viscous_tension_weight\":";CDPDiagnostics::json(payload,viscous_tension_weight);
           payload<<",\"active_branch\":\""<<AbaqusCDPLocalIntegrator::branchName(step_result.result.backbone.active_branch)<<"\"";
           payload<<",\"backbone_damage_t\":";CDPDiagnostics::json(payload,step_result.result.backbone.backbone_tension_damage);

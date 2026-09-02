@@ -93,6 +93,14 @@ AbaqusCDPStateIntegrator::integrate(const SymmetricTensor & total_strain,
   return assembleResult(total_strain, time_step, old_state, backbone);
 }
 
+AbaqusCDPStateIntegrator::SymmetricTensor
+AbaqusCDPStateIntegrator::backboneEffectiveStress(const SymmetricTensor & total_strain,
+                                                  const State & state) const
+{
+  return _backbone_integrator.elasticStress(
+      subtractStateTensor(total_strain, state.backbone.plastic_strain));
+}
+
 AbaqusCDPStateIntegrator::Result
 AbaqusCDPStateIntegrator::assembleResult(
     const SymmetricTensor & total_strain,
