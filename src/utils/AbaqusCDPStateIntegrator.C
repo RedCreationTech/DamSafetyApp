@@ -122,17 +122,33 @@ AbaqusCDPStateIntegrator::aggregateBackboneHistory(
     const AbaqusCDPLocalIntegrator::State & old_backbone_state,
     const AbaqusCDPLocalIntegrator::Result & substepped_backbone) const
 {
+  const double tension_weight =
+      AbaqusCDPFormula::stressInvariants(substepped_backbone.effective_stress).tension_weight;
+  return aggregateBackboneHistory(
+      old_backbone_state, substepped_backbone, tension_weight, 1.0 - tension_weight);
+}
+
+AbaqusCDPLocalIntegrator::Result
+AbaqusCDPStateIntegrator::aggregateBackboneHistory(
+    const AbaqusCDPLocalIntegrator::State & old_backbone_state,
+    const AbaqusCDPLocalIntegrator::Result & substepped_backbone,
+    const double tensile_path_weight,
+    const double compressive_path_weight) const
+{
+  if (!std::isfinite(tensile_path_weight) || tensile_path_weight < 0.0 ||
+      tensile_path_weight > 1.0 || !std::isfinite(compressive_path_weight) ||
+      compressive_path_weight < 0.0 || compressive_path_weight > 1.0)
+    stateIntegrationError("accepted-step history path weights must be finite and in [0, 1]");
+
   auto aggregated = substepped_backbone;
   const auto plastic_increment = subtractStateTensor(
       substepped_backbone.state.plastic_strain, old_backbone_state.plastic_strain);
   const auto plastic_principal =
       AbaqusCDPFormula::stressInvariants(plastic_increment).principal_stress;
-  const double tension_weight =
-      AbaqusCDPFormula::stressInvariants(substepped_backbone.effective_stress).tension_weight;
   const double tensile_increment =
-      tension_weight * std::max(0.0, plastic_principal.back());
+      tensile_path_weight * std::max(0.0, plastic_principal.back());
   const double compressive_increment =
-      (1.0 - tension_weight) * std::max(0.0, -plastic_principal.front());
+      compressive_path_weight * std::max(0.0, -plastic_principal.front());
 
   aggregated.state.tensile_equivalent_plastic_strain =
       old_backbone_state.tensile_equivalent_plastic_strain + tensile_increment;

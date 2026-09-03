@@ -60,6 +60,47 @@ isPowerOfTwo(const unsigned int value)
 {
   return value != 0 && (value & (value - 1)) == 0;
 }
+
+struct HistoryPathAccumulator
+{
+  double tensile_measure = 0.0;
+  double tensile_weighted_measure = 0.0;
+  double compressive_measure = 0.0;
+  double compressive_weighted_measure = 0.0;
+
+  void add(const SymmetricTensor & old_plastic_strain,
+           const SymmetricTensor & new_plastic_strain,
+           const SymmetricTensor & start_effective_stress,
+           const SymmetricTensor & end_effective_stress)
+  {
+    const auto plastic_increment = substepDifference(new_plastic_strain, old_plastic_strain);
+    const auto plastic_principal =
+        AbaqusCDPFormula::stressInvariants(plastic_increment).principal_stress;
+    const double positive_measure = std::max(0.0, plastic_principal.back());
+    const double negative_measure = std::max(0.0, -plastic_principal.front());
+    const double start_weight =
+        AbaqusCDPFormula::stressInvariants(start_effective_stress).tension_weight;
+    const double end_weight =
+        AbaqusCDPFormula::stressInvariants(end_effective_stress).tension_weight;
+    const double average_weight = 0.5 * (start_weight + end_weight);
+
+    tensile_measure += positive_measure;
+    tensile_weighted_measure += average_weight * positive_measure;
+    compressive_measure += negative_measure;
+    compressive_weighted_measure += (1.0 - average_weight) * negative_measure;
+  }
+
+  double tensileWeight(const double fallback) const
+  {
+    return tensile_measure > 0.0 ? tensile_weighted_measure / tensile_measure : fallback;
+  }
+
+  double compressiveWeight(const double fallback) const
+  {
+    return compressive_measure > 0.0 ? compressive_weighted_measure / compressive_measure
+                                     : fallback;
+  }
+};
 }
 
 AbaqusCDPSubstepIntegrator::AbaqusCDPSubstepIntegrator(
@@ -79,6 +120,10 @@ AbaqusCDPSubstepIntegrator::AbaqusCDPSubstepIntegrator(
       !_parameters.defer_viscous_update_to_global_step)
     substepError("aggregate_backbone_history_to_global_step requires "
                  "defer_viscous_update_to_global_step");
+  if (_parameters.integrate_backbone_history_weights_over_substeps &&
+      !_parameters.aggregate_backbone_history_to_global_step)
+    substepError("integrate_backbone_history_weights_over_substeps requires "
+                 "aggregate_backbone_history_to_global_step");
 }
 
 AbaqusCDPSubstepIntegrator::Result
@@ -118,6 +163,9 @@ AbaqusCDPSubstepIntegrator::integrate(const SymmetricTensor & old_total_strain,
     State working_state = old_state;
     std::optional<AbaqusCDPStateIntegrator::Result> final_result;
     std::optional<AbaqusCDPLocalIntegrator::Result> final_backbone;
+    HistoryPathAccumulator history_path;
+    SymmetricTensor previous_effective_stress =
+        _state_integrator.backboneEffectiveStress(old_total_strain, old_state);
     unsigned int total_local_iterations = 0;
     unsigned int total_jacobian_fallbacks = 0;
     unsigned int total_automatic_jacobian_evaluations = 0;
@@ -135,6 +183,7 @@ AbaqusCDPSubstepIntegrator::integrate(const SymmetricTensor & old_total_strain,
       {
         if (_parameters.defer_viscous_update_to_global_step)
         {
+          const auto old_backbone = working_state.backbone;
           auto backbone =
               _state_integrator.integrateBackbone(target, working_state.backbone);
           total_local_iterations += backbone.iterations;
@@ -145,6 +194,12 @@ AbaqusCDPSubstepIntegrator::integrate(const SymmetricTensor & old_total_strain,
               backbone.finite_difference_jacobian_evaluations;
           total_local_factorizations += backbone.local_factorizations;
           total_local_backsolves += backbone.local_backsolves;
+          if (_parameters.integrate_backbone_history_weights_over_substeps)
+            history_path.add(old_backbone.plastic_strain,
+                             backbone.state.plastic_strain,
+                             previous_effective_stress,
+                             backbone.effective_stress);
+          previous_effective_stress = backbone.effective_stress;
           working_state.backbone = backbone.state;
           final_backbone = std::move(backbone);
         }
@@ -178,8 +233,21 @@ AbaqusCDPSubstepIntegrator::integrate(const SymmetricTensor & old_total_strain,
       try
       {
         if (_parameters.aggregate_backbone_history_to_global_step)
-          *final_backbone = _state_integrator.aggregateBackboneHistory(
-              old_state.backbone, *final_backbone);
+        {
+          if (_parameters.integrate_backbone_history_weights_over_substeps)
+          {
+            const double final_tension_weight =
+                AbaqusCDPFormula::stressInvariants(final_backbone->effective_stress).tension_weight;
+            *final_backbone = _state_integrator.aggregateBackboneHistory(
+                old_state.backbone,
+                *final_backbone,
+                history_path.tensileWeight(final_tension_weight),
+                history_path.compressiveWeight(1.0 - final_tension_weight));
+          }
+          else
+            *final_backbone = _state_integrator.aggregateBackboneHistory(
+                old_state.backbone, *final_backbone);
+        }
         final_result = _state_integrator.assembleBackboneResult(
             new_total_strain, time_step, old_state, *final_backbone);
       }

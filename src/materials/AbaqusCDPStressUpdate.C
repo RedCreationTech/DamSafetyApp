@@ -74,6 +74,14 @@ AbaqusCDPStressUpdate::validParams()
       "and final effective-stress weight. Requires defer_viscous_update_to_global_step=true. "
       "The current diagnostic uses a numerical consistent tangent and is not a production "
       "performance candidate.");
+  params.addParam<bool>(
+      "integrate_backbone_history_weights_over_substeps",
+      false,
+      "Diagnostic-only refinement of aggregate_backbone_history_to_global_step. The accepted "
+      "step still applies the principal value of the total plastic-strain increment exactly "
+      "once, while its tensile/compressive weights are plastic-measure-weighted trapezoidal "
+      "averages of the return-map substep path. This adds no point-specific scale factor and "
+      "requires aggregate_backbone_history_to_global_step=true.");
   params.addParam<bool>("enable_performance_diagnostics",
                         false,
                         "Measure per-material-call elapsed time and expose detailed local solver "
@@ -141,7 +149,8 @@ AbaqusCDPStressUpdate::AbaqusCDPStressUpdate(const InputParameters & parameters)
                          getParam<Real>("maximum_strain_increment"),
                          getParam<Real>("reference_tangent_perturbation"),
                          getParam<bool>("defer_viscous_update_to_global_step"),
-                         getParam<bool>("aggregate_backbone_history_to_global_step")}),
+                         getParam<bool>("aggregate_backbone_history_to_global_step"),
+                         getParam<bool>("integrate_backbone_history_weights_over_substeps")}),
     _backbone_plastic_strain(
         declareProperty<RankTwoTensor>(_base_name + "cdp_backbone_plastic_strain")),
     _backbone_plastic_strain_old(

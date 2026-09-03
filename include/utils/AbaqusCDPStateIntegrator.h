@@ -87,6 +87,17 @@ public:
       const AbaqusCDPLocalIntegrator::Result & substepped_backbone) const;
 
   /**
+   * Recompute the accepted-step histories with independently integrated
+   * tensile and compressive path weights. The weights are dimensionless and
+   * must lie in [0, 1].
+   */
+  AbaqusCDPLocalIntegrator::Result aggregateBackboneHistory(
+      const AbaqusCDPLocalIntegrator::State & old_backbone_state,
+      const AbaqusCDPLocalIntegrator::Result & substepped_backbone,
+      double tensile_path_weight,
+      double compressive_path_weight) const;
+
+  /**
    * Assemble viscous plastic strain, viscous damage, and Cauchy stress from an
    * already-integrated backbone. These entry points allow a caller to use
    * material substeps for the inviscid return map while committing the

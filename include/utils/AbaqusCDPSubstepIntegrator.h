@@ -25,6 +25,7 @@ public:
     double tangent_perturbation = 1.0e-8;
     bool defer_viscous_update_to_global_step = false;
     bool aggregate_backbone_history_to_global_step = false;
+    bool integrate_backbone_history_weights_over_substeps = false;
   };
 
   struct Result

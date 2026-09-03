@@ -77,6 +77,16 @@ substepScale(const AbaqusCDPSubstepIntegrator::SymmetricTensor & tensor, const d
     result[i] = factor * tensor[i];
   return result;
 }
+
+AbaqusCDPSubstepIntegrator::SymmetricTensor
+substepDifference(const AbaqusCDPSubstepIntegrator::SymmetricTensor & left,
+                  const AbaqusCDPSubstepIntegrator::SymmetricTensor & right)
+{
+  AbaqusCDPSubstepIntegrator::SymmetricTensor result;
+  for (std::size_t i = 0; i < result.size(); ++i)
+    result[i] = left[i] - right[i];
+  return result;
+}
 }
 
 TEST(AbaqusCDPSubstepIntegrator, ProactiveBinarySubstepsMatchManualSequentialIntegration)
@@ -240,6 +250,89 @@ TEST(AbaqusCDPSubstepIntegrator, AggregatedBackboneHistoryReferenceTangentMatche
     EXPECT_NEAR(predicted[i], measured[i], 1.0e-2 * std::max(1.0, std::abs(measured[i])));
 }
 
+TEST(AbaqusCDPSubstepIntegrator, AcceptedStepHistoryUsesPlasticWeightedSubstepPathWeights)
+{
+  const auto table = capturedHistoryTable();
+  const AbaqusCDPLocalIntegrator local(
+      table, {2.97915e10, 0.2, 36.0, 0.1, 1.16, 0.667, 40, 1.0e-9, 1.0e-7, 1.0e-6});
+  const AbaqusCDPStateIntegrator state_integrator(local, {0.0, 1.0, 5.0e-4, 1.0e-12});
+  const AbaqusCDPSubstepIntegrator::SymmetricTensor old_strain = {
+      5.3299999999999995e-05,
+      5.4550000000000005e-05,
+      -2.5200000000000000e-04,
+      6.8250000000002650e-09,
+      -1.7362500000000293e-07,
+      2.6949999999999980e-07};
+  const AbaqusCDPSubstepIntegrator::SymmetricTensor target_strain = {
+      7.360602500000001e-05,
+      7.517099000000002e-05,
+      -3.366179300000000e-04,
+      2.3822382499999515e-08,
+      -3.804546000000022e-07,
+      5.034524500000326e-08};
+  const auto total_increment = substepDifference(target_strain, old_strain);
+  const double strain_limit =
+      *std::max_element(total_increment.begin(), total_increment.end(), [](double left, double right) {
+        return std::abs(left) < std::abs(right);
+      }) /
+      3.0;
+  const AbaqusCDPSubstepIntegrator path_integrated(
+      state_integrator, {16, std::abs(strain_limit), 1.0e-8, true, true, true});
+
+  const auto result = path_integrated.integrate(old_strain, target_strain, 1.0e-2, {});
+  EXPECT_EQ(result.accepted_substeps, 4u);
+
+  AbaqusCDPLocalIntegrator::State working;
+  std::optional<AbaqusCDPLocalIntegrator::Result> final_backbone;
+  AbaqusCDPSubstepIntegrator::SymmetricTensor previous_effective_stress =
+      state_integrator.backboneEffectiveStress(old_strain, {});
+  double tensile_measure = 0.0;
+  double tensile_weighted_measure = 0.0;
+  double compressive_measure = 0.0;
+  double compressive_weighted_measure = 0.0;
+  for (unsigned int i = 1; i <= 4; ++i)
+  {
+    auto target = old_strain;
+    for (std::size_t component = 0; component < target.size(); ++component)
+      target[component] += static_cast<double>(i) / 4.0 * total_increment[component];
+    const auto previous = working;
+    final_backbone = state_integrator.integrateBackbone(target, working);
+    const auto plastic_increment =
+        substepDifference(final_backbone->state.plastic_strain, previous.plastic_strain);
+    const auto plastic_principal =
+        AbaqusCDPFormula::stressInvariants(plastic_increment).principal_stress;
+    const double positive_measure = std::max(0.0, plastic_principal.back());
+    const double negative_measure = std::max(0.0, -plastic_principal.front());
+    const double start_weight =
+        AbaqusCDPFormula::stressInvariants(previous_effective_stress).tension_weight;
+    const double end_weight =
+        AbaqusCDPFormula::stressInvariants(final_backbone->effective_stress).tension_weight;
+    const double average_weight = 0.5 * (start_weight + end_weight);
+    tensile_measure += positive_measure;
+    tensile_weighted_measure += average_weight * positive_measure;
+    compressive_measure += negative_measure;
+    compressive_weighted_measure += (1.0 - average_weight) * negative_measure;
+    previous_effective_stress = final_backbone->effective_stress;
+    working = final_backbone->state;
+  }
+  ASSERT_TRUE(final_backbone.has_value());
+  ASSERT_GT(tensile_measure, 0.0);
+  ASSERT_GT(compressive_measure, 0.0);
+  const auto expected_backbone = state_integrator.aggregateBackboneHistory(
+      {},
+      *final_backbone,
+      tensile_weighted_measure / tensile_measure,
+      compressive_weighted_measure / compressive_measure);
+  const auto expected =
+      state_integrator.assembleBackboneResult(target_strain, 1.0e-2, {}, expected_backbone);
+
+  EXPECT_DOUBLE_EQ(result.final_result.state.backbone.tensile_equivalent_plastic_strain,
+                   expected.state.backbone.tensile_equivalent_plastic_strain);
+  EXPECT_DOUBLE_EQ(result.final_result.state.backbone.compressive_equivalent_plastic_strain,
+                   expected.state.backbone.compressive_equivalent_plastic_strain);
+  EXPECT_EQ(result.final_result.cauchy_stress, expected.cauchy_stress);
+}
+
 TEST(AbaqusCDPSubstepIntegrator, AggregatedBackboneHistoryRequiresDeferredViscousState)
 {
   const auto table = substepReferenceTable();
@@ -247,6 +340,9 @@ TEST(AbaqusCDPSubstepIntegrator, AggregatedBackboneHistoryRequiresDeferredViscou
   const AbaqusCDPStateIntegrator state_integrator(local, substepStateParameters(5.0e-4));
   EXPECT_THROW(AbaqusCDPSubstepIntegrator(state_integrator, {16, 0.0, 1.0e-8, false, true}),
                std::runtime_error);
+  EXPECT_THROW(
+      AbaqusCDPSubstepIntegrator(state_integrator, {16, 0.0, 1.0e-8, true, false, true}),
+      std::runtime_error);
 }
 
 TEST(AbaqusCDPSubstepIntegrator, ExhaustedCutbacksLeaveCallerStateUntouched)
