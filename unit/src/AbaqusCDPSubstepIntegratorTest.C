@@ -227,7 +227,7 @@ TEST(AbaqusCDPSubstepIntegrator, AggregatedBackboneHistoryUsesAcceptedStepPlasti
   EXPECT_EQ(result.final_result.cauchy_stress, expected.cauchy_stress);
 }
 
-TEST(AbaqusCDPSubstepIntegrator, AggregatedBackboneHistoryReferenceTangentMatchesDirection)
+TEST(AbaqusCDPSubstepIntegrator, AggregatedBackboneHistoryAlgorithmicTangentMatchesDirection)
 {
   const auto table = substepReferenceTable();
   const AbaqusCDPLocalIntegrator local(table, substepLocalParameters());
@@ -248,6 +248,31 @@ TEST(AbaqusCDPSubstepIntegrator, AggregatedBackboneHistoryReferenceTangentMatche
   EXPECT_EQ(algorithmic.result.accepted_substeps, 4u);
   for (std::size_t i = 0; i < 6; ++i)
     EXPECT_NEAR(predicted[i], measured[i], 1.0e-2 * std::max(1.0, std::abs(measured[i])));
+}
+
+TEST(AbaqusCDPSubstepIntegrator, AggregatedBackboneHistoryTangentDoesNotReplayWholeMap)
+{
+  const auto table = substepReferenceTable();
+  const AbaqusCDPLocalIntegrator local(table, substepLocalParameters());
+  const AbaqusCDPStateIntegrator state_integrator(local, substepStateParameters(5.0e-4));
+  const double initial_tension =
+      table.responseByEquivalentPlasticStrain(CDPMaterialTable::Branch::TENSION, 0.0).stress.value;
+  const auto target = substepUniaxialElasticStrain(1.05 * initial_tension);
+  const AbaqusCDPSubstepIntegrator integrator(
+      state_integrator, {16, std::abs(target[0]) / 3.0, 1.0e-8, true, true});
+  CDPDiagnostics::Counters costs = {};
+  CDPDiagnostics::Context context;
+  context.counters = &costs;
+
+  {
+    CDPDiagnostics::Binding binding(&context);
+    const auto result = integrator.integrateLinearized({}, target, 1.0e-3, {});
+    EXPECT_EQ(result.result.accepted_substeps, 4u);
+  }
+
+  EXPECT_EQ(costs[CDPDiagnostics::LOCAL_LINEARIZED].calls, 4u);
+  EXPECT_EQ(costs[CDPDiagnostics::PARTITION].calls, 1u);
+  EXPECT_GT(costs[CDPDiagnostics::STATE_CHAIN].calls, 0u);
 }
 
 TEST(AbaqusCDPSubstepIntegrator, AcceptedStepHistoryUsesPlasticWeightedSubstepPathWeights)

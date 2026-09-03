@@ -5,11 +5,12 @@
 #include <array>
 
 /**
- * Transactional binary substepping and numerical reference tangent for B-009A.
+ * Transactional binary substepping and chained algorithmic tangent for B-009A.
  *
  * This class differentiates the complete discrete material-point map. The
- * numerical matrix is a correctness reference, not the B-009B production
- * tangent intended for full-model performance.
+ * numerical matrix remains available as a correctness reference. Deferred
+ * viscous and accepted-step end-weight history modes use the production
+ * chained tangent intended for full-model performance.
  */
 class AbaqusCDPSubstepIntegrator
 {

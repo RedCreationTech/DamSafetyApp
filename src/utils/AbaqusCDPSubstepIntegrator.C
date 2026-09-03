@@ -55,6 +55,43 @@ maximumAbsoluteComponent(const SymmetricTensor & tensor)
   return result;
 }
 
+double
+positivePrincipalMeasure(const SymmetricTensor & tensor)
+{
+  return std::max(0.0, AbaqusCDPFormula::stressInvariants(tensor).principal_stress.back());
+}
+
+double
+negativePrincipalMeasure(const SymmetricTensor & tensor)
+{
+  return std::max(0.0, -AbaqusCDPFormula::stressInvariants(tensor).principal_stress.front());
+}
+
+template <typename Function>
+SymmetricTensor
+scalarTensorGradient(const SymmetricTensor & argument, const double step, Function function)
+{
+  SymmetricTensor gradient = {};
+  for (std::size_t component = 0; component < gradient.size(); ++component)
+  {
+    auto plus = argument;
+    auto minus = argument;
+    plus[component] += step;
+    minus[component] -= step;
+    gradient[component] = (function(plus) - function(minus)) / (2.0 * step);
+  }
+  return gradient;
+}
+
+double
+tensorDot(const SymmetricTensor & left, const SymmetricTensor & right)
+{
+  double value = 0.0;
+  for (std::size_t component = 0; component < left.size(); ++component)
+    value += left[component] * right[component];
+  return value;
+}
+
 bool
 isPowerOfTwo(const unsigned int value)
 {
@@ -431,6 +468,79 @@ AbaqusCDPSubstepIntegrator::integrateDeferredViscousLinearized(
       try
       {
         final_backbone->derivative = chained_derivative;
+        if (_parameters.aggregate_backbone_history_to_global_step)
+        {
+          const auto plastic_increment = substepDifference(
+              final_backbone->result.state.plastic_strain, old_state.backbone.plastic_strain);
+          const double tension_weight =
+              AbaqusCDPFormula::stressInvariants(final_backbone->result.effective_stress)
+                  .tension_weight;
+          const double tensile_measure = positivePrincipalMeasure(plastic_increment);
+          const double compressive_measure = negativePrincipalMeasure(plastic_increment);
+
+          double stress_scale = 1.0;
+          for (const double value : final_backbone->result.effective_stress)
+            stress_scale = std::max(stress_scale, std::abs(value));
+          const double stress_step = 1.0e-7 * stress_scale;
+          const double plastic_step = std::max(
+              _parameters.tangent_perturbation,
+              1.0e-7 * std::max(maximumAbsoluteComponent(plastic_increment), 1.0e-12));
+          const auto tension_weight_gradient = scalarTensorGradient(
+              final_backbone->result.effective_stress,
+              stress_step,
+              [](const SymmetricTensor & stress) {
+                return AbaqusCDPFormula::stressInvariants(stress).tension_weight;
+              });
+          const auto tensile_measure_gradient = scalarTensorGradient(
+              plastic_increment, plastic_step, positivePrincipalMeasure);
+          const auto compressive_measure_gradient = scalarTensorGradient(
+              plastic_increment, plastic_step, negativePrincipalMeasure);
+
+          for (std::size_t input = 0;
+               input < AbaqusCDPLocalIntegrator::transition_size;
+               ++input)
+          {
+            SymmetricTensor effective_stress_derivative = {};
+            SymmetricTensor plastic_increment_derivative = {};
+            for (std::size_t component = 0; component < 6; ++component)
+            {
+              effective_stress_derivative[component] =
+                  final_backbone->derivative[input][component];
+              plastic_increment_derivative[component] =
+                  final_backbone->derivative[input][6 + component] -
+                  (input == 6 + component ? 1.0 : 0.0);
+            }
+
+            const double weight_derivative =
+                tensorDot(tension_weight_gradient, effective_stress_derivative);
+            const double tensile_measure_derivative =
+                tensorDot(tensile_measure_gradient, plastic_increment_derivative);
+            const double compressive_measure_derivative =
+                tensorDot(compressive_measure_gradient, plastic_increment_derivative);
+            final_backbone->derivative[input][12] =
+                (input == 12 ? 1.0 : 0.0) + weight_derivative * tensile_measure +
+                tension_weight * tensile_measure_derivative;
+            final_backbone->derivative[input][13] =
+                (input == 13 ? 1.0 : 0.0) - weight_derivative * compressive_measure +
+                (1.0 - tension_weight) * compressive_measure_derivative;
+          }
+
+          final_backbone->result = _state_integrator.aggregateBackboneHistory(
+              old_state.backbone, final_backbone->result);
+          if (CDPDiagnostics::current && CDPDiagnostics::current->trace)
+          {
+            std::ostringstream payload;
+            payload << "\"history_integration_rule\":\"global_accepted_step_end\"";
+            payload << ",\"tension_weight\":";
+            CDPDiagnostics::json(payload, tension_weight);
+            payload << ",\"tensile_measure\":";
+            CDPDiagnostics::json(payload, tensile_measure);
+            payload << ",\"compressive_measure\":";
+            CDPDiagnostics::json(payload, compressive_measure);
+            payload << ",\"scalable_algorithmic_tangent\":true";
+            CDPDiagnostics::event("accepted_step_history", payload.str());
+          }
+        }
         auto assembled = _state_integrator.assembleBackboneLinearized(
             new_total_strain, time_step, old_state, *final_backbone);
         TangentMatrix tangent = {};
@@ -499,7 +609,8 @@ AbaqusCDPSubstepIntegrator::integrateLinearized(const SymmetricTensor & old_tota
   if (!std::isfinite(time_step) || time_step < 0.0)
     substepError("time step must be finite and nonnegative");
 
-  if (_parameters.aggregate_backbone_history_to_global_step)
+  if (_parameters.aggregate_backbone_history_to_global_step &&
+      _parameters.integrate_backbone_history_weights_over_substeps)
     return integrateAggregateHistoryReferenceLinearized(
         old_total_strain, new_total_strain, time_step, old_state);
 
