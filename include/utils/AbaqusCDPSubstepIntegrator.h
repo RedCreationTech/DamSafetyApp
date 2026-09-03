@@ -24,6 +24,7 @@ public:
     double maximum_strain_increment = 0.0;
     double tangent_perturbation = 1.0e-8;
     bool defer_viscous_update_to_global_step = false;
+    bool aggregate_backbone_history_to_global_step = false;
   };
 
   struct Result
@@ -85,6 +86,12 @@ public:
 
 private:
   LinearizedResult integrateDeferredViscousLinearized(
+      const SymmetricTensor & old_total_strain,
+      const SymmetricTensor & new_total_strain,
+      double time_step,
+      const State & old_state) const;
+
+  LinearizedResult integrateAggregateHistoryReferenceLinearized(
       const SymmetricTensor & old_total_strain,
       const SymmetricTensor & new_total_strain,
       double time_step,

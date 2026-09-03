@@ -75,6 +75,10 @@ AbaqusCDPSubstepIntegrator::AbaqusCDPSubstepIntegrator(
   if (!std::isfinite(_parameters.tangent_perturbation) ||
       _parameters.tangent_perturbation <= 0.0)
     substepError("tangent_perturbation must be finite and positive");
+  if (_parameters.aggregate_backbone_history_to_global_step &&
+      !_parameters.defer_viscous_update_to_global_step)
+    substepError("aggregate_backbone_history_to_global_step requires "
+                 "defer_viscous_update_to_global_step");
 }
 
 AbaqusCDPSubstepIntegrator::Result
@@ -173,6 +177,9 @@ AbaqusCDPSubstepIntegrator::integrate(const SymmetricTensor & old_total_strain,
     if (partition_succeeded && _parameters.defer_viscous_update_to_global_step && final_backbone)
       try
       {
+        if (_parameters.aggregate_backbone_history_to_global_step)
+          *final_backbone = _state_integrator.aggregateBackboneHistory(
+              old_state.backbone, *final_backbone);
         final_result = _state_integrator.assembleBackboneResult(
             new_total_strain, time_step, old_state, *final_backbone);
       }
@@ -401,6 +408,19 @@ AbaqusCDPSubstepIntegrator::integrateDeferredViscousLinearized(
 }
 
 AbaqusCDPSubstepIntegrator::LinearizedResult
+AbaqusCDPSubstepIntegrator::integrateAggregateHistoryReferenceLinearized(
+    const SymmetricTensor & old_total_strain,
+    const SymmetricTensor & new_total_strain,
+    const double time_step,
+    const State & old_state) const
+{
+  auto result = integrate(old_total_strain, new_total_strain, time_step, old_state);
+  const auto reference =
+      referenceTangent(old_total_strain, new_total_strain, time_step, old_state);
+  return {std::move(result), reference.value};
+}
+
+AbaqusCDPSubstepIntegrator::LinearizedResult
 AbaqusCDPSubstepIntegrator::integrateLinearized(const SymmetricTensor & old_total_strain,
                                                 const SymmetricTensor & new_total_strain,
                                                 const double time_step,
@@ -410,6 +430,10 @@ AbaqusCDPSubstepIntegrator::integrateLinearized(const SymmetricTensor & old_tota
     substepError("old or new total strain contains a non-finite value");
   if (!std::isfinite(time_step) || time_step < 0.0)
     substepError("time step must be finite and nonnegative");
+
+  if (_parameters.aggregate_backbone_history_to_global_step)
+    return integrateAggregateHistoryReferenceLinearized(
+        old_total_strain, new_total_strain, time_step, old_state);
 
   if (_parameters.defer_viscous_update_to_global_step)
     return integrateDeferredViscousLinearized(

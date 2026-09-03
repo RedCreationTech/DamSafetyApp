@@ -66,6 +66,14 @@ AbaqusCDPStressUpdate::validParams()
       "plasticity backbone and kappa histories, but Duvaut-Lions plastic strain and damage are "
       "committed once using the full accepted global time increment. The default preserves the "
       "existing per-material-substep viscous update.");
+  params.addParam<bool>(
+      "aggregate_backbone_history_to_global_step",
+      false,
+      "Diagnostic-only accepted-step history switch. Return mapping retains material substeps, "
+      "then kappa_t/kappa_c are recomputed once from the total accepted-step plastic increment "
+      "and final effective-stress weight. Requires defer_viscous_update_to_global_step=true. "
+      "The current diagnostic uses a numerical consistent tangent and is not a production "
+      "performance candidate.");
   params.addParam<bool>("enable_performance_diagnostics",
                         false,
                         "Measure per-material-call elapsed time and expose detailed local solver "
@@ -132,7 +140,8 @@ AbaqusCDPStressUpdate::AbaqusCDPStressUpdate(const InputParameters & parameters)
                         {getParam<unsigned int>("maximum_substeps"),
                          getParam<Real>("maximum_strain_increment"),
                          getParam<Real>("reference_tangent_perturbation"),
-                         getParam<bool>("defer_viscous_update_to_global_step")}),
+                         getParam<bool>("defer_viscous_update_to_global_step"),
+                         getParam<bool>("aggregate_backbone_history_to_global_step")}),
     _backbone_plastic_strain(
         declareProperty<RankTwoTensor>(_base_name + "cdp_backbone_plastic_strain")),
     _backbone_plastic_strain_old(

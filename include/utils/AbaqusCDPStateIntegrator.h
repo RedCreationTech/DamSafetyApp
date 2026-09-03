@@ -76,6 +76,17 @@ public:
                               const AbaqusCDPLocalIntegrator::State & old_state) const;
 
   /**
+   * Recompute the two equivalent-plastic-strain histories once from the total
+   * accepted-step plastic increment and the final effective-stress weight.
+   * The already-integrated plastic strain and effective stress are retained.
+   * This is an opt-in diagnostic for separating return-map stability substeps
+   * from accepted-step history semantics.
+   */
+  AbaqusCDPLocalIntegrator::Result aggregateBackboneHistory(
+      const AbaqusCDPLocalIntegrator::State & old_backbone_state,
+      const AbaqusCDPLocalIntegrator::Result & substepped_backbone) const;
+
+  /**
    * Assemble viscous plastic strain, viscous damage, and Cauchy stress from an
    * already-integrated backbone. These entry points allow a caller to use
    * material substeps for the inviscid return map while committing the

@@ -117,6 +117,41 @@ AbaqusCDPStateIntegrator::integrateBackboneLinearized(
   return _backbone_integrator.integrateLinearized(total_strain, old_state);
 }
 
+AbaqusCDPLocalIntegrator::Result
+AbaqusCDPStateIntegrator::aggregateBackboneHistory(
+    const AbaqusCDPLocalIntegrator::State & old_backbone_state,
+    const AbaqusCDPLocalIntegrator::Result & substepped_backbone) const
+{
+  auto aggregated = substepped_backbone;
+  const auto plastic_increment = subtractStateTensor(
+      substepped_backbone.state.plastic_strain, old_backbone_state.plastic_strain);
+  const auto plastic_principal =
+      AbaqusCDPFormula::stressInvariants(plastic_increment).principal_stress;
+  const double tension_weight =
+      AbaqusCDPFormula::stressInvariants(substepped_backbone.effective_stress).tension_weight;
+  const double tensile_increment =
+      tension_weight * std::max(0.0, plastic_principal.back());
+  const double compressive_increment =
+      (1.0 - tension_weight) * std::max(0.0, -plastic_principal.front());
+
+  aggregated.state.tensile_equivalent_plastic_strain =
+      old_backbone_state.tensile_equivalent_plastic_strain + tensile_increment;
+  aggregated.state.compressive_equivalent_plastic_strain =
+      old_backbone_state.compressive_equivalent_plastic_strain + compressive_increment;
+  aggregated.backbone_tension_damage =
+      _backbone_integrator
+          .materialResponse(CDPMaterialTable::Branch::TENSION,
+                            aggregated.state.tensile_equivalent_plastic_strain)
+          .damage.value;
+  aggregated.backbone_compression_damage =
+      _backbone_integrator
+          .materialResponse(CDPMaterialTable::Branch::COMPRESSION,
+                            aggregated.state.compressive_equivalent_plastic_strain)
+          .damage.value;
+
+  return aggregated;
+}
+
 AbaqusCDPStateIntegrator::Result
 AbaqusCDPStateIntegrator::assembleBackboneResult(
     const SymmetricTensor & total_strain,
