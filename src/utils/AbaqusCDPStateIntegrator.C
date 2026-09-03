@@ -80,16 +80,52 @@ AbaqusCDPStateIntegrator::integrate(const SymmetricTensor & total_strain,
                                     const State & old_state) const
 {
   CDPDiagnostics::Scope diagnostic_scope(CDPDiagnostics::STATE);
+  validateAssemblyInputs(total_strain, time_step, old_state);
+
+  // The old state remains immutable. Any failure below leaves the caller's
+  // checkpoint untouched and makes a cutback retry deterministic.
+  const auto backbone = integrateBackbone(total_strain, old_state.backbone);
+  return assembleResult(total_strain, time_step, old_state, backbone);
+}
+
+void
+AbaqusCDPStateIntegrator::validateAssemblyInputs(const SymmetricTensor & total_strain,
+                                                 const double time_step,
+                                                 const State & old_state) const
+{
   if (!finiteStateTensor(total_strain) || !finiteStateTensor(old_state.viscous_plastic_strain))
     stateIntegrationError("total strain or old viscous plastic strain contains a non-finite value");
   if (!std::isfinite(time_step) || time_step < 0.0)
     stateIntegrationError("time step must be finite and nonnegative");
   validateDamage(old_state.viscous_tension_damage, "old viscous tension damage");
   validateDamage(old_state.viscous_compression_damage, "old viscous compression damage");
+}
 
-  // The old state remains immutable. Any failure below leaves the caller's
-  // checkpoint untouched and makes a cutback retry deterministic.
-  const auto backbone = _backbone_integrator.integrate(total_strain, old_state.backbone);
+AbaqusCDPLocalIntegrator::Result
+AbaqusCDPStateIntegrator::integrateBackbone(
+    const SymmetricTensor & total_strain,
+    const AbaqusCDPLocalIntegrator::State & old_state) const
+{
+  return _backbone_integrator.integrate(total_strain, old_state);
+}
+
+AbaqusCDPLocalIntegrator::LinearizedResult
+AbaqusCDPStateIntegrator::integrateBackboneLinearized(
+    const SymmetricTensor & total_strain,
+    const AbaqusCDPLocalIntegrator::State & old_state) const
+{
+  return _backbone_integrator.integrateLinearized(total_strain, old_state);
+}
+
+AbaqusCDPStateIntegrator::Result
+AbaqusCDPStateIntegrator::assembleBackboneResult(
+    const SymmetricTensor & total_strain,
+    const double time_step,
+    const State & old_state,
+    const AbaqusCDPLocalIntegrator::Result & backbone) const
+{
+  CDPDiagnostics::Scope diagnostic_scope(CDPDiagnostics::STATE);
+  validateAssemblyInputs(total_strain, time_step, old_state);
   return assembleResult(total_strain, time_step, old_state, backbone);
 }
 
@@ -178,15 +214,19 @@ AbaqusCDPStateIntegrator::integrateLinearized(const SymmetricTensor & total_stra
                                               const State & old_state) const
 {
   CDPDiagnostics::Scope diagnostic_scope(CDPDiagnostics::STATE_LINEARIZED);
-  if (!finiteStateTensor(total_strain) || !finiteStateTensor(old_state.viscous_plastic_strain))
-    stateIntegrationError("total strain or old viscous plastic strain contains a non-finite value");
-  if (!std::isfinite(time_step) || time_step < 0.0)
-    stateIntegrationError("time step must be finite and nonnegative");
-  validateDamage(old_state.viscous_tension_damage, "old viscous tension damage");
-  validateDamage(old_state.viscous_compression_damage, "old viscous compression damage");
+  validateAssemblyInputs(total_strain, time_step, old_state);
+  const auto backbone = integrateBackboneLinearized(total_strain, old_state.backbone);
+  return assembleBackboneLinearized(total_strain, time_step, old_state, backbone);
+}
 
-  const auto backbone =
-      _backbone_integrator.integrateLinearized(total_strain, old_state.backbone);
+AbaqusCDPStateIntegrator::LinearizedResult
+AbaqusCDPStateIntegrator::assembleBackboneLinearized(
+    const SymmetricTensor & total_strain,
+    const double time_step,
+    const State & old_state,
+    const AbaqusCDPLocalIntegrator::LinearizedResult & backbone) const
+{
+  validateAssemblyInputs(total_strain, time_step, old_state);
   LinearizedResult linearized{
       assembleResult(total_strain, time_step, old_state, backbone.result), {}};
 

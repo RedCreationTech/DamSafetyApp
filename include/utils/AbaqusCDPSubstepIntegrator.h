@@ -23,6 +23,7 @@ public:
     unsigned int maximum_substeps = 256;
     double maximum_strain_increment = 0.0;
     double tangent_perturbation = 1.0e-8;
+    bool defer_viscous_update_to_global_step = false;
   };
 
   struct Result
@@ -83,6 +84,12 @@ public:
                                       const SymmetricTensor & direction);
 
 private:
+  LinearizedResult integrateDeferredViscousLinearized(
+      const SymmetricTensor & old_total_strain,
+      const SymmetricTensor & new_total_strain,
+      double time_step,
+      const State & old_state) const;
+
   const AbaqusCDPStateIntegrator & _state_integrator;
   const Parameters _parameters;
 };

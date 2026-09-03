@@ -59,6 +59,13 @@ AbaqusCDPStressUpdate::validParams()
                                     1.0e-8,
                                     "reference_tangent_perturbation > 0",
                                     "Diagnostic reference-tangent perturbation");
+  params.addParam<bool>(
+      "defer_viscous_update_to_global_step",
+      false,
+      "Diagnostic-only state-integration switch. Material substeps still advance the inviscid "
+      "plasticity backbone and kappa histories, but Duvaut-Lions plastic strain and damage are "
+      "committed once using the full accepted global time increment. The default preserves the "
+      "existing per-material-substep viscous update.");
   params.addParam<bool>("enable_performance_diagnostics",
                         false,
                         "Measure per-material-call elapsed time and expose detailed local solver "
@@ -124,7 +131,8 @@ AbaqusCDPStressUpdate::AbaqusCDPStressUpdate(const InputParameters & parameters)
     _substep_integrator(_state_integrator,
                         {getParam<unsigned int>("maximum_substeps"),
                          getParam<Real>("maximum_strain_increment"),
-                         getParam<Real>("reference_tangent_perturbation")}),
+                         getParam<Real>("reference_tangent_perturbation"),
+                         getParam<bool>("defer_viscous_update_to_global_step")}),
     _backbone_plastic_strain(
         declareProperty<RankTwoTensor>(_base_name + "cdp_backbone_plastic_strain")),
     _backbone_plastic_strain_old(

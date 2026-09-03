@@ -67,11 +67,39 @@ public:
                                        double time_step,
                                        const State & old_state) const;
 
+  /** Advance only the inviscid, path-dependent CDP backbone. */
+  AbaqusCDPLocalIntegrator::Result
+  integrateBackbone(const SymmetricTensor & total_strain,
+                    const AbaqusCDPLocalIntegrator::State & old_state) const;
+  AbaqusCDPLocalIntegrator::LinearizedResult
+  integrateBackboneLinearized(const SymmetricTensor & total_strain,
+                              const AbaqusCDPLocalIntegrator::State & old_state) const;
+
+  /**
+   * Assemble viscous plastic strain, viscous damage, and Cauchy stress from an
+   * already-integrated backbone. These entry points allow a caller to use
+   * material substeps for the inviscid return map while committing the
+   * Duvaut-Lions state exactly once for the accepted global increment.
+   */
+  Result assembleBackboneResult(
+      const SymmetricTensor & total_strain,
+      double time_step,
+      const State & old_state,
+      const AbaqusCDPLocalIntegrator::Result & backbone) const;
+  LinearizedResult assembleBackboneLinearized(
+      const SymmetricTensor & total_strain,
+      double time_step,
+      const State & old_state,
+      const AbaqusCDPLocalIntegrator::LinearizedResult & backbone) const;
+
   /** Undamaged elastic stress associated with total_strain and backbone plastic history. */
   SymmetricTensor backboneEffectiveStress(const SymmetricTensor & total_strain,
                                           const State & state) const;
 
 private:
+  void validateAssemblyInputs(const SymmetricTensor & total_strain,
+                              double time_step,
+                              const State & old_state) const;
   Result assembleResult(const SymmetricTensor & total_strain,
                         double time_step,
                         const State & old_state,

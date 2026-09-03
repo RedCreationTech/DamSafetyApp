@@ -112,6 +112,71 @@ TEST(AbaqusCDPSubstepIntegrator, ProactiveBinarySubstepsMatchManualSequentialInt
                    manual_result->state.viscous_tension_damage);
 }
 
+TEST(AbaqusCDPSubstepIntegrator, DeferredViscousUpdateCommitsOnceAtGlobalStep)
+{
+  const auto table = substepReferenceTable();
+  const AbaqusCDPLocalIntegrator local(table, substepLocalParameters());
+  const AbaqusCDPStateIntegrator state_integrator(local, substepStateParameters(5.0e-4));
+  const double initial_tension =
+      table.responseByEquivalentPlasticStrain(CDPMaterialTable::Branch::TENSION, 0.0).stress.value;
+  const auto target = substepUniaxialElasticStrain(1.05 * initial_tension);
+  const double strain_limit = std::abs(target[0]) / 3.0;
+  const AbaqusCDPSubstepIntegrator deferred(
+      state_integrator, {16, strain_limit, 1.0e-8, true});
+  const AbaqusCDPSubstepIntegrator legacy(
+      state_integrator, {16, strain_limit, 1.0e-8, false});
+
+  const auto result = deferred.integrate({}, target, 1.0e-3, {});
+  EXPECT_EQ(result.accepted_substeps, 4u);
+
+  AbaqusCDPLocalIntegrator::State manual_backbone_state;
+  std::optional<AbaqusCDPLocalIntegrator::Result> manual_backbone;
+  for (unsigned int i = 1; i <= 4; ++i)
+  {
+    manual_backbone = state_integrator.integrateBackbone(
+        substepScale(target, static_cast<double>(i) / 4.0), manual_backbone_state);
+    manual_backbone_state = manual_backbone->state;
+  }
+  ASSERT_TRUE(manual_backbone.has_value());
+  const auto expected =
+      state_integrator.assembleBackboneResult(target, 1.0e-3, {}, *manual_backbone);
+
+  EXPECT_EQ(result.final_result.state.backbone.plastic_strain,
+            expected.state.backbone.plastic_strain);
+  EXPECT_EQ(result.final_result.state.viscous_plastic_strain,
+            expected.state.viscous_plastic_strain);
+  EXPECT_DOUBLE_EQ(result.final_result.state.viscous_tension_damage,
+                   expected.state.viscous_tension_damage);
+  EXPECT_EQ(result.final_result.cauchy_stress, expected.cauchy_stress);
+
+  const auto legacy_result = legacy.integrate({}, target, 1.0e-3, {});
+  EXPECT_NE(result.final_result.state.viscous_plastic_strain,
+            legacy_result.final_result.state.viscous_plastic_strain);
+}
+
+TEST(AbaqusCDPSubstepIntegrator, DeferredViscousAlgorithmicTangentMatchesDirection)
+{
+  const auto table = substepReferenceTable();
+  const AbaqusCDPLocalIntegrator local(table, substepLocalParameters());
+  const AbaqusCDPStateIntegrator state_integrator(local, substepStateParameters(5.0e-4));
+  const double initial_tension =
+      table.responseByEquivalentPlasticStrain(CDPMaterialTable::Branch::TENSION, 0.0).stress.value;
+  const auto target = substepUniaxialElasticStrain(1.05 * initial_tension);
+  const AbaqusCDPSubstepIntegrator integrator(
+      state_integrator, {16, std::abs(target[0]) / 3.0, 1.0e-8, true});
+  const AbaqusCDPSubstepIntegrator::SymmetricTensor direction =
+      {1.0, -0.2, -0.2, 0.1, 0.0, 0.0};
+
+  const auto algorithmic = integrator.integrateLinearized({}, target, 1.0e-3, {});
+  const auto predicted =
+      AbaqusCDPSubstepIntegrator::applyTangent(algorithmic.algorithmic_tangent, direction);
+  const auto measured =
+      integrator.directionalDerivative({}, target, 1.0e-3, {}, direction, 1.0e-8);
+  EXPECT_EQ(algorithmic.result.accepted_substeps, 4u);
+  for (std::size_t i = 0; i < 6; ++i)
+    EXPECT_NEAR(predicted[i], measured[i], 1.0e-2 * std::max(1.0, std::abs(measured[i])));
+}
+
 TEST(AbaqusCDPSubstepIntegrator, ExhaustedCutbacksLeaveCallerStateUntouched)
 {
   const auto table = substepReferenceTable();

@@ -113,6 +113,7 @@ AbaqusCDPSubstepIntegrator::integrate(const SymmetricTensor & old_total_strain,
     ++attempted_partitions;
     State working_state = old_state;
     std::optional<AbaqusCDPStateIntegrator::Result> final_result;
+    std::optional<AbaqusCDPLocalIntegrator::Result> final_backbone;
     unsigned int total_local_iterations = 0;
     unsigned int total_jacobian_fallbacks = 0;
     unsigned int total_automatic_jacobian_evaluations = 0;
@@ -128,18 +129,36 @@ AbaqusCDPSubstepIntegrator::integrate(const SymmetricTensor & old_total_strain,
       if (CDPDiagnostics::current) CDPDiagnostics::current->substep=i;
       try
       {
-        auto step_result = _state_integrator.integrate(
-            target, time_step / static_cast<double>(substeps), working_state);
-        total_local_iterations += step_result.backbone.iterations;
-        total_jacobian_fallbacks += step_result.backbone.jacobian_fallbacks;
-        total_automatic_jacobian_evaluations +=
-            step_result.backbone.automatic_jacobian_evaluations;
-        total_finite_difference_jacobian_evaluations +=
-            step_result.backbone.finite_difference_jacobian_evaluations;
-        total_local_factorizations += step_result.backbone.local_factorizations;
-        total_local_backsolves += step_result.backbone.local_backsolves;
-        working_state = step_result.state;
-        final_result = std::move(step_result);
+        if (_parameters.defer_viscous_update_to_global_step)
+        {
+          auto backbone =
+              _state_integrator.integrateBackbone(target, working_state.backbone);
+          total_local_iterations += backbone.iterations;
+          total_jacobian_fallbacks += backbone.jacobian_fallbacks;
+          total_automatic_jacobian_evaluations +=
+              backbone.automatic_jacobian_evaluations;
+          total_finite_difference_jacobian_evaluations +=
+              backbone.finite_difference_jacobian_evaluations;
+          total_local_factorizations += backbone.local_factorizations;
+          total_local_backsolves += backbone.local_backsolves;
+          working_state.backbone = backbone.state;
+          final_backbone = std::move(backbone);
+        }
+        else
+        {
+          auto step_result = _state_integrator.integrate(
+              target, time_step / static_cast<double>(substeps), working_state);
+          total_local_iterations += step_result.backbone.iterations;
+          total_jacobian_fallbacks += step_result.backbone.jacobian_fallbacks;
+          total_automatic_jacobian_evaluations +=
+              step_result.backbone.automatic_jacobian_evaluations;
+          total_finite_difference_jacobian_evaluations +=
+              step_result.backbone.finite_difference_jacobian_evaluations;
+          total_local_factorizations += step_result.backbone.local_factorizations;
+          total_local_backsolves += step_result.backbone.local_backsolves;
+          working_state = step_result.state;
+          final_result = std::move(step_result);
+        }
       }
       catch (const std::exception & error)
       {
@@ -150,6 +169,20 @@ AbaqusCDPSubstepIntegrator::integrate(const SymmetricTensor & old_total_strain,
         break;
       }
     }
+
+    if (partition_succeeded && _parameters.defer_viscous_update_to_global_step && final_backbone)
+      try
+      {
+        final_result = _state_integrator.assembleBackboneResult(
+            new_total_strain, time_step, old_state, *final_backbone);
+      }
+      catch (const std::exception & error)
+      {
+        partition_succeeded = false;
+        last_error = error.what();
+        last_failed_substep = substeps;
+        last_partition = substeps;
+      }
 
     if (partition_succeeded && final_result)
       return {std::move(*final_result),
@@ -180,6 +213,194 @@ AbaqusCDPSubstepIntegrator::integrate(const SymmetricTensor & old_total_strain,
 }
 
 AbaqusCDPSubstepIntegrator::LinearizedResult
+AbaqusCDPSubstepIntegrator::integrateDeferredViscousLinearized(
+    const SymmetricTensor & old_total_strain,
+    const SymmetricTensor & new_total_strain,
+    const double time_step,
+    const State & old_state) const
+{
+  CDPDiagnostics::Scope diagnostic_scope(CDPDiagnostics::STATE_LINEARIZED);
+  const auto total_increment = substepDifference(new_total_strain, old_total_strain);
+  unsigned int substeps = 1;
+  if (_parameters.maximum_strain_increment > 0.0)
+    while (maximumAbsoluteComponent(total_increment) / substeps >
+           _parameters.maximum_strain_increment)
+    {
+      if (substeps == _parameters.maximum_substeps)
+        substepError("proactive strain-increment limit requires more than maximum_substeps");
+      substeps *= 2;
+    }
+  const bool proactively_partitioned = substeps > 1;
+
+  unsigned int cutback_count = 0;
+  unsigned int attempted_partitions = 0;
+  std::string last_error;
+  unsigned int last_failed_substep = 0;
+  unsigned int last_partition = substeps;
+
+  while (substeps <= _parameters.maximum_substeps)
+  {
+    CDPDiagnostics::Scope partition_scope(CDPDiagnostics::PARTITION);
+    if (CDPDiagnostics::current)
+      CDPDiagnostics::current->partition = substeps;
+    ++attempted_partitions;
+
+    auto working_backbone = old_state.backbone;
+    std::optional<AbaqusCDPLocalIntegrator::LinearizedResult> final_backbone;
+    AbaqusCDPLocalIntegrator::TransitionJacobian chained_derivative = {};
+    std::array<std::array<double, 8>, AbaqusCDPLocalIntegrator::transition_size>
+        backbone_state_sensitivity = {};
+    for (std::size_t state = 0; state < 8; ++state)
+      backbone_state_sensitivity[6 + state][state] = 1.0;
+
+    unsigned int total_local_iterations = 0;
+    unsigned int total_jacobian_fallbacks = 0;
+    unsigned int total_automatic_jacobian_evaluations = 0;
+    unsigned int total_finite_difference_jacobian_evaluations = 0;
+    unsigned int total_local_factorizations = 0;
+    unsigned int total_local_backsolves = 0;
+    bool partition_succeeded = true;
+
+    for (unsigned int i = 1; i <= substeps; ++i)
+    {
+      const double fraction = static_cast<double>(i) / substeps;
+      const auto target = substepInterpolate(old_total_strain, total_increment, fraction);
+      if (CDPDiagnostics::current)
+        CDPDiagnostics::current->substep = i;
+      try
+      {
+        const auto old_backbone = working_backbone;
+        auto step = _state_integrator.integrateBackboneLinearized(target, working_backbone);
+        total_local_iterations += step.result.iterations;
+        total_jacobian_fallbacks += step.result.jacobian_fallbacks;
+        total_automatic_jacobian_evaluations +=
+            step.result.automatic_jacobian_evaluations;
+        total_finite_difference_jacobian_evaluations +=
+            step.result.finite_difference_jacobian_evaluations;
+        total_local_factorizations += step.result.local_factorizations;
+        total_local_backsolves += step.result.local_backsolves;
+
+        std::array<std::array<double, 8>, AbaqusCDPLocalIntegrator::transition_size>
+            new_state_sensitivity = {};
+        AbaqusCDPLocalIntegrator::TransitionJacobian new_chained_derivative = {};
+        {
+          CDPDiagnostics::Scope chain_scope(CDPDiagnostics::STATE_CHAIN);
+          for (std::size_t original_input = 0;
+               original_input < AbaqusCDPLocalIntegrator::transition_size;
+               ++original_input)
+          {
+            std::array<double, AbaqusCDPLocalIntegrator::transition_size> input_derivative = {};
+            if (original_input < 6)
+              input_derivative[original_input] = fraction;
+            for (std::size_t state = 0; state < 8; ++state)
+              input_derivative[6 + state] =
+                  backbone_state_sensitivity[original_input][state];
+
+            for (std::size_t output = 0;
+                 output < AbaqusCDPLocalIntegrator::transition_size;
+                 ++output)
+              for (std::size_t input = 0;
+                   input < AbaqusCDPLocalIntegrator::transition_size;
+                   ++input)
+                new_chained_derivative[original_input][output] +=
+                    step.derivative[input][output] * input_derivative[input];
+            for (std::size_t state = 0; state < 8; ++state)
+              new_state_sensitivity[original_input][state] =
+                  new_chained_derivative[original_input][6 + state];
+          }
+        }
+
+        if (CDPDiagnostics::current && CDPDiagnostics::current->trace)
+        {
+          std::ostringstream payload;
+          payload << "\"target\":";
+          CDPDiagnostics::json(payload, target);
+          payload << ",\"history_integration_rule\":\"material_substep_end\"";
+          payload << ",\"viscous_state_commit\":\"deferred_to_global_accepted_step\"";
+          payload << ",\"old_kappa_t\":";
+          CDPDiagnostics::json(payload, old_backbone.tensile_equivalent_plastic_strain);
+          payload << ",\"new_kappa_t\":";
+          CDPDiagnostics::json(payload,
+                               step.result.state.tensile_equivalent_plastic_strain);
+          payload << ",\"old_kappa_c\":";
+          CDPDiagnostics::json(payload, old_backbone.compressive_equivalent_plastic_strain);
+          payload << ",\"new_kappa_c\":";
+          CDPDiagnostics::json(payload,
+                               step.result.state.compressive_equivalent_plastic_strain);
+          payload << ",\"backbone_damage_t\":";
+          CDPDiagnostics::json(payload, step.result.backbone_tension_damage);
+          payload << ",\"backbone_damage_c\":";
+          CDPDiagnostics::json(payload, step.result.backbone_compression_damage);
+          payload << ",\"active_branch\":\""
+                  << AbaqusCDPLocalIntegrator::branchName(step.result.active_branch) << "\"";
+          CDPDiagnostics::event("substep", payload.str());
+        }
+
+        working_backbone = step.result.state;
+        backbone_state_sensitivity = new_state_sensitivity;
+        chained_derivative = new_chained_derivative;
+        final_backbone = std::move(step);
+      }
+      catch (const std::exception & error)
+      {
+        partition_succeeded = false;
+        last_error = error.what();
+        last_failed_substep = i;
+        last_partition = substeps;
+        break;
+      }
+    }
+
+    if (partition_succeeded && final_backbone)
+    {
+      try
+      {
+        final_backbone->derivative = chained_derivative;
+        auto assembled = _state_integrator.assembleBackboneLinearized(
+            new_total_strain, time_step, old_state, *final_backbone);
+        TangentMatrix tangent = {};
+        for (std::size_t column = 0; column < 6; ++column)
+          for (std::size_t row = 0; row < 6; ++row)
+            tangent[column][row] = assembled.derivative[column][row];
+
+        Result result{std::move(assembled.result),
+                      substeps,
+                      cutback_count,
+                      attempted_partitions,
+                      total_local_iterations,
+                      total_jacobian_fallbacks,
+                      total_automatic_jacobian_evaluations,
+                      total_finite_difference_jacobian_evaluations,
+                      total_local_factorizations,
+                      total_local_backsolves,
+                      proactively_partitioned};
+        return {std::move(result), tangent};
+      }
+      catch (const std::exception & error)
+      {
+        partition_succeeded = false;
+        last_error = error.what();
+        last_failed_substep = substeps;
+        last_partition = substeps;
+      }
+    }
+
+    partition_scope.failed();
+    if (substeps == _parameters.maximum_substeps)
+      break;
+    substeps *= 2;
+    ++cutback_count;
+  }
+
+  std::ostringstream message;
+  message << "deferred-viscous linearization failed after partition=" << last_partition
+          << ", failed_substep=" << last_failed_substep
+          << ", attempted_partitions=" << attempted_partitions
+          << ", last_error=" << last_error;
+  substepError(message.str());
+}
+
+AbaqusCDPSubstepIntegrator::LinearizedResult
 AbaqusCDPSubstepIntegrator::integrateLinearized(const SymmetricTensor & old_total_strain,
                                                 const SymmetricTensor & new_total_strain,
                                                 const double time_step,
@@ -189,6 +410,10 @@ AbaqusCDPSubstepIntegrator::integrateLinearized(const SymmetricTensor & old_tota
     substepError("old or new total strain contains a non-finite value");
   if (!std::isfinite(time_step) || time_step < 0.0)
     substepError("time step must be finite and nonnegative");
+
+  if (_parameters.defer_viscous_update_to_global_step)
+    return integrateDeferredViscousLinearized(
+        old_total_strain, new_total_strain, time_step, old_state);
 
   const auto total_increment = substepDifference(new_total_strain, old_total_strain);
   unsigned int substeps = 1;
