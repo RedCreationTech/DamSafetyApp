@@ -424,11 +424,69 @@ AbaqusCDPSubstepIntegrator::integrateDeferredViscousLinearized(
 
         if (CDPDiagnostics::current && CDPDiagnostics::current->trace)
         {
+          const double start_fraction = static_cast<double>(i - 1) / substeps;
+          const auto start_target =
+              substepInterpolate(old_total_strain, total_increment, start_fraction);
+          const auto start_effective_stress =
+              _state_integrator.backboneEffectiveStress(start_target, old_backbone);
+          const auto plastic_increment =
+              substepDifference(step.result.state.plastic_strain, old_backbone.plastic_strain);
+          const auto plastic_increment_invariants =
+              AbaqusCDPFormula::stressInvariants(plastic_increment);
+          const auto start_invariants =
+              AbaqusCDPFormula::stressInvariants(start_effective_stress);
+          const auto end_invariants =
+              AbaqusCDPFormula::stressInvariants(step.result.effective_stress);
+          const double positive_plastic_measure =
+              std::max(0.0, plastic_increment_invariants.principal_stress.back());
+          const double negative_plastic_measure =
+              std::max(0.0, -plastic_increment_invariants.principal_stress.front());
+          const double raw_delta_kappa_t =
+              end_invariants.tension_weight * positive_plastic_measure;
+          const double raw_delta_kappa_c =
+              (1.0 - end_invariants.tension_weight) * negative_plastic_measure;
+          SymmetricTensor flow_direction = {};
+          if (step.result.plastic_multiplier > 0.0)
+            for (std::size_t component = 0; component < flow_direction.size(); ++component)
+              flow_direction[component] =
+                  plastic_increment[component] / step.result.plastic_multiplier;
+          const auto flow_direction_principal =
+              AbaqusCDPFormula::stressInvariants(flow_direction).principal_stress;
           std::ostringstream payload;
           payload << "\"target\":";
           CDPDiagnostics::json(payload, target);
+          payload << ",\"start_target\":";
+          CDPDiagnostics::json(payload, start_target);
           payload << ",\"history_integration_rule\":\"material_substep_end\"";
           payload << ",\"viscous_state_commit\":\"deferred_to_global_accepted_step\"";
+          payload << ",\"start_effective_stress\":";
+          CDPDiagnostics::json(payload, start_effective_stress);
+          payload << ",\"end_effective_stress\":";
+          CDPDiagnostics::json(payload, step.result.effective_stress);
+          payload << ",\"start_effective_principal\":";
+          CDPDiagnostics::json(payload, start_invariants.principal_stress);
+          payload << ",\"end_effective_principal\":";
+          CDPDiagnostics::json(payload, end_invariants.principal_stress);
+          payload << ",\"start_tension_weight\":";
+          CDPDiagnostics::json(payload, start_invariants.tension_weight);
+          payload << ",\"end_tension_weight\":";
+          CDPDiagnostics::json(payload, end_invariants.tension_weight);
+          payload << ",\"plastic_increment\":";
+          CDPDiagnostics::json(payload, plastic_increment);
+          payload << ",\"plastic_increment_principal\":";
+          CDPDiagnostics::json(payload, plastic_increment_invariants.principal_stress);
+          payload << ",\"positive_plastic_measure\":";
+          CDPDiagnostics::json(payload, positive_plastic_measure);
+          payload << ",\"negative_plastic_measure\":";
+          CDPDiagnostics::json(payload, negative_plastic_measure);
+          payload << ",\"flow_direction\":";
+          CDPDiagnostics::json(payload, flow_direction);
+          payload << ",\"flow_direction_principal\":";
+          CDPDiagnostics::json(payload, flow_direction_principal);
+          payload << ",\"raw_delta_kappa_t\":";
+          CDPDiagnostics::json(payload, raw_delta_kappa_t);
+          payload << ",\"raw_delta_kappa_c\":";
+          CDPDiagnostics::json(payload, raw_delta_kappa_c);
           payload << ",\"old_kappa_t\":";
           CDPDiagnostics::json(payload, old_backbone.tensile_equivalent_plastic_strain);
           payload << ",\"new_kappa_t\":";
@@ -445,6 +503,14 @@ AbaqusCDPSubstepIntegrator::integrateDeferredViscousLinearized(
           CDPDiagnostics::json(payload, step.result.backbone_compression_damage);
           payload << ",\"active_branch\":\""
                   << AbaqusCDPLocalIntegrator::branchName(step.result.active_branch) << "\"";
+          payload << ",\"trial_yield\":";
+          CDPDiagnostics::json(payload, step.result.trial_yield);
+          payload << ",\"final_yield\":";
+          CDPDiagnostics::json(payload, step.result.final_yield);
+          payload << ",\"residual_norm\":";
+          CDPDiagnostics::json(payload, step.result.residual_norm);
+          payload << ",\"plastic_multiplier\":";
+          CDPDiagnostics::json(payload, step.result.plastic_multiplier);
           CDPDiagnostics::event("substep", payload.str());
         }
 
@@ -529,14 +595,42 @@ AbaqusCDPSubstepIntegrator::integrateDeferredViscousLinearized(
               old_state.backbone, final_backbone->result);
           if (CDPDiagnostics::current && CDPDiagnostics::current->trace)
           {
+            const auto plastic_increment_principal =
+                AbaqusCDPFormula::stressInvariants(plastic_increment).principal_stress;
+            const auto effective_invariants =
+                AbaqusCDPFormula::stressInvariants(final_backbone->result.effective_stress);
+            const double raw_delta_kappa_t = tension_weight * tensile_measure;
+            const double raw_delta_kappa_c = (1.0 - tension_weight) * compressive_measure;
             std::ostringstream payload;
             payload << "\"history_integration_rule\":\"global_accepted_step_end\"";
+            payload << ",\"effective_stress\":";
+            CDPDiagnostics::json(payload, final_backbone->result.effective_stress);
+            payload << ",\"effective_principal\":";
+            CDPDiagnostics::json(payload, effective_invariants.principal_stress);
+            payload << ",\"plastic_increment\":";
+            CDPDiagnostics::json(payload, plastic_increment);
+            payload << ",\"plastic_increment_principal\":";
+            CDPDiagnostics::json(payload, plastic_increment_principal);
             payload << ",\"tension_weight\":";
             CDPDiagnostics::json(payload, tension_weight);
             payload << ",\"tensile_measure\":";
             CDPDiagnostics::json(payload, tensile_measure);
             payload << ",\"compressive_measure\":";
             CDPDiagnostics::json(payload, compressive_measure);
+            payload << ",\"raw_delta_kappa_t\":";
+            CDPDiagnostics::json(payload, raw_delta_kappa_t);
+            payload << ",\"raw_delta_kappa_c\":";
+            CDPDiagnostics::json(payload, raw_delta_kappa_c);
+            payload << ",\"old_kappa_t\":";
+            CDPDiagnostics::json(payload, old_state.backbone.tensile_equivalent_plastic_strain);
+            payload << ",\"new_kappa_t\":";
+            CDPDiagnostics::json(
+                payload, final_backbone->result.state.tensile_equivalent_plastic_strain);
+            payload << ",\"old_kappa_c\":";
+            CDPDiagnostics::json(payload, old_state.backbone.compressive_equivalent_plastic_strain);
+            payload << ",\"new_kappa_c\":";
+            CDPDiagnostics::json(
+                payload, final_backbone->result.state.compressive_equivalent_plastic_strain);
             payload << ",\"scalable_algorithmic_tangent\":true";
             CDPDiagnostics::event("accepted_step_history", payload.str());
           }
