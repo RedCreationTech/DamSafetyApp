@@ -427,8 +427,10 @@ AbaqusCDPSubstepIntegrator::integrateDeferredViscousLinearized(
           const double start_fraction = static_cast<double>(i - 1) / substeps;
           const auto start_target =
               substepInterpolate(old_total_strain, total_increment, start_fraction);
+          auto start_state = old_state;
+          start_state.backbone = old_backbone;
           const auto start_effective_stress =
-              _state_integrator.backboneEffectiveStress(start_target, old_backbone);
+              _state_integrator.backboneEffectiveStress(start_target, start_state);
           const auto plastic_increment =
               substepDifference(step.result.state.plastic_strain, old_backbone.plastic_strain);
           const auto plastic_increment_invariants =
