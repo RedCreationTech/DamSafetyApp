@@ -12,10 +12,24 @@ class CompressionDiagnosticTest(unittest.TestCase):
                                    '[Materials]\n  [cdp_stress_update]\n  []\n[]\n')
         for value in ("expression = '-0.0025*t'", 'end_time = 1', 'dt = 0.01', 'dtmin = 1e-15',
                       'nl_rel_tol = 1e-9', 'nl_abs_tol = 1e-8', '[min_stress_zz]', 'value_type = min',
-                      'file_base = uniaxial_compression', builder.SOURCE_SHA):
+                      'file_base = uniaxial_compression', 'volumetric_locking_correction = true', builder.SOURCE_SHA):
             self.assertIn(value, text)
         for value in ('C3D8R', 'uniaxial_tension', '[bottom_x]', '[bottom_y]', '2.5e-5*t'):
             self.assertNotIn(value, text)
+
+    def test_bbar_does_not_change_tension_or_accept_ambiguous_configuration(self):
+        from c3d8_formulation import apply_c3d8_bbar
+        import build_uniaxial_tension_diagnostic as tension
+        raw = tension.moose_input({'elastic': {'youngs_modulus_pa': 2.97915e10,
+                                              'poissons_ratio': .2}},
+                                  '[Materials]\n  [cdp_stress_update]\n  []\n[]\n')
+        self.assertNotIn('volumetric_locking_correction', raw)
+        corrected = apply_c3d8_bbar(raw)
+        self.assertEqual(corrected.count('volumetric_locking_correction = true'), 1)
+        with self.assertRaisesRegex(ValueError, 'Existing volumetric'):
+            apply_c3d8_bbar(corrected)
+        with self.assertRaisesRegex(ValueError, 'small-strain'):
+            apply_c3d8_bbar(raw.replace('strain = SMALL', 'strain = FINITE'))
 
     def test_changed_source_rejected_without_output(self):
         with tempfile.TemporaryDirectory() as tmp:

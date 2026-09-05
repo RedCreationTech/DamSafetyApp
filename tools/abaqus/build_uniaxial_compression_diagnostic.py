@@ -6,12 +6,13 @@ import json
 from pathlib import Path
 import build_uniaxial_tension_diagnostic as base
 from abaqus_cdp import write_bundle
+from c3d8_formulation import apply_c3d8_bbar
 
 SOURCE_SHA = "032449357ed66108b0f11967d62cb729ebf1c970d00efbb4ba41ef5bf00a1e26"
 CASE = "tpl-bj-uniaxial-compression-cdp-c3d8-hex8-v1"
 INPUT = CASE + ".i"
 MESH = "uniaxial_compression_mesh.e"
-SOLVER_SHA = "fecadd3e13cdb7003d8c7fc7a0365bd588254730"
+SOLVER_SHA = "f99f18d1e24e5168ef6b88857d06b8c01f0c0fee"
 
 
 def moose_input(si: dict, fragment: str) -> str:
@@ -22,11 +23,12 @@ def moose_input(si: dict, fragment: str) -> str:
         ("U3=+0.025mm -> +2.5e-5*t m", "U3=-2.5mm -> -0.0025*t m"),
         ("expression = '2.5e-5*t'", "expression = '-0.0025*t'"),
         ("C3D8R IDs/connectivity retained as standard HEX8, not reduced/hourglass equivalent.",
-         "C3D8 IDs/connectivity retained as standard HEX8; both full integration, not a proof of identical formulation."),
+         "C3D8 IDs/connectivity retained as HEX8 with element-averaged volumetric strain (B-bar)."),
         ("not raw C3D8R IntPt=1 values.", "compare with C3D8 volume-averaged 8-IP fields, not raw IP maxima."),
     ]:
         base.check(old in text, f"Shared template changed; review replacement: {old}")
         text = text.replace(old, new)
+    text = apply_c3d8_bbar(text)
     marker = "[Postprocessors]\n"
     base.check(text.count(marker) == 1, "Postprocessor anchor changed")
     return text.replace(marker, marker + "  [min_stress_zz]\n    type = ElementExtremeValue\n"
@@ -61,7 +63,7 @@ def build(source: Path, output: Path) -> dict:
                     "source_state": "local reviewed converter changes; solver binary remains locked"},
         "assumptions": [
             "单位沿用已确认mm,N,s,MPa；长度/位移乘1e-3，应力/E乘1e6；应变/损伤/时间不变",
-            "原C3D8网格1000单元1331节点，原ID/连通/装配平移保留；标准HEX8完全积分",
+            "原C3D8网格1000单元1331节点，原ID/连通/装配平移保留；HEX8启用physics层B-bar体积应变修正",
             "OP=NEW清除初始夹持：底面仅U3=0，横向自由；顶面RP零转角对应刚性平移",
             "顶面U1=U2=0固定两个自由整体平移零基准，不添加底部横向约束",
             "U3=-2.5mm在1s内线性加载；本次不是拉伸+0.025mm，也不是旧压缩-5mm",
@@ -69,7 +71,8 @@ def build(source: Path, output: Path) -> dict:
             "原Static初始/总时长/最小/最大增量0.01/1/1e-15/1保留，自适应算法非Abaqus同算法",
             "每0.01s输出真实求解场；压缩负应力最小值另记min_stress_zz；无结果CSV驱动",
         ],
-        "unsupported": ["两软件完全积分HEX8/C3D8不代表刚度/内部实现逐项完全等价",
+        "element_formulation": {"source": "C3D8", "moose": "HEX8", "volumetric_locking_correction": True, "scope": "incremental small strain", "validation": "see damASR E15/E17 evidence; candidate, not final acceptance"},
+        "unsupported": ["B-bar兼容修正不代表全部本构及单元内部实现完全等价",
             "MOOSE元素常量投影不是原始IP值；只能对齐8IP体积平均后对比",
             "参考场CSV没有RF3/U3时，不宣称RP力位移对标通过", "诊断性验证，最终接受由专家评审"],
         "artifacts": {p.name: base.sha(p) for p in sorted(inputs.iterdir()) if p.name != "cdp-mapping-manifest.json"},
