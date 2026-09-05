@@ -952,6 +952,9 @@ AbaqusCDPLocalIntegrator::integrateLinearized(const SymmetricTensor & total_stra
        yield_with_strengths(compression.value - compression_step, tension.value)) /
       (2.0 * compression_step);
 
+  // Old plastic-strain right-hand sides are the negatives of the six total-strain
+  // right-hand sides at the same converged root and with the same LU factors.
+  std::array<LocalVector, 6> strain_unknown_derivatives;
   for (std::size_t input = 0; input < transition_size; ++input)
   {
     LocalVector direct = {0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0};
@@ -970,8 +973,17 @@ AbaqusCDPLocalIntegrator::integrateLinearized(const SymmetricTensor & total_stra
 
     for (double & value : direct)
       value = -value;
-    const auto unknown_derivative = solveLinearSystem(factorization, direct);
-    ++linearized.result.local_backsolves;
+    LocalVector unknown_derivative;
+    if (input >= 6 && input < 12)
+      for (std::size_t row = 0; row < unknown_derivative.size(); ++row)
+        unknown_derivative[row] = -strain_unknown_derivatives[input - 6][row];
+    else
+    {
+      unknown_derivative = solveLinearSystem(factorization, direct);
+      ++linearized.result.local_backsolves;
+      if (input < 6)
+        strain_unknown_derivatives[input] = unknown_derivative;
+    }
 
     SymmetricTensor stress_derivative;
     for (std::size_t row = 0; row < 6; ++row)

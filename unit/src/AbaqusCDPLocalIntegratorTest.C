@@ -208,10 +208,10 @@ TEST(AbaqusCDPLocalIntegrator, AutomaticDifferentiationAndFiniteDifferenceReachS
     ASSERT_EQ(automatic_result.result.active_branch, reference_result.result.active_branch);
     EXPECT_GT(automatic_result.result.local_factorizations, 0u);
     EXPECT_EQ(automatic_result.result.local_backsolves,
-              automatic_result.result.local_factorizations + 13u);
+              automatic_result.result.local_factorizations + 7u);
     EXPECT_GT(reference_result.result.local_factorizations, 0u);
     EXPECT_EQ(reference_result.result.local_backsolves,
-              reference_result.result.local_factorizations + 13u);
+              reference_result.result.local_factorizations + 7u);
     for (std::size_t i = 0; i < 6; ++i)
     {
       EXPECT_NEAR(automatic_result.result.effective_stress[i],
@@ -227,5 +227,67 @@ TEST(AbaqusCDPLocalIntegrator, AutomaticDifferentiationAndFiniteDifferenceReachS
     EXPECT_NEAR(automatic_result.result.state.compressive_equivalent_plastic_strain,
                 reference_result.result.state.compressive_equivalent_plastic_strain,
                 1.0e-10);
+  }
+}
+
+TEST(AbaqusCDPLocalIntegrator, ReusedPlasticStrainColumnsPreserveTransitionAndEightBacksolves)
+{
+  const auto table = referenceTable();
+  for (const bool automatic : {true, false})
+  {
+    const AbaqusCDPLocalIntegrator integrator(table, parameters(40, automatic));
+    const double tension = table.responseByEquivalentPlasticStrain(
+        CDPMaterialTable::Branch::TENSION, 0.0).stress.value;
+    const double compression = table.responseByEquivalentPlasticStrain(
+        CDPMaterialTable::Branch::COMPRESSION, 0.0).stress.value;
+    auto mixed = uniaxialElasticStrain(1.08 * tension);
+    mixed[3] = 0.08 * tension / youngs_modulus;
+    auto smooth_compression = uniaxialElasticStrain(-1.05 * compression);
+    // Split the repeated transverse principal stresses: centered differences at
+    // the exact compression meridian need not equal a selected branch derivative.
+    smooth_compression[3] = 0.07 * compression / youngs_modulus;
+    smooth_compression[4] = -0.03 * compression / youngs_modulus;
+    for (const auto & strain : {uniaxialElasticStrain(1.05 * tension),
+                               smooth_compression, mixed})
+    {
+      const auto plain = integrator.integrate(strain, {});
+      const auto result = integrator.integrateLinearized(strain, {});
+      ASSERT_TRUE(result.result.plastic);
+      EXPECT_EQ(result.result.local_backsolves - plain.local_backsolves, 8u);
+      EXPECT_EQ(result.result.effective_stress, plain.effective_stress);
+      EXPECT_EQ(result.result.state.plastic_strain, plain.state.plastic_strain);
+      for (std::size_t column = 0; column < 6; ++column)
+      {
+        auto plus = AbaqusCDPLocalIntegrator::State{};
+        auto minus = plus;
+        constexpr double h = 1.0e-9;
+        plus.plastic_strain[column] += h;
+        minus.plastic_strain[column] -= h;
+        const auto rp = integrator.integrate(strain, plus);
+        const auto rm = integrator.integrate(strain, minus);
+        ASSERT_EQ(rp.active_branch, result.result.active_branch);
+        ASSERT_EQ(rm.active_branch, result.result.active_branch);
+        for (std::size_t row = 0; row < 6; ++row)
+        {
+          EXPECT_DOUBLE_EQ(result.derivative[6 + column][row],
+                           -result.derivative[column][row]);
+          EXPECT_NEAR(result.derivative[6 + column][6 + row] +
+                          result.derivative[column][6 + row],
+                      column == row ? 1.0 : 0.0, 1.0e-14);
+          EXPECT_NEAR(result.derivative[6 + column][row],
+                      (rp.effective_stress[row] - rm.effective_stress[row]) / (2 * h),
+                      2.0e-4 * youngs_modulus);
+          EXPECT_NEAR(result.derivative[6 + column][6 + row],
+                      (rp.state.plastic_strain[row] - rm.state.plastic_strain[row]) / (2 * h),
+                      2.0e-4);
+        }
+        EXPECT_NEAR(result.derivative[6 + column][12],
+                    (rp.state.tensile_equivalent_plastic_strain -
+                     rm.state.tensile_equivalent_plastic_strain) / (2 * h), 2.0e-4);
+        EXPECT_NEAR(result.derivative[6 + column][13],
+                    (rp.state.compressive_equivalent_plastic_strain -
+                     rm.state.compressive_equivalent_plastic_strain) / (2 * h), 2.0e-4);
+      }
+    }
   }
 }
