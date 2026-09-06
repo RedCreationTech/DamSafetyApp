@@ -750,6 +750,7 @@ AbaqusCDPLocalIntegrator::integrate(const SymmetricTensor & total_strain,
       return ActiveBranch::TENSION;
     return ActiveBranch::MIXED;
   };
+  bool retried_elastic_predictor = false;
   unsigned int iterations = 0;
   unsigned int jacobian_fallbacks = 0;
   unsigned int automatic_jacobian_evaluations = 0;
@@ -846,6 +847,21 @@ AbaqusCDPLocalIntegrator::integrate(const SymmetricTensor & total_strain,
       ++local_factorizations;
       accepted = try_increment(solveLinearSystem(factorization, right_hand_side));
       ++local_backsolves;
+    }
+    if (!accepted && !retried_elastic_predictor)
+    {
+      // The explicit plastic predictor may enter a different stress branch and
+      // drive Newton toward the nonnegative multiplier boundary. Retry once
+      // from the feasible elastic trial, using the SAME old state and residual
+      // equations. Successful original solves are untouched. The retry shares
+      // the original iteration budget and never relaxes the residual tolerance.
+      retried_elastic_predictor = true;
+      unknown = {};
+      for (std::size_t i = 0; i < 6; ++i)
+        unknown[i] = trial_stress[i] / stress_scale;
+      current = evaluate(unknown, total_strain, old_state, stress_scale);
+      residual_norm = infinityNorm(current.residual);
+      continue;
     }
     if (!accepted)
     {

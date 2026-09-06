@@ -357,3 +357,183 @@ TEST(AbaqusCDPLocalIntegrator, FailureCaptureDoesNotChangeReturnOrFailure)
   }
   EXPECT_GT(payloads, 0u);
 }
+
+TEST(AbaqusCDPLocalIntegrator, CapturedD01Failure0ConvergesWithoutRelaxation)
+{
+  const std::string d = "test/tests/cdp_material_table/reloading_capture_data/";
+  const CDPMaterialTable table(d + "compression_hardening.csv", d + "compression_damage.csv",
+                              d + "tension_stiffening.csv", d + "tension_damage.csv", 29791500000.0);
+  const AbaqusCDPLocalIntegrator integrator(table, {29791500000.0, 0.2, 36, 0.1, 1.16, 0.667});
+  const AbaqusCDPLocalIntegrator::SymmetricTensor target = {-9.0365343635225316e-05, -9.036534363203684e-05, 0.00093614078695955288, 1.2324873920195368e-05, -1.7592418891230148e-05, -1.7592418905879295e-05};
+  AbaqusCDPLocalIntegrator::State old;
+  old.plastic_strain = {-0.0001700362842915049, -0.00017003628428836188, 0.00084379512253861754, 1.216360837019724e-05, -1.7356925963159499e-05, -1.7356925977610017e-05};
+  old.tensile_equivalent_plastic_strain = 0.00084441609852190045;
+  old.compressive_equivalent_plastic_strain = 0;
+  const auto saved = old;
+  const auto linearized = integrator.integrateLinearized(target, old);
+  const auto & result = linearized.result;
+  EXPECT_LT(result.residual_norm, 1e-9);
+  EXPECT_LE(result.iterations, 40u);
+  EXPECT_GT(result.plastic_multiplier, 0.0);
+  EXPECT_GE(result.state.tensile_equivalent_plastic_strain, old.tensile_equivalent_plastic_strain);
+  EXPECT_GE(result.state.compressive_equivalent_plastic_strain, old.compressive_equivalent_plastic_strain);
+  EXPECT_EQ(old.plastic_strain, saved.plastic_strain);
+  EXPECT_EQ(old.tensile_equivalent_plastic_strain, saved.tensile_equivalent_plastic_strain);
+  EXPECT_EQ(old.compressive_equivalent_plastic_strain, saved.compressive_equivalent_plastic_strain);
+  auto plus = target, minus = target;
+  const double step = 1e-10;
+  plus[2] += step;
+  minus[2] -= step;
+  const auto upper = integrator.integrate(plus, old);
+  const auto lower = integrator.integrate(minus, old);
+  for (unsigned int k = 0; k < 6; ++k)
+  {
+    const double finite_difference = (upper.effective_stress[k] - lower.effective_stress[k]) / (2 * step);
+    EXPECT_NEAR(linearized.derivative[2][k], finite_difference,
+                1e-4 * std::max(1.0e6, std::abs(finite_difference)));
+  }
+}
+
+TEST(AbaqusCDPLocalIntegrator, CapturedD02Failure0ConvergesWithoutRelaxation)
+{
+  const std::string d = "test/tests/cdp_material_table/reloading_capture_data/";
+  const CDPMaterialTable table(d + "compression_hardening.csv", d + "compression_damage.csv",
+                              d + "tension_stiffening.csv", d + "tension_damage.csv", 29791500000.0);
+  const AbaqusCDPLocalIntegrator integrator(table, {29791500000.0, 0.2, 36, 0.1, 1.16, 0.667});
+  const AbaqusCDPLocalIntegrator::SymmetricTensor target = {0.0015240141114345868, 0.0015240141110805254, -0.0013975892305307224, -0.00021690460335515682, 0.00017610941571070507, 0.0001761094157224077};
+  AbaqusCDPLocalIntegrator::State old;
+  old.plastic_strain = {0.0014872687374944899, 0.0014872687371291821, -0.0014620339967781621, -0.00020665604500810279, 0.00016646232338713882, 0.00016646232341545116};
+  old.tensile_equivalent_plastic_strain = 0.00012298361418062488;
+  old.compressive_equivalent_plastic_strain = 0.0014613947559259319;
+  const auto saved = old;
+  const auto linearized = integrator.integrateLinearized(target, old);
+  const auto & result = linearized.result;
+  EXPECT_LT(result.residual_norm, 1e-9);
+  EXPECT_LE(result.iterations, 40u);
+  EXPECT_GT(result.plastic_multiplier, 0.0);
+  EXPECT_GE(result.state.tensile_equivalent_plastic_strain, old.tensile_equivalent_plastic_strain);
+  EXPECT_GE(result.state.compressive_equivalent_plastic_strain, old.compressive_equivalent_plastic_strain);
+  EXPECT_EQ(old.plastic_strain, saved.plastic_strain);
+  EXPECT_EQ(old.tensile_equivalent_plastic_strain, saved.tensile_equivalent_plastic_strain);
+  EXPECT_EQ(old.compressive_equivalent_plastic_strain, saved.compressive_equivalent_plastic_strain);
+  auto plus = target, minus = target;
+  const double step = 1e-10;
+  plus[2] += step;
+  minus[2] -= step;
+  const auto upper = integrator.integrate(plus, old);
+  const auto lower = integrator.integrate(minus, old);
+  for (unsigned int k = 0; k < 6; ++k)
+  {
+    const double finite_difference = (upper.effective_stress[k] - lower.effective_stress[k]) / (2 * step);
+    EXPECT_NEAR(linearized.derivative[2][k], finite_difference,
+                1e-4 * std::max(1.0e6, std::abs(finite_difference)));
+  }
+}
+
+TEST(AbaqusCDPLocalIntegrator, CapturedD02Failure1ConvergesWithoutRelaxation)
+{
+  const std::string d = "test/tests/cdp_material_table/reloading_capture_data/";
+  const CDPMaterialTable table(d + "compression_hardening.csv", d + "compression_damage.csv",
+                              d + "tension_stiffening.csv", d + "tension_damage.csv", 29791500000.0);
+  const AbaqusCDPLocalIntegrator integrator(table, {29791500000.0, 0.2, 36, 0.1, 1.16, 0.667});
+  const AbaqusCDPLocalIntegrator::SymmetricTensor target = {0.0009531850571030951, 0.0009531850548886397, 0.00015815542001929389, 0.00061822768025922, -0.0013701250945158156, -0.0013701250960286499};
+  AbaqusCDPLocalIntegrator::State old;
+  old.plastic_strain = {0.00089439568582129524, 0.00089439568360668502, 8.5302688470749991e-05, 0.00061818102327210037, -0.0013700165132083122, -0.0013700165147215513};
+  old.tensile_equivalent_plastic_strain = 0.0021957686373652988;
+  old.compressive_equivalent_plastic_strain = 0.00043273549203351008;
+  const auto saved = old;
+  const auto linearized = integrator.integrateLinearized(target, old);
+  const auto & result = linearized.result;
+  EXPECT_LT(result.residual_norm, 1e-9);
+  EXPECT_LE(result.iterations, 40u);
+  EXPECT_GT(result.plastic_multiplier, 0.0);
+  EXPECT_GE(result.state.tensile_equivalent_plastic_strain, old.tensile_equivalent_plastic_strain);
+  EXPECT_GE(result.state.compressive_equivalent_plastic_strain, old.compressive_equivalent_plastic_strain);
+  EXPECT_EQ(old.plastic_strain, saved.plastic_strain);
+  EXPECT_EQ(old.tensile_equivalent_plastic_strain, saved.tensile_equivalent_plastic_strain);
+  EXPECT_EQ(old.compressive_equivalent_plastic_strain, saved.compressive_equivalent_plastic_strain);
+  auto plus = target, minus = target;
+  const double step = 1e-10;
+  plus[2] += step;
+  minus[2] -= step;
+  const auto upper = integrator.integrate(plus, old);
+  const auto lower = integrator.integrate(minus, old);
+  for (unsigned int k = 0; k < 6; ++k)
+  {
+    const double finite_difference = (upper.effective_stress[k] - lower.effective_stress[k]) / (2 * step);
+    EXPECT_NEAR(linearized.derivative[2][k], finite_difference,
+                1e-4 * std::max(1.0e6, std::abs(finite_difference)));
+  }
+}
+
+TEST(AbaqusCDPLocalIntegrator, CapturedD02Failure2ConvergesWithoutRelaxation)
+{
+  const std::string d = "test/tests/cdp_material_table/reloading_capture_data/";
+  const CDPMaterialTable table(d + "compression_hardening.csv", d + "compression_damage.csv",
+                              d + "tension_stiffening.csv", d + "tension_damage.csv", 29791500000.0);
+  const AbaqusCDPLocalIntegrator integrator(table, {29791500000.0, 0.2, 36, 0.1, 1.16, 0.667});
+  const AbaqusCDPLocalIntegrator::SymmetricTensor target = {0.00096133133028604694, 0.00096133131583884689, 0.00018357006345837883, 0.00062554901815871085, -0.0013831792766431663, -0.0013831792782876442};
+  AbaqusCDPLocalIntegrator::State old;
+  old.plastic_strain = {0.00089792970657001636, 0.00089792969212419726, 0.00011291180885880218, 0.00062554735417117379, -0.0013831757902785732, -0.0013831757919230423};
+  old.tensile_equivalent_plastic_strain = 0.0022492747425780671;
+  old.compressive_equivalent_plastic_strain = 0.00043273549203351008;
+  const auto saved = old;
+  const auto linearized = integrator.integrateLinearized(target, old);
+  const auto & result = linearized.result;
+  EXPECT_LT(result.residual_norm, 1e-9);
+  EXPECT_LE(result.iterations, 40u);
+  EXPECT_GT(result.plastic_multiplier, 0.0);
+  EXPECT_GE(result.state.tensile_equivalent_plastic_strain, old.tensile_equivalent_plastic_strain);
+  EXPECT_GE(result.state.compressive_equivalent_plastic_strain, old.compressive_equivalent_plastic_strain);
+  EXPECT_EQ(old.plastic_strain, saved.plastic_strain);
+  EXPECT_EQ(old.tensile_equivalent_plastic_strain, saved.tensile_equivalent_plastic_strain);
+  EXPECT_EQ(old.compressive_equivalent_plastic_strain, saved.compressive_equivalent_plastic_strain);
+  auto plus = target, minus = target;
+  const double step = 1e-10;
+  plus[2] += step;
+  minus[2] -= step;
+  const auto upper = integrator.integrate(plus, old);
+  const auto lower = integrator.integrate(minus, old);
+  for (unsigned int k = 0; k < 6; ++k)
+  {
+    const double finite_difference = (upper.effective_stress[k] - lower.effective_stress[k]) / (2 * step);
+    EXPECT_NEAR(linearized.derivative[2][k], finite_difference,
+                1e-4 * std::max(1.0e6, std::abs(finite_difference)));
+  }
+}
+
+TEST(AbaqusCDPLocalIntegrator, CapturedD02Failure3ConvergesWithoutRelaxation)
+{
+  const std::string d = "test/tests/cdp_material_table/reloading_capture_data/";
+  const CDPMaterialTable table(d + "compression_hardening.csv", d + "compression_damage.csv",
+                              d + "tension_stiffening.csv", d + "tension_damage.csv", 29791500000.0);
+  const AbaqusCDPLocalIntegrator integrator(table, {29791500000.0, 0.2, 36, 0.1, 1.16, 0.667});
+  const AbaqusCDPLocalIntegrator::SymmetricTensor target = {0.000972388249845218, 0.00097238851354146155, 0.00019442585526969455, 0.0006369081687145761, -0.0014009130930480956, -0.0014009128555236452};
+  AbaqusCDPLocalIntegrator::State old;
+  old.plastic_strain = {0.00090746960819255583, 0.00090746987188716798, 0.00012445839532105251, 0.00063690805969194729, -0.0014009128986647683, -0.0014009126611421736};
+  old.tensile_equivalent_plastic_strain = 0.0022945280968675206;
+  old.compressive_equivalent_plastic_strain = 0.00043273549203351008;
+  const auto saved = old;
+  const auto linearized = integrator.integrateLinearized(target, old);
+  const auto & result = linearized.result;
+  EXPECT_LT(result.residual_norm, 1e-9);
+  EXPECT_LE(result.iterations, 40u);
+  EXPECT_GT(result.plastic_multiplier, 0.0);
+  EXPECT_GE(result.state.tensile_equivalent_plastic_strain, old.tensile_equivalent_plastic_strain);
+  EXPECT_GE(result.state.compressive_equivalent_plastic_strain, old.compressive_equivalent_plastic_strain);
+  EXPECT_EQ(old.plastic_strain, saved.plastic_strain);
+  EXPECT_EQ(old.tensile_equivalent_plastic_strain, saved.tensile_equivalent_plastic_strain);
+  EXPECT_EQ(old.compressive_equivalent_plastic_strain, saved.compressive_equivalent_plastic_strain);
+  auto plus = target, minus = target;
+  const double step = 1e-10;
+  plus[2] += step;
+  minus[2] -= step;
+  const auto upper = integrator.integrate(plus, old);
+  const auto lower = integrator.integrate(minus, old);
+  for (unsigned int k = 0; k < 6; ++k)
+  {
+    const double finite_difference = (upper.effective_stress[k] - lower.effective_stress[k]) / (2 * step);
+    EXPECT_NEAR(linearized.derivative[2][k], finite_difference,
+                1e-4 * std::max(1.0e6, std::abs(finite_difference)));
+  }
+}
