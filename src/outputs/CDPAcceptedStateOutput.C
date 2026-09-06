@@ -1,4 +1,5 @@
 #include "CDPAcceptedStateOutput.h"
+#include "CDPAssemblyProbe.h"
 #include "FEProblemBase.h"
 #include "MaterialPropertyStorage.h"
 #include "MooseMesh.h"
@@ -11,6 +12,7 @@
 #include "libmesh/elem.h"
 #include "libmesh/fe.h"
 #include "libmesh/quadrature_gauss.h"
+#include <algorithm>
 #include <fstream>
 #include <iomanip>
 
@@ -21,6 +23,8 @@ InputParameters CDPAcceptedStateOutput::validParams()
   p.set<ExecFlagEnum>("execute_on", true) = EXEC_TIMESTEP_END;
   p.addParam<std::vector<Real>>("fd_targets", {0., 0., 0.11, 2., 0., 0., 0.14, 2.},
       "Flat x y z component tuples for diagnostic columns; component 0/1/2 is X/Y/Z.");
+  p.addParam<std::vector<Real>>("capture_times", {}, "Optional exact accepted times; never forces steps");
+  p.addParam<bool>("assembly_probe", false, "Capture passive assembly material data");
   p.addClassDescription("Capture accepted global solution, assembled residual/Jacobian and complete stored material histories.");
   return p;
 }
@@ -56,6 +60,11 @@ void CDPAcceptedStateOutput::writeHistory(const std::string & stage)
 }
 void CDPAcceptedStateOutput::output()
 {
+  const auto & times = getParam<std::vector<Real>>("capture_times");
+  if (!times.empty() && std::none_of(times.begin(), times.end(),
+      [this](Real t) { return std::abs(_time-t) < 1e-9; })) return;
+  const bool probe = getParam<bool>("assembly_probe");
+  const std::string rank = "_rank" + std::to_string(processor_id()) + ".csv";
   auto & nl = _problem_ptr->getNonlinearSystemBase(0);
   auto & sys = dynamic_cast<libMesh::NonlinearImplicitSystem &>(nl.system());
   const auto stem = filename();
@@ -90,7 +99,9 @@ void CDPAcceptedStateOutput::output()
   auto jacobian = sys.get_system_matrix().zero_clone();
   _problem_ptr->computeResidual(*accepted,*residual,0);
   residual->print_matlab(stem + "_residual.m");
+  if (probe) CDPAssemblyProbe::beginCapture(stem + "_ip_base" + rank, true);
   _problem_ptr->computeJacobian(*accepted,*jacobian,0);
+  if (probe) CDPAssemblyProbe::endCapture();
   jacobian->print_matlab(stem + "_jacobian.m");
   // Configurable physical coordinates avoid reliance on MPI-dependent DOF IDs.
   // Keep the original two centerline Z columns as the default.
@@ -121,8 +132,13 @@ void CDPAcceptedStateOutput::output()
       plus->close(); minus->close();
       auto rp = residual->zero_clone();
       auto rm = residual->zero_clone();
+      const std::string ip_stem = stem + "_ip_dof" + std::to_string(dof) + (h==1e-10 ? "_h10" : "_h11");
+      if (probe) CDPAssemblyProbe::beginCapture(ip_stem + "_plus" + rank, false);
       _problem_ptr->computeResidual(*plus,*rp,0);
+      if (probe) CDPAssemblyProbe::endCapture();
+      if (probe) CDPAssemblyProbe::beginCapture(ip_stem + "_minus" + rank, false);
       _problem_ptr->computeResidual(*minus,*rm,0);
+      if (probe) CDPAssemblyProbe::endCapture();
       rp->add(-1.,*rm); rp->scale(0.5/h);
       rp->print_matlab(stem + "_fd_dof" + std::to_string(dof) + (h==1e-10 ? "_h10.m" : "_h11.m"));
       // Reset the problem's current solution pointer before scratch vectors die.
