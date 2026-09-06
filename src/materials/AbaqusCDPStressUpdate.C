@@ -5,6 +5,8 @@
 #include <array>
 #include <chrono>
 #include <exception>
+#include <sstream>
+#include <iomanip>
 
 registerMooseObject("DamSafetyApp", AbaqusCDPStressUpdate);
 
@@ -59,12 +61,18 @@ AbaqusCDPStressUpdate::validParams()
                         false,
                         "Measure per-material-call elapsed time and expose detailed local solver "
                         "counters as material properties");
+  params.addParam<unsigned int>("maximum_failure_captures", 0,
+                                "Maximum detailed failures per material instance/rank/thread; zero disables");
+  params.addParam<Real>("failure_capture_start_time", 0.0,
+                       "Earliest simulation time for detailed failure logging");
   return params;
 }
 
 AbaqusCDPStressUpdate::AbaqusCDPStressUpdate(const InputParameters & parameters)
   : StressUpdateBase(parameters),
     _enable_performance_diagnostics(getParam<bool>("enable_performance_diagnostics")),
+    _maximum_failure_captures(getParam<unsigned int>("maximum_failure_captures")),
+    _failure_capture_start_time(getParam<Real>("failure_capture_start_time")),
     _table(getParam<FileName>("compression_hardening_file"),
            getParam<FileName>("compression_damage_file"),
            getParam<FileName>("tension_stiffening_file"),
@@ -80,7 +88,9 @@ AbaqusCDPStressUpdate::AbaqusCDPStressUpdate(const InputParameters & parameters)
                        getParam<unsigned int>("maximum_local_iterations"),
                        getParam<Real>("local_residual_tolerance"),
                        getParam<Real>("local_finite_difference_step"),
-                       getParam<Real>("minimum_line_search")}),
+                       getParam<Real>("minimum_line_search"),
+                       true,
+                       _maximum_failure_captures > 0}),
     _state_integrator(_local_integrator,
                       {getParam<Real>("tension_recovery"),
                        getParam<Real>("compression_recovery"),
@@ -303,6 +313,24 @@ AbaqusCDPStressUpdate::updateState(RankTwoTensor & strain_increment,
   }
   catch (const std::exception & error)
   {
-    throw MooseException(error.what());
+    std::string detail = error.what();
+    const auto payload = detail.find("\nCDP_LOCAL_FAILURE_V1 ");
+    if (payload != std::string::npos)
+    {
+      if (_t >= _failure_capture_start_time && _failure_captures < _maximum_failure_captures)
+      {
+        ++_failure_captures;
+        std::ostringstream context;
+        context << std::setprecision(17) << "\nCDP_MATERIAL_FAILURE_V1 {\"element_id\":"
+                << _current_elem->id() << ",\"qp_zero_based\":" << _qp
+                << ",\"rank\":" << processor_id() << ",\"time\":" << _t
+                << ",\"dt\":" << _dt << ",\"capture_index\":" << _failure_captures << '}';
+        detail += context.str();
+      }
+      else
+        detail.resize(payload);
+    }
+    throw MooseException(detail);
+
   }
 }

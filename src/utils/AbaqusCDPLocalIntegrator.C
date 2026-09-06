@@ -763,7 +763,22 @@ AbaqusCDPLocalIntegrator::integrate(const SymmetricTensor & total_strain,
     LocalVector right_hand_side;
     for (std::size_t i = 0; i < local_size; ++i)
       right_hand_side[i] = -current.residual[i];
+    struct DirectionDiagnostic
+    {
+      LocalVector direction = {};
+      unsigned int negative_rejections = 0;
+      unsigned int residual_rejections = 0;
+      bool attempted = false;
+    };
+    std::array<DirectionDiagnostic, 2> diagnostics = {};
+    unsigned int direction_index = 0;
     const auto try_increment = [&](const LocalVector & increment) {
+      auto & diagnostic = diagnostics[direction_index];
+      if (_parameters.capture_failure_context)
+      {
+        diagnostic.direction = increment;
+        diagnostic.attempted = true;
+      }
       for (double line_search = 1.0; line_search >= _parameters.minimum_line_search;
            line_search *= 0.5)
       {
@@ -772,7 +787,11 @@ AbaqusCDPLocalIntegrator::integrate(const SymmetricTensor & total_strain,
           candidate_unknown[i] += line_search * increment[i];
         if (candidate_unknown[6] < 0.0 || candidate_unknown[7] < 0.0 ||
             candidate_unknown[8] < 0.0)
+        {
+          if (_parameters.capture_failure_context)
+            ++diagnostic.negative_rejections;
           continue;
+        }
 
         auto candidate = evaluate(candidate_unknown, total_strain, old_state, stress_scale);
         const double candidate_norm = infinityNorm(candidate.residual);
@@ -783,6 +802,8 @@ AbaqusCDPLocalIntegrator::integrate(const SymmetricTensor & total_strain,
           residual_norm = candidate_norm;
           return true;
         }
+        if (_parameters.capture_failure_context)
+          ++diagnostic.residual_rejections;
       }
       return false;
     };
@@ -807,6 +828,7 @@ AbaqusCDPLocalIntegrator::integrate(const SymmetricTensor & total_strain,
       if (!accepted)
       {
         ++jacobian_fallbacks;
+        direction_index = 1;
         const auto reference = numericalJacobian(unknown, total_strain, old_state, stress_scale);
         ++finite_difference_jacobian_evaluations;
         const auto factorization = factorLinearSystem(reference);
@@ -817,6 +839,7 @@ AbaqusCDPLocalIntegrator::integrate(const SymmetricTensor & total_strain,
     }
     else
     {
+      direction_index = 1;
       const auto reference = numericalJacobian(unknown, total_strain, old_state, stress_scale);
       ++finite_difference_jacobian_evaluations;
       const auto factorization = factorLinearSystem(reference);
@@ -833,6 +856,38 @@ AbaqusCDPLocalIntegrator::integrate(const SymmetricTensor & total_strain,
               << ", kappa_t=" << current.tensile_equivalent_plastic_strain
               << ", kappa_c=" << current.compressive_equivalent_plastic_strain
               << ", branch=" << branchName(currentBranch(current));
+      if (_parameters.capture_failure_context)
+      {
+        const auto array = [&](const auto & values) {
+          message << '[';
+          for (std::size_t j = 0; j < values.size(); ++j)
+            message << (j ? "," : "") << values[j];
+          message << ']';
+        };
+        message << std::setprecision(17) << "\nCDP_LOCAL_FAILURE_V1 {\"total_strain\":";
+        array(total_strain);
+        message << ",\"old_plastic_strain\":";
+        array(old_state.plastic_strain);
+        message << ",\"old_kappa_t\":" << old_state.tensile_equivalent_plastic_strain
+                << ",\"old_kappa_c\":" << old_state.compressive_equivalent_plastic_strain
+                << ",\"stress_scale\":" << stress_scale << ",\"unknown\":";
+        array(unknown);
+        message << ",\"residual\":";
+        array(current.residual);
+        message << ",\"directions\":[";
+        for (std::size_t j = 0; j < diagnostics.size(); ++j)
+        {
+          const auto & diagnostic = diagnostics[j];
+          message << (j ? "," : "") << "{\"method\":\"" << (j ? "FD" : "AD")
+                  << "\",\"attempted\":" << (diagnostic.attempted ? "true" : "false")
+                  << ",\"negative_rejections\":" << diagnostic.negative_rejections
+                  << ",\"residual_rejections\":" << diagnostic.residual_rejections
+                  << ",\"direction\":";
+          array(diagnostic.direction);
+          message << '}';
+        }
+        message << "]}";
+      }
       integrationError(message.str());
     }
   }

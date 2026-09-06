@@ -5,6 +5,7 @@
 #include <cmath>
 #include <stdexcept>
 #include <string>
+#include <optional>
 
 namespace
 {
@@ -290,4 +291,69 @@ TEST(AbaqusCDPLocalIntegrator, ReusedPlasticStrainColumnsPreserveTransitionAndEi
       }
     }
   }
+}
+
+TEST(AbaqusCDPLocalIntegrator, FailureCaptureDoesNotChangeReturnOrFailure)
+{
+  const auto table = referenceTable();
+  auto off = parameters();
+  off.minimum_line_search = 1.0; // exercise rejection without a long backtracking path
+  auto on = off;
+  on.capture_failure_context = true;
+  const AbaqusCDPLocalIntegrator plain(table, off), captured(table, on);
+  unsigned int payloads = 0;
+  for (double strain : {1e-6, 1e-4, 1e-3, 1e-2, -1e-4, -1e-3, -1e-2})
+  {
+    const AbaqusCDPLocalIntegrator::SymmetricTensor target =
+        {strain, -0.2 * strain, -0.2 * strain, 0.0, 0.0, 0.0};
+    AbaqusCDPLocalIntegrator::State old_state;
+    std::string expected_error;
+    std::optional<AbaqusCDPLocalIntegrator::LinearizedResult> reference;
+    try
+    {
+      reference = plain.integrateLinearized(target, old_state);
+    }
+    catch (const std::runtime_error & error)
+    {
+      expected_error = error.what();
+    }
+    if (reference)
+    {
+      std::optional<AbaqusCDPLocalIntegrator::LinearizedResult> observed;
+      ASSERT_NO_THROW(observed = captured.integrateLinearized(target, old_state));
+      const auto & a = *reference;
+      const auto & b = *observed;
+      EXPECT_EQ(a.result.effective_stress, b.result.effective_stress);
+      EXPECT_EQ(a.result.state.plastic_strain, b.result.state.plastic_strain);
+      EXPECT_EQ(a.result.state.tensile_equivalent_plastic_strain,
+                b.result.state.tensile_equivalent_plastic_strain);
+      EXPECT_EQ(a.result.state.compressive_equivalent_plastic_strain,
+                b.result.state.compressive_equivalent_plastic_strain);
+      EXPECT_EQ(a.derivative, b.derivative);
+      EXPECT_EQ(a.result.iterations, b.result.iterations);
+    }
+    if (!expected_error.empty())
+    {
+      try
+      {
+        captured.integrateLinearized(target, old_state);
+        FAIL() << "capture changed failure into success";
+      }
+      catch (const std::runtime_error & error)
+      {
+        const std::string actual = error.what();
+        EXPECT_EQ(actual.substr(0, expected_error.size()), expected_error);
+        if (expected_error.find("line search failed") != std::string::npos)
+        {
+          EXPECT_NE(actual.find("CDP_LOCAL_FAILURE_V1"), std::string::npos);
+          EXPECT_NE(actual.find("negative_rejections"), std::string::npos);
+          EXPECT_NE(actual.find("old_plastic_strain"), std::string::npos);
+          ++payloads;
+        }
+      }
+    }
+    EXPECT_EQ(old_state.tensile_equivalent_plastic_strain, 0.0);
+    EXPECT_EQ(old_state.compressive_equivalent_plastic_strain, 0.0);
+  }
+  EXPECT_GT(payloads, 0u);
 }

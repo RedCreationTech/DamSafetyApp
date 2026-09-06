@@ -49,6 +49,10 @@ private:
                   Real integration_microseconds);
 
   const bool _enable_performance_diagnostics;
+  const unsigned int _maximum_failure_captures;
+  const Real _failure_capture_start_time;
+  unsigned int _failure_captures = 0; // diagnostic only; deliberately not rolled back
+
   const CDPMaterialTable _table;
   const AbaqusCDPLocalIntegrator _local_integrator;
   const AbaqusCDPStateIntegrator _state_integrator;
