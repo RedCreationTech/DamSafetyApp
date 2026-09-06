@@ -23,6 +23,8 @@ public:
     unsigned int maximum_substeps = 256;
     double maximum_strain_increment = 0.0;
     double tangent_perturbation = 1.0e-8;
+    // Rescue only a failed local solve at the last allowed partition.
+    bool terminal_elastic_predictor_retry = true;
   };
 
   struct Result

@@ -76,7 +76,8 @@ AbaqusCDPStateIntegrator::AbaqusCDPStateIntegrator(
 AbaqusCDPStateIntegrator::Result
 AbaqusCDPStateIntegrator::integrate(const SymmetricTensor & total_strain,
                                     const double time_step,
-                                    const State & old_state) const
+                                    const State & old_state,
+                                    const bool allow_elastic_predictor_retry) const
 {
   if (!finiteStateTensor(total_strain) || !finiteStateTensor(old_state.viscous_plastic_strain))
     stateIntegrationError("total strain or old viscous plastic strain contains a non-finite value");
@@ -87,7 +88,7 @@ AbaqusCDPStateIntegrator::integrate(const SymmetricTensor & total_strain,
 
   // The old state remains immutable. Any failure below leaves the caller's
   // checkpoint untouched and makes a cutback retry deterministic.
-  const auto backbone = _backbone_integrator.integrate(total_strain, old_state.backbone);
+  const auto backbone = _backbone_integrator.integrate(total_strain, old_state.backbone, allow_elastic_predictor_retry);
   return assembleResult(total_strain, time_step, old_state, backbone);
 }
 
@@ -165,7 +166,8 @@ AbaqusCDPStateIntegrator::assembleResult(
 AbaqusCDPStateIntegrator::LinearizedResult
 AbaqusCDPStateIntegrator::integrateLinearized(const SymmetricTensor & total_strain,
                                               const double time_step,
-                                              const State & old_state) const
+                                              const State & old_state,
+                                    const bool allow_elastic_predictor_retry) const
 {
   if (!finiteStateTensor(total_strain) || !finiteStateTensor(old_state.viscous_plastic_strain))
     stateIntegrationError("total strain or old viscous plastic strain contains a non-finite value");
@@ -175,7 +177,7 @@ AbaqusCDPStateIntegrator::integrateLinearized(const SymmetricTensor & total_stra
   validateDamage(old_state.viscous_compression_damage, "old viscous compression damage");
 
   const auto backbone =
-      _backbone_integrator.integrateLinearized(total_strain, old_state.backbone);
+      _backbone_integrator.integrateLinearized(total_strain, old_state.backbone, allow_elastic_predictor_retry);
   LinearizedResult linearized{
       assembleResult(total_strain, time_step, old_state, backbone.result), {}};
 

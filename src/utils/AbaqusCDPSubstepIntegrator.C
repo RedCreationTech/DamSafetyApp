@@ -125,7 +125,8 @@ AbaqusCDPSubstepIntegrator::integrate(const SymmetricTensor & old_total_strain,
       try
       {
         auto step_result = _state_integrator.integrate(
-            target, time_step / static_cast<double>(substeps), working_state);
+            target, time_step / static_cast<double>(substeps), working_state,
+            _parameters.terminal_elastic_predictor_retry && substeps == _parameters.maximum_substeps);
         total_local_iterations += step_result.backbone.iterations;
         total_jacobian_fallbacks += step_result.backbone.jacobian_fallbacks;
         total_automatic_jacobian_evaluations +=
@@ -226,7 +227,8 @@ AbaqusCDPSubstepIntegrator::integrateLinearized(const SymmetricTensor & old_tota
       try
       {
         auto step_result = _state_integrator.integrateLinearized(
-            target, time_step / static_cast<double>(substeps), working_state);
+            target, time_step / static_cast<double>(substeps), working_state,
+            _parameters.terminal_elastic_predictor_retry && substeps == _parameters.maximum_substeps);
         total_local_iterations += step_result.result.backbone.iterations;
         total_jacobian_fallbacks += step_result.result.backbone.jacobian_fallbacks;
         total_automatic_jacobian_evaluations +=

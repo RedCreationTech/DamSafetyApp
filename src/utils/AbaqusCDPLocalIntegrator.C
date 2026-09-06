@@ -676,7 +676,8 @@ AbaqusCDPLocalIntegrator::solveLinearSystem(const LocalFactorization & factoriza
 
 AbaqusCDPLocalIntegrator::Result
 AbaqusCDPLocalIntegrator::integrate(const SymmetricTensor & total_strain,
-                                    const State & old_state) const
+                                    const State & old_state,
+                                    const bool allow_elastic_predictor_retry) const
 {
   if (!finiteTensor(total_strain) || !finiteTensor(old_state.plastic_strain))
     integrationError("total or plastic strain contains a non-finite component");
@@ -848,7 +849,7 @@ AbaqusCDPLocalIntegrator::integrate(const SymmetricTensor & total_strain,
       accepted = try_increment(solveLinearSystem(factorization, right_hand_side));
       ++local_backsolves;
     }
-    if (!accepted && !retried_elastic_predictor)
+    if (!accepted && allow_elastic_predictor_retry && !retried_elastic_predictor)
     {
       // The explicit plastic predictor may enter a different stress branch and
       // drive Newton toward the nonnegative multiplier boundary. Retry once
@@ -950,9 +951,10 @@ AbaqusCDPLocalIntegrator::integrate(const SymmetricTensor & total_strain,
 
 AbaqusCDPLocalIntegrator::LinearizedResult
 AbaqusCDPLocalIntegrator::integrateLinearized(const SymmetricTensor & total_strain,
-                                              const State & old_state) const
+                                              const State & old_state,
+                                    const bool allow_elastic_predictor_retry) const
 {
-  LinearizedResult linearized{integrate(total_strain, old_state), {}};
+  LinearizedResult linearized{integrate(total_strain, old_state, allow_elastic_predictor_retry), {}};
 
   // The first six columns of the elastic stiffness use the same physical
   // tensor-shear convention as the constitutive arrays.

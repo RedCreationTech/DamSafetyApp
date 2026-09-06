@@ -370,7 +370,7 @@ TEST(AbaqusCDPLocalIntegrator, CapturedD01Failure0ConvergesWithoutRelaxation)
   old.tensile_equivalent_plastic_strain = 0.00084441609852190045;
   old.compressive_equivalent_plastic_strain = 0;
   const auto saved = old;
-  const auto linearized = integrator.integrateLinearized(target, old);
+  const auto linearized = integrator.integrateLinearized(target, old, true);
   const auto & result = linearized.result;
   EXPECT_LT(result.residual_norm, 1e-9);
   EXPECT_LE(result.iterations, 40u);
@@ -384,8 +384,8 @@ TEST(AbaqusCDPLocalIntegrator, CapturedD01Failure0ConvergesWithoutRelaxation)
   const double step = 1e-10;
   plus[2] += step;
   minus[2] -= step;
-  const auto upper = integrator.integrate(plus, old);
-  const auto lower = integrator.integrate(minus, old);
+  const auto upper = integrator.integrate(plus, old, true);
+  const auto lower = integrator.integrate(minus, old, true);
   for (unsigned int k = 0; k < 6; ++k)
   {
     const double finite_difference = (upper.effective_stress[k] - lower.effective_stress[k]) / (2 * step);
@@ -406,7 +406,7 @@ TEST(AbaqusCDPLocalIntegrator, CapturedD02Failure0ConvergesWithoutRelaxation)
   old.tensile_equivalent_plastic_strain = 0.00012298361418062488;
   old.compressive_equivalent_plastic_strain = 0.0014613947559259319;
   const auto saved = old;
-  const auto linearized = integrator.integrateLinearized(target, old);
+  const auto linearized = integrator.integrateLinearized(target, old, true);
   const auto & result = linearized.result;
   EXPECT_LT(result.residual_norm, 1e-9);
   EXPECT_LE(result.iterations, 40u);
@@ -420,8 +420,8 @@ TEST(AbaqusCDPLocalIntegrator, CapturedD02Failure0ConvergesWithoutRelaxation)
   const double step = 1e-10;
   plus[2] += step;
   minus[2] -= step;
-  const auto upper = integrator.integrate(plus, old);
-  const auto lower = integrator.integrate(minus, old);
+  const auto upper = integrator.integrate(plus, old, true);
+  const auto lower = integrator.integrate(minus, old, true);
   for (unsigned int k = 0; k < 6; ++k)
   {
     const double finite_difference = (upper.effective_stress[k] - lower.effective_stress[k]) / (2 * step);
@@ -442,7 +442,7 @@ TEST(AbaqusCDPLocalIntegrator, CapturedD02Failure1ConvergesWithoutRelaxation)
   old.tensile_equivalent_plastic_strain = 0.0021957686373652988;
   old.compressive_equivalent_plastic_strain = 0.00043273549203351008;
   const auto saved = old;
-  const auto linearized = integrator.integrateLinearized(target, old);
+  const auto linearized = integrator.integrateLinearized(target, old, true);
   const auto & result = linearized.result;
   EXPECT_LT(result.residual_norm, 1e-9);
   EXPECT_LE(result.iterations, 40u);
@@ -456,8 +456,8 @@ TEST(AbaqusCDPLocalIntegrator, CapturedD02Failure1ConvergesWithoutRelaxation)
   const double step = 1e-10;
   plus[2] += step;
   minus[2] -= step;
-  const auto upper = integrator.integrate(plus, old);
-  const auto lower = integrator.integrate(minus, old);
+  const auto upper = integrator.integrate(plus, old, true);
+  const auto lower = integrator.integrate(minus, old, true);
   for (unsigned int k = 0; k < 6; ++k)
   {
     const double finite_difference = (upper.effective_stress[k] - lower.effective_stress[k]) / (2 * step);
@@ -478,7 +478,7 @@ TEST(AbaqusCDPLocalIntegrator, CapturedD02Failure2ConvergesWithoutRelaxation)
   old.tensile_equivalent_plastic_strain = 0.0022492747425780671;
   old.compressive_equivalent_plastic_strain = 0.00043273549203351008;
   const auto saved = old;
-  const auto linearized = integrator.integrateLinearized(target, old);
+  const auto linearized = integrator.integrateLinearized(target, old, true);
   const auto & result = linearized.result;
   EXPECT_LT(result.residual_norm, 1e-9);
   EXPECT_LE(result.iterations, 40u);
@@ -492,8 +492,8 @@ TEST(AbaqusCDPLocalIntegrator, CapturedD02Failure2ConvergesWithoutRelaxation)
   const double step = 1e-10;
   plus[2] += step;
   minus[2] -= step;
-  const auto upper = integrator.integrate(plus, old);
-  const auto lower = integrator.integrate(minus, old);
+  const auto upper = integrator.integrate(plus, old, true);
+  const auto lower = integrator.integrate(minus, old, true);
   for (unsigned int k = 0; k < 6; ++k)
   {
     const double finite_difference = (upper.effective_stress[k] - lower.effective_stress[k]) / (2 * step);
@@ -514,7 +514,7 @@ TEST(AbaqusCDPLocalIntegrator, CapturedD02Failure3ConvergesWithoutRelaxation)
   old.tensile_equivalent_plastic_strain = 0.0022945280968675206;
   old.compressive_equivalent_plastic_strain = 0.00043273549203351008;
   const auto saved = old;
-  const auto linearized = integrator.integrateLinearized(target, old);
+  const auto linearized = integrator.integrateLinearized(target, old, true);
   const auto & result = linearized.result;
   EXPECT_LT(result.residual_norm, 1e-9);
   EXPECT_LE(result.iterations, 40u);
@@ -528,8 +528,8 @@ TEST(AbaqusCDPLocalIntegrator, CapturedD02Failure3ConvergesWithoutRelaxation)
   const double step = 1e-10;
   plus[2] += step;
   minus[2] -= step;
-  const auto upper = integrator.integrate(plus, old);
-  const auto lower = integrator.integrate(minus, old);
+  const auto upper = integrator.integrate(plus, old, true);
+  const auto lower = integrator.integrate(minus, old, true);
   for (unsigned int k = 0; k < 6; ++k)
   {
     const double finite_difference = (upper.effective_stress[k] - lower.effective_stress[k]) / (2 * step);

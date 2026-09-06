@@ -62,10 +62,12 @@ public:
 
   Result integrate(const SymmetricTensor & total_strain,
                    double time_step,
-                   const State & old_state) const;
+                   const State & old_state,
+                   bool allow_elastic_predictor_retry = false) const;
   LinearizedResult integrateLinearized(const SymmetricTensor & total_strain,
                                        double time_step,
-                                       const State & old_state) const;
+                                       const State & old_state,
+                   bool allow_elastic_predictor_retry = false) const;
 
 private:
   Result assembleResult(const SymmetricTensor & total_strain,

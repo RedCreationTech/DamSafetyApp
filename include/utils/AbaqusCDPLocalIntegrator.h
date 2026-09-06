@@ -96,9 +96,11 @@ public:
 
   AbaqusCDPLocalIntegrator(const CDPMaterialTable & table, Parameters parameters);
 
-  Result integrate(const SymmetricTensor & total_strain, const State & old_state) const;
+  Result integrate(const SymmetricTensor & total_strain, const State & old_state,
+                   bool allow_elastic_predictor_retry = false) const;
   LinearizedResult integrateLinearized(const SymmetricTensor & total_strain,
-                                       const State & old_state) const;
+                                       const State & old_state,
+                   bool allow_elastic_predictor_retry = false) const;
   SymmetricTensor elasticStress(const SymmetricTensor & elastic_strain) const;
   SymmetricTensor elasticStrain(const SymmetricTensor & stress) const;
   CDPMaterialTable::Response materialResponse(CDPMaterialTable::Branch branch,
