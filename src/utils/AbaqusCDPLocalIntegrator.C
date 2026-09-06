@@ -763,13 +763,16 @@ AbaqusCDPLocalIntegrator::integrate(const SymmetricTensor & total_strain,
     LocalVector right_hand_side;
     for (std::size_t i = 0; i < local_size; ++i)
       right_hand_side[i] = -current.residual[i];
-    const auto try_increment = [&](const LocalVector & increment) {
+    const auto try_increment = [&](const LocalVector & increment, const bool project = false) {
       for (double line_search = 1.0; line_search >= _parameters.minimum_line_search;
            line_search *= 0.5)
       {
         auto candidate_unknown = unknown;
         for (std::size_t i = 0; i < local_size; ++i)
           candidate_unknown[i] += line_search * increment[i];
+        if (project)
+          for (std::size_t i = 6; i < local_size; ++i)
+            candidate_unknown[i] = std::max(0.0, candidate_unknown[i]);
         if (candidate_unknown[6] < 0.0 || candidate_unknown[7] < 0.0 ||
             candidate_unknown[8] < 0.0)
           continue;
@@ -823,6 +826,36 @@ AbaqusCDPLocalIntegrator::integrate(const SymmetricTensor & total_strain,
       ++local_factorizations;
       accepted = try_increment(solveLinearSystem(factorization, right_hand_side));
       ++local_backsolves;
+    }
+    if (!accepted && _parameters.project_failed_newton_step)
+    {
+      // Retain the original residual and iteration budget. Projection only affects
+      // a trial point, never committed history or a converged result.
+      for (unsigned int method = _parameters.use_automatic_differentiation_jacobian ? 0 : 1;
+           method < 2 && !accepted;
+           ++method)
+      {
+        try
+        {
+          const auto jacobian = method == 0
+                                    ? automaticDifferentiationJacobian(
+                                          unknown, total_strain, old_state, stress_scale)
+                                    : numericalJacobian(unknown, total_strain, old_state, stress_scale);
+          if (method == 0)
+            ++automatic_jacobian_evaluations;
+          else
+            ++finite_difference_jacobian_evaluations;
+          const auto factorization = factorLinearSystem(jacobian);
+          ++local_factorizations;
+          const auto direction = solveLinearSystem(factorization, right_hand_side);
+          ++local_backsolves;
+          accepted = try_increment(direction, true);
+        }
+        catch (const std::runtime_error &)
+        {
+          accepted = false;
+        }
+      }
     }
     if (!accepted)
     {
