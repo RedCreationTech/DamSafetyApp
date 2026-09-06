@@ -19,6 +19,8 @@ InputParameters CDPAcceptedStateOutput::validParams()
 {
   auto p = FileOutput::validParams();
   p.set<ExecFlagEnum>("execute_on", true) = EXEC_TIMESTEP_END;
+  p.addParam<std::vector<Real>>("fd_targets", {0., 0., 0.11, 2., 0., 0., 0.14, 2.},
+      "Flat x y z component tuples for diagnostic columns; component 0/1/2 is X/Y/Z.");
   p.addClassDescription("Capture accepted global solution, assembled residual/Jacobian and complete stored material histories.");
   return p;
 }
@@ -90,14 +92,21 @@ void CDPAcceptedStateOutput::output()
   residual->print_matlab(stem + "_residual.m");
   _problem_ptr->computeJacobian(*accepted,*jacobian,0);
   jacobian->print_matlab(stem + "_jacobian.m");
-  // Audit two mirrored interior Z columns at the actual accepted state. This is
-  // a diagnostic finite difference, not a solver tolerance or load perturbation.
-  for (const Real z : {0.11, 0.14})
+  // Configurable physical coordinates avoid reliance on MPI-dependent DOF IDs.
+  // Keep the original two centerline Z columns as the default.
+  const auto & targets = getParam<std::vector<Real>>("fd_targets");
+  if (targets.empty() || targets.size() % 4)
+    paramError("fd_targets", "Expected nonempty x y z component tuples");
+  for (unsigned int target = 0; target < targets.size(); target += 4)
   {
+    const Real component = targets[target + 3];
+    if (component != 0. && component != 1. && component != 2.)
+      paramError("fd_targets", "Component must be 0, 1 or 2");
+    const std::string variable = component == 0. ? "disp_x" : component == 1. ? "disp_y" : "disp_z";
     libMesh::dof_id_type dof = libMesh::DofObject::invalid_id;
     for (const auto * node : _mesh_ptr->getMesh().local_node_ptr_range())
-      if (std::abs((*node)(0)) < 1e-12 && std::abs((*node)(1)) < 1e-12 && std::abs((*node)(2)-z) < 1e-12)
-        dof = node->dof_number(sys.number(),sys.variable_number("disp_z"),0);
+      if (std::abs((*node)(0)-targets[target]) < 1e-12 && std::abs((*node)(1)-targets[target+1]) < 1e-12 && std::abs((*node)(2)-targets[target+2]) < 1e-12)
+        dof = node->dof_number(sys.number(),sys.variable_number(variable),0);
     _communicator.min(dof);
     if (dof == libMesh::DofObject::invalid_id) mooseError("Missing mirror diagnostic node");
     for (const Real h : {1e-10, 1e-11})
