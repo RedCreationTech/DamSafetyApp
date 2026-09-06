@@ -4,6 +4,7 @@
 #include "MooseMesh.h"
 #include "NonlinearSystemBase.h"
 #include "RankTwoTensor.h"
+#include "MooseVariableFieldBase.h"
 #include "libmesh/nonlinear_implicit_system.h"
 #include "libmesh/numeric_vector.h"
 #include "libmesh/sparse_matrix.h"
@@ -61,12 +62,12 @@ void CDPAcceptedStateOutput::output()
   nl.solutionOld().print_matlab(stem + "_u_old.m");
   nl.solutionOlder().print_matlab(stem + "_u_older.m");
   std::ofstream map(stem + "_map_rank" + std::to_string(processor_id()) + ".csv");
-  map << std::setprecision(17) << "node,x,y,z,variable,dof\n";
+  map << std::setprecision(17) << "node,x,y,z,variable,dof,scaling\n";
   for (const auto * node : _mesh_ptr->getMesh().local_node_ptr_range())
     for (unsigned int v=0; v<sys.n_vars(); ++v)
       if (node->n_dofs(sys.number(),v))
         map << node->id() << ',' << (*node)(0) << ',' << (*node)(1) << ',' << (*node)(2)
-            << ',' << sys.variable_name(v) << ',' << node->dof_number(sys.number(),v,0) << '\n';
+            << ',' << sys.variable_name(v) << ',' << node->dof_number(sys.number(),v,0) << ',' << nl.getVariable(0,v).scalingFactor() << '\n';
   std::ofstream qpfile(stem + "_qp_rank" + std::to_string(processor_id()) + ".csv");
   qpfile << std::setprecision(17) << "element,qp,x,y,z\n";
   libMesh::QGauss q(3,libMesh::SECOND);
@@ -86,6 +87,36 @@ void CDPAcceptedStateOutput::output()
   residual->print_matlab(stem + "_residual.m");
   _problem_ptr->computeJacobian(*sys.solution,*jacobian,0);
   jacobian->print_matlab(stem + "_jacobian.m");
+  // Audit two mirrored interior Z columns at the actual accepted state. This is
+  // a diagnostic finite difference, not a solver tolerance or load perturbation.
+  for (const Real z : {0.11, 0.14})
+  {
+    libMesh::dof_id_type dof = libMesh::DofObject::invalid_id;
+    for (const auto * node : _mesh_ptr->getMesh().local_node_ptr_range())
+      if (std::abs((*node)(0)) < 1e-12 && std::abs((*node)(1)) < 1e-12 && std::abs((*node)(2)-z) < 1e-12)
+        dof = node->dof_number(sys.number(),sys.variable_number("disp_z"),0);
+    _communicator.min(dof);
+    if (dof == libMesh::DofObject::invalid_id) mooseError("Missing mirror diagnostic node");
+    for (const Real h : {1e-10, 1e-11})
+    {
+      auto plus = solution->clone();
+      auto minus = solution->clone();
+      if (dof >= plus->first_local_index() && dof < plus->last_local_index())
+      {
+        plus->add(dof,h);
+        minus->add(dof,-h);
+      }
+      plus->close(); minus->close();
+      auto rp = residual->zero_clone();
+      auto rm = residual->zero_clone();
+      _problem_ptr->computeResidual(*plus,*rp,0);
+      _problem_ptr->computeResidual(*minus,*rm,0);
+      rp->add(-1.,*rm); rp->scale(0.5/h);
+      rp->print_matlab(stem + "_fd_dof" + std::to_string(dof) + (h==1e-10 ? "_h10.m" : "_h11.m"));
+      // Reset the problem's current solution pointer before scratch vectors die.
+      _problem_ptr->computeResidual(*sys.solution,*residual,0);
+    }
+  }
   // Re-evaluate the original accepted solution last, with original old histories.
   _problem_ptr->computeResidual(*sys.solution,*residual,0);
   writeHistory("after");
