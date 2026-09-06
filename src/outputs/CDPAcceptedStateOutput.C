@@ -57,7 +57,10 @@ void CDPAcceptedStateOutput::output()
   auto & nl = _problem_ptr->getNonlinearSystemBase(0);
   auto & sys = dynamic_cast<libMesh::NonlinearImplicitSystem &>(nl.system());
   const auto stem = filename();
-  auto solution = sys.solution->clone();
+  // Element assembly needs the ghosted current solution, not the distributed
+  // owning System::solution vector (remote element DOFs are otherwise unavailable).
+  const auto * accepted = nl.currentSolution();
+  auto solution = accepted->clone();
   solution->print_matlab(stem + "_u.m");
   nl.solutionOld().print_matlab(stem + "_u_old.m");
   nl.solutionOlder().print_matlab(stem + "_u_older.m");
@@ -82,10 +85,10 @@ void CDPAcceptedStateOutput::output()
   }
   writeHistory("before");
   auto residual = solution->zero_clone();
-  auto jacobian = sys.matrix->zero_clone();
-  _problem_ptr->computeResidual(*sys.solution,*residual,0);
+  auto jacobian = sys.get_system_matrix().zero_clone();
+  _problem_ptr->computeResidual(*accepted,*residual,0);
   residual->print_matlab(stem + "_residual.m");
-  _problem_ptr->computeJacobian(*sys.solution,*jacobian,0);
+  _problem_ptr->computeJacobian(*accepted,*jacobian,0);
   jacobian->print_matlab(stem + "_jacobian.m");
   // Audit two mirrored interior Z columns at the actual accepted state. This is
   // a diagnostic finite difference, not a solver tolerance or load perturbation.
@@ -114,10 +117,10 @@ void CDPAcceptedStateOutput::output()
       rp->add(-1.,*rm); rp->scale(0.5/h);
       rp->print_matlab(stem + "_fd_dof" + std::to_string(dof) + (h==1e-10 ? "_h10.m" : "_h11.m"));
       // Reset the problem's current solution pointer before scratch vectors die.
-      _problem_ptr->computeResidual(*sys.solution,*residual,0);
+      _problem_ptr->computeResidual(*accepted,*residual,0);
     }
   }
   // Re-evaluate the original accepted solution last, with original old histories.
-  _problem_ptr->computeResidual(*sys.solution,*residual,0);
+  _problem_ptr->computeResidual(*accepted,*residual,0);
   writeHistory("after");
 }
