@@ -770,6 +770,9 @@ AbaqusCDPLocalIntegrator::integrate(const SymmetricTensor & total_strain,
         auto candidate_unknown = unknown;
         for (std::size_t i = 0; i < local_size; ++i)
           candidate_unknown[i] += line_search * increment[i];
+        if (project && !std::all_of(candidate_unknown.begin(), candidate_unknown.end(),
+                                    [](double value) { return std::isfinite(value); }))
+          continue;
         if (project)
           for (std::size_t i = 6; i < local_size; ++i)
             candidate_unknown[i] = std::max(0.0, candidate_unknown[i]);
