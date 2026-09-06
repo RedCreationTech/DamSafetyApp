@@ -33,10 +33,10 @@ CDPAssemblyProbe::CDPAssemblyProbe(const InputParameters & p)
 void CDPAssemblyProbe::beginCapture(const std::string & path, bool tangent)
 {
   if (libMesh::n_threads() != 1)
-    mooseError("CDPAssemblyProbe requires one thread per MPI rank");
+    ::mooseError("CDPAssemblyProbe requires one thread per MPI rank");
   cdp_probe_tangent = tangent;
   cdp_probe_stream.open(path);
-  if (!cdp_probe_stream) mooseError("Cannot open assembly probe capture");
+  if (!cdp_probe_stream) ::mooseError("Cannot open assembly probe capture");
   cdp_probe_stream << std::setprecision(17) << "element,qp,x,y,z,kappa_t,DamageT,substeps,depth,fallbacks";
   for (const auto name : {"stress", "strain"})
     for (unsigned int c=0;c<9;++c) cdp_probe_stream << ',' << name << c;
@@ -46,7 +46,7 @@ void CDPAssemblyProbe::beginCapture(const std::string & path, bool tangent)
 }
 void CDPAssemblyProbe::endCapture()
 {
-  if (!cdp_probe_stream) mooseError("Assembly probe write failed");
+  if (!cdp_probe_stream) ::mooseError("Assembly probe write failed");
   cdp_probe_stream.close();
 }
 void CDPAssemblyProbe::computeQpProperties()
