@@ -27,7 +27,7 @@ DamSafetyApp::registerAll(Factory & f, ActionFactory & af, Syntax & syntax)
   Registry::registerObjectsTo(f, {"DamSafetyApp"});
   Registry::registerActionsTo(af, {"DamSafetyApp"});
 
-  /* register custom execute flags, action syntax, etc. here */
+  registerSyntax("CDPQuasiStaticPhysics", "Physics/SolidMechanics/CDPQuasiStatic/*");
 }
 
 void
