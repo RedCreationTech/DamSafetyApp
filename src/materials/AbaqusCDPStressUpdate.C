@@ -112,6 +112,9 @@ AbaqusCDPStressUpdate::AbaqusCDPStressUpdate(const InputParameters & parameters)
     _stiffness_factor(declareProperty<Real>(_base_name + "cdp_stiffness_factor")),
     _local_iterations(declareProperty<Real>(_base_name + "cdp_local_iterations")),
     _jacobian_fallbacks(declareProperty<Real>(_base_name + "cdp_jacobian_fallbacks")),
+    _audit_branch(declareProperty<Real>(_base_name + "cdp_audit_branch")),
+    _audit_residual(declareProperty<Real>(_base_name + "cdp_audit_residual")),
+    _audit_plastic(declareProperty<Real>(_base_name + "cdp_audit_plastic")),
     _accepted_substeps(declareProperty<Real>(_base_name + "cdp_accepted_substeps")),
     _failed_material_calls(declareProperty<Real>(_base_name + "cdp_failed_material_calls")),
     _attempted_partitions(declareProperty<Real>(_base_name + "cdp_attempted_partitions")),
@@ -141,6 +144,7 @@ AbaqusCDPStressUpdate::initQpStatefulProperties()
   _stiffness_factor[_qp] = 1.0;
   _local_iterations[_qp] = 0.0;
   _jacobian_fallbacks[_qp] = 0.0;
+  _audit_branch[_qp] = _audit_residual[_qp] = _audit_plastic[_qp] = 0.;
   _accepted_substeps[_qp] = 1.0;
   _failed_material_calls[_qp] = 0.0;
   _attempted_partitions[_qp] = 1.0;
@@ -241,6 +245,9 @@ AbaqusCDPStressUpdate::storeState(const AbaqusCDPSubstepIntegrator::LinearizedRe
   _stiffness_factor[_qp] = result.result.final_result.damage.stiffness_factor;
   _local_iterations[_qp] = result.result.total_local_iterations;
   _jacobian_fallbacks[_qp] = result.result.total_jacobian_fallbacks;
+  _audit_branch[_qp] = static_cast<unsigned int>(result.result.final_result.backbone.active_branch);
+  _audit_residual[_qp] = result.result.final_result.backbone.residual_norm;
+  _audit_plastic[_qp] = result.result.final_result.backbone.plastic;
   _accepted_substeps[_qp] = result.result.accepted_substeps;
   _failed_material_calls[_qp] = result.result.cutback_count;
   _attempted_partitions[_qp] = result.result.attempted_partitions;

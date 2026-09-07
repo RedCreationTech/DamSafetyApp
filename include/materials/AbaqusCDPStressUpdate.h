@@ -71,6 +71,9 @@ private:
   MaterialProperty<Real> & _stiffness_factor;
   MaterialProperty<Real> & _local_iterations;
   MaterialProperty<Real> & _jacobian_fallbacks;
+  MaterialProperty<Real> & _audit_branch;
+  MaterialProperty<Real> & _audit_residual;
+  MaterialProperty<Real> & _audit_plastic;
   MaterialProperty<Real> & _accepted_substeps;
   MaterialProperty<Real> & _failed_material_calls;
   MaterialProperty<Real> & _attempted_partitions;

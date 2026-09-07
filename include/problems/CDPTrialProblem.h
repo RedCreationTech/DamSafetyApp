@@ -11,6 +11,8 @@ public:
   static PetscErrorCode monitor(SNES, PetscInt, PetscReal, void *);
 private:
   bool capturing() const;
+  void auditDirections(SNES);
+  bool _directions_done = false;
   unsigned int _evaluation = 0;
   const Real _start, _end;
   const std::string _prefix;

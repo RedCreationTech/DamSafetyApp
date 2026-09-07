@@ -43,6 +43,8 @@ CDPAssemblyProbe::CDPAssemblyProbe(const InputParameters & p)
     _history_scalars.push_back(&getMaterialPropertyOld<Real>(name));
   }
   _history_scalars.push_back(&getMaterialProperty<Real>("cdp_stiffness_factor"));
+  for (const auto & name : {"cdp_audit_branch", "cdp_audit_residual", "cdp_audit_plastic"})
+    _history_scalars.push_back(&getMaterialProperty<Real>(name));
   for (const auto id : getParam<std::vector<dof_id_type>>("probe_elements"))
     _probe_elements.insert(id);
 }
@@ -65,7 +67,7 @@ void CDPAssemblyProbe::beginCapture(const std::string & path, bool tangent)
   for (const auto & name : scalar_history_names)
     for (const auto age : {"new", "old"})
       cdp_probe_stream << ',' << name << '_' << age;
-  cdp_probe_stream << ",cdp_stiffness_factor\n";
+  cdp_probe_stream << ",cdp_stiffness_factor,final_substep_active_branch,final_substep_residual_norm,final_substep_plastic\n";
 }
 void CDPAssemblyProbe::endCapture()
 {
