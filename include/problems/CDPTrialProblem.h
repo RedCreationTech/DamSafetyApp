@@ -12,7 +12,6 @@ public:
 private:
   bool capturing() const;
   unsigned int _evaluation = 0;
-  SNES _observed_snes = nullptr;
   const Real _start, _end;
   const std::string _prefix;
 };

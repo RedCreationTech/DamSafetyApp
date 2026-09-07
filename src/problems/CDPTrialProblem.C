@@ -24,11 +24,11 @@ void CDPTrialProblem::computeResidual(const NumericVector<Number> & x,
   auto * solver = dynamic_cast<libMesh::PetscNonlinearSolver<Number> *>(getNonlinearSystem(n).nonlinearSolver());
   if (!solver) mooseError("CDPTrialProblem requires PETSc");
   SNES snes = solver->snes();
-  if (_observed_snes != snes)
-  {
-    if (SNESMonitorSet(snes, monitor, this, nullptr)) mooseError("Cannot attach passive SNES monitor");
-    _observed_snes = snes;
-  }
+  // SNES objects may be recreated at the same address between time steps.
+  // PETSc deduplicates equal monitor/context/destroy triples. Re-registering
+  // avoids a rank-dependent stale pointer cache and collective viewer hangs.
+  if (SNESMonitorSet(snes, monitor, this, nullptr))
+    mooseError("Cannot attach passive SNES monitor");
   if (!capturing()) { FEProblem::computeResidual(x,r,n); return; }
   const auto id = ++_evaluation;
   const auto stem = _prefix + "_eval" + std::to_string(id);
