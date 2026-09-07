@@ -62,6 +62,28 @@ PetscErrorCode CDPTrialProblem::monitor(SNES snes, PetscInt iteration, PetscReal
   PetscCall(PetscViewerPushFormat(viewer, PETSC_VIEWER_ASCII_MATLAB));
   PetscCall(VecView(x,viewer));
   PetscCall(PetscViewerDestroy(&viewer));
+  if (iteration > 0 && p.getParam<bool>("capture_actual_jacobian"))
+  {
+    // Observe the operator actually used for the completed linear solve.
+    // Never print/close the live matrix inside FEProblem assembly.
+    KSP ksp;
+    Mat op, pc, copy;
+    PetscCall(SNESGetKSP(snes, &ksp));
+    PetscCall(KSPGetOperators(ksp, &op, &pc));
+    PetscCall(MatDuplicate(pc, MAT_COPY_VALUES, &copy));
+    const auto matrix_stem = p._prefix + "_actual_jac_eval" + std::to_string(p._evaluation);
+    PetscCall(PetscViewerASCIIOpen(PetscObjectComm((PetscObject)snes), (matrix_stem+"_J.m").c_str(), &viewer));
+    PetscCall(PetscViewerPushFormat(viewer, PETSC_VIEWER_ASCII_MATLAB));
+    PetscCall(MatView(copy, viewer));
+    PetscCall(PetscViewerDestroy(&viewer));
+    PetscCall(MatDestroy(&copy));
+    if (p.processor_id()==0)
+    {
+      std::ofstream f(p._prefix+"_actual_jacobians.csv",std::ios::app);
+      f << std::setprecision(17) << p._evaluation << ',' << p.time() << ',' << p.dt() << ',' << iteration << '\n';
+      if (!f) return PETSC_ERR_FILE_WRITE;
+    }
+  }
   if (p.processor_id()==0)
   {
     std::ofstream f(p._prefix+"_accepted.csv",std::ios::app);
@@ -69,20 +91,4 @@ PetscErrorCode CDPTrialProblem::monitor(SNES snes, PetscInt iteration, PetscReal
     if (!f) return PETSC_ERR_FILE_WRITE;
   }
   return PETSC_SUCCESS;
-}
-
-void CDPTrialProblem::computeJacobian(const NumericVector<Number> & x,
-                                     SparseMatrix<Number> & jacobian, unsigned int n)
-{
-  FEProblem::computeJacobian(x, jacobian, n);
-  if (!capturing() || !getParam<bool>("capture_actual_jacobian")) return;
-  const auto stem = _prefix + "_actual_jac_eval" + std::to_string(_evaluation);
-  x.print_matlab(stem + "_u.m");
-  jacobian.print_matlab(stem + "_J.m");
-  if (processor_id() == 0)
-  {
-    std::ofstream f(_prefix + "_actual_jacobians.csv", std::ios::app);
-    f << std::setprecision(17) << _evaluation << ',' << time() << ',' << dt() << '\n';
-    if (!f) mooseError("Cannot write actual Jacobian index");
-  }
 }

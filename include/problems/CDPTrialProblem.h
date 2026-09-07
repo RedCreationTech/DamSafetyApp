@@ -8,7 +8,6 @@ public:
   static InputParameters validParams();
   CDPTrialProblem(const InputParameters & p);
   void computeResidual(const NumericVector<Number> &, NumericVector<Number> &, unsigned int) override;
-  void computeJacobian(const NumericVector<Number> &, SparseMatrix<Number> &, unsigned int) override;
   static PetscErrorCode monitor(SNES, PetscInt, PetscReal, void *);
 private:
   bool capturing() const;
