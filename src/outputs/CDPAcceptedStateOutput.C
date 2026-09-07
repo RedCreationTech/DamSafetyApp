@@ -24,6 +24,7 @@ InputParameters CDPAcceptedStateOutput::validParams()
   p.addParam<std::vector<Real>>("fd_targets", {0., 0., 0.11, 2., 0., 0., 0.14, 2.},
       "Flat x y z component tuples for diagnostic columns; component 0/1/2 is X/Y/Z.");
   p.addParam<std::vector<Real>>("capture_times", {}, "Optional exact accepted times; never forces steps");
+  p.addParam<bool>("passive_only", false, "Only read accepted vectors and stored history; never reassemble residual or Jacobian");
   p.addParam<bool>("assembly_probe", false, "Capture passive assembly material data");
   p.addClassDescription("Capture accepted global solution, assembled residual/Jacobian and complete stored material histories.");
   return p;
@@ -95,6 +96,11 @@ void CDPAcceptedStateOutput::output()
       qpfile << elem->id() << ',' << i << ',' << xyz[i](0) << ',' << xyz[i](1) << ',' << xyz[i](2) << '\n';
   }
   writeHistory("before");
+  if (getParam<bool>("passive_only"))
+  {
+    writeHistory("after");
+    return;
+  }
   auto residual = solution->zero_clone();
   auto jacobian = sys.get_system_matrix().zero_clone();
   _problem_ptr->computeResidual(*accepted,*residual,0);

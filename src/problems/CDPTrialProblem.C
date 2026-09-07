@@ -3,12 +3,14 @@
 #include "NonlinearSystem.h"
 #include "libmesh/petsc_nonlinear_solver.h"
 #include "libmesh/numeric_vector.h"
+#include "libmesh/sparse_matrix.h"
 #include <fstream>
 #include <iomanip>
 registerMooseObject("DamSafetyApp", CDPTrialProblem);
 InputParameters CDPTrialProblem::validParams()
 {
   auto p = FEProblem::validParams();
+  p.addParam<bool>("capture_actual_jacobian", false, "Passively write actual assembled solver matrices in the trial window");
   p.addParam<Real>("trial_start", 0.425, "First observed actual residual time");
   p.addParam<Real>("trial_end", 0.430, "Last observed actual residual time");
   p.addParam<std::string>("trial_prefix", "trial", "Output prefix");
@@ -67,4 +69,20 @@ PetscErrorCode CDPTrialProblem::monitor(SNES snes, PetscInt iteration, PetscReal
     if (!f) return PETSC_ERR_FILE_WRITE;
   }
   return PETSC_SUCCESS;
+}
+
+void CDPTrialProblem::computeJacobian(const NumericVector<Number> & x,
+                                     SparseMatrix<Number> & jacobian, unsigned int n)
+{
+  FEProblem::computeJacobian(x, jacobian, n);
+  if (!capturing() || !getParam<bool>("capture_actual_jacobian")) return;
+  const auto stem = _prefix + "_actual_jac_eval" + std::to_string(_evaluation);
+  x.print_matlab(stem + "_u.m");
+  jacobian.print_matlab(stem + "_J.m");
+  if (processor_id() == 0)
+  {
+    std::ofstream f(_prefix + "_actual_jacobians.csv", std::ios::app);
+    f << std::setprecision(17) << _evaluation << ',' << time() << ',' << dt() << '\n';
+    if (!f) mooseError("Cannot write actual Jacobian index");
+  }
 }
