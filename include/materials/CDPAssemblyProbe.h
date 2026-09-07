@@ -22,5 +22,8 @@ protected:
   const MaterialProperty<Real> & _probe_substeps;
   const MaterialProperty<Real> & _probe_depth;
   const MaterialProperty<Real> & _probe_fallbacks;
+  // References only: the observer never updates a constitutive property.
+  std::vector<const MaterialProperty<RankTwoTensor> *> _history_tensors;
+  std::vector<const MaterialProperty<Real> *> _history_scalars;
   std::set<dof_id_type> _probe_elements;
 };
