@@ -50,7 +50,7 @@ void CDPTrialProblem::computeResidual(const NumericVector<Number> & x,
 PetscErrorCode CDPTrialProblem::monitor(SNES snes, PetscInt iteration, PetscReal norm, void * context)
 {
   auto & p = *static_cast<CDPTrialProblem *>(context);
-  if (!p.capturing()) return 0;
+  if (!p.capturing()) return PETSC_SUCCESS;
   // SNES monitor reports the accepted iterate; residual calls alone do not.
   Vec x;
   PetscCall(SNESGetSolution(snes, &x));
@@ -66,5 +66,5 @@ PetscErrorCode CDPTrialProblem::monitor(SNES snes, PetscInt iteration, PetscReal
     f << std::setprecision(17) << p._evaluation << ',' << p.time() << ',' << iteration << ',' << norm << '\n';
     if (!f) return PETSC_ERR_FILE_WRITE;
   }
-  return 0;
+  return PETSC_SUCCESS;
 }
