@@ -139,7 +139,7 @@ void CDPTrialProblem::auditDirections(SNES snes)
     if (!f) mooseError("Cannot write direction history");
   };
   auto evaluate = [&](const NumericVector<Number> & u, const std::string & label) {
-    CDPAssemblyProbe::beginCapture(stem+"_"+label+rank,false);
+    CDPAssemblyProbe::beginCapture(stem+"_"+label+rank,false,true);
     try { FEProblem::computeResidual(u,*residual,0); }
     catch (...) { CDPAssemblyProbe::endCapture(); throw; }
     CDPAssemblyProbe::endCapture();
@@ -150,7 +150,7 @@ void CDPTrialProblem::auditDirections(SNES snes)
   history("before");
   evaluate(*x,"base0");
   evaluate(*x,"base1");
-  CDPAssemblyProbe::beginCapture(stem+"_jacobian"+rank,true);
+  CDPAssemblyProbe::beginCapture(stem+"_jacobian"+rank,true,true);
   try { FEProblem::computeJacobian(*x,*jacobian,0); }
   catch (...) { CDPAssemblyProbe::endCapture(); throw; }
   CDPAssemblyProbe::endCapture();

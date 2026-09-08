@@ -10,7 +10,7 @@ class CDPAssemblyProbe : public Material
 public:
   static InputParameters validParams();
   CDPAssemblyProbe(const InputParameters & p);
-  static void beginCapture(const std::string & path, bool tangent);
+  static void beginCapture(const std::string & path, bool tangent, bool all_elements = false);
   static void endCapture();
 protected:
   void computeQpProperties() override;

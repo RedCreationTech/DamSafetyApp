@@ -8,6 +8,7 @@ namespace
 {
 std::ofstream cdp_probe_stream;
 bool cdp_probe_tangent = false;
+bool cdp_probe_all = false;
 const std::vector<std::string> tensor_history_names = {
     "cdp_backbone_plastic_strain", "cdp_viscous_plastic_strain",
     "elastic_strain", "mechanical_strain"};
@@ -48,11 +49,12 @@ CDPAssemblyProbe::CDPAssemblyProbe(const InputParameters & p)
   for (const auto id : getParam<std::vector<dof_id_type>>("probe_elements"))
     _probe_elements.insert(id);
 }
-void CDPAssemblyProbe::beginCapture(const std::string & path, bool tangent)
+void CDPAssemblyProbe::beginCapture(const std::string & path, bool tangent, bool all_elements)
 {
   if (libMesh::n_threads() != 1)
     ::mooseError("CDPAssemblyProbe requires one thread per MPI rank");
   cdp_probe_tangent = tangent;
+  cdp_probe_all = all_elements;
   cdp_probe_stream.open(path);
   if (!cdp_probe_stream) ::mooseError("Cannot open assembly probe capture");
   cdp_probe_stream << std::setprecision(17) << "element,qp,x,y,z,kappa_t,DamageT,substeps,depth,fallbacks";
@@ -76,7 +78,7 @@ void CDPAssemblyProbe::endCapture()
 }
 void CDPAssemblyProbe::computeQpProperties()
 {
-  if (!cdp_probe_stream.is_open() || !_probe_elements.count(_current_elem->id())) return;
+  if (!cdp_probe_stream.is_open() || (!cdp_probe_all && !_probe_elements.count(_current_elem->id()))) return;
   cdp_probe_stream << _current_elem->id() << ',' << _qp;
   for (unsigned int c=0;c<3;++c) cdp_probe_stream << ',' << _q_point[_qp](c);
   cdp_probe_stream << ',' << _probe_kappa[_qp] << ',' << _probe_damage[_qp]
