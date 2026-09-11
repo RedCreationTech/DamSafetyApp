@@ -41,3 +41,7 @@ __pycache__/
 .DS_Store
 *.swp
 *~
+
+# MOOSE TestHarness 运行产物(重跑可再生成,不入库)
+test/tests/**/*_out.csv
+test/tests/**/*_out_cp/
