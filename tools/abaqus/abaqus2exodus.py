@@ -24,6 +24,7 @@ DamSafetyApp 版本源自 demo-process@0cc241b8dbee6b7eb9594e9f7538fbd493d1f7a8�
 """
 
 import argparse
+import csv
 import json
 import math
 import re
@@ -744,6 +745,44 @@ class GlobalMesh:
         self._hash[h] = gid
         self.node_map[key] = gid
         return gid
+
+
+def write_node_map_csv(gm, path):
+    """Write the explicit Abaqus-label to Exodus numbering map."""
+    path = Path(path)
+    with path.open('w', encoding='utf-8', newline='') as stream:
+        writer = csv.DictWriter(stream, fieldnames=(
+            'instance', 'abaqus_node_label', 'exodus_node_number',
+            'exodus_zero_based_index', 'x', 'y', 'z'))
+        writer.writeheader()
+        for (instance, label), exodus_number in sorted(gm.node_map.items()):
+            x, y, z = gm.coords[exodus_number - 1]
+            writer.writerow({
+                'instance': instance,
+                'abaqus_node_label': label,
+                'exodus_node_number': exodus_number,
+                'exodus_zero_based_index': exodus_number - 1,
+                'x': f'{x:.17g}',
+                'y': f'{y:.17g}',
+                'z': f'{z:.17g}',
+            })
+    return path
+
+
+def add_node_label_sets(gm, nodesets, specs):
+    """Add nodesets from stable instance and Abaqus node-label identities."""
+    for spec in specs:
+        try:
+            name, instance, labels_text = spec.split(':', 2)
+            labels = [int(value) for value in labels_text.split(',')]
+        except ValueError as exc:
+            raise ValueError(f'无法解析 --add-node-label-set: {spec}') from exc
+        missing = [label for label in labels if (instance, label) not in gm.node_map]
+        if missing:
+            raise ValueError(
+                f'节点标签不存在: instance={instance}, labels={missing}')
+        nodesets[sanitize(name)] = sorted({
+            gm.node_map[(instance, label)] for label in labels})
 
 
 def build_global_mesh(model, tol):
@@ -1673,6 +1712,11 @@ def main():
     ap.add_argument('--inp', required=True, help='Abaqus 输入文件')
     ap.add_argument('--out', required=True, help='输出 Exodus .e 文件')
     ap.add_argument('--report', help='JSON 报告输出路径')
+    ap.add_argument('--node-map-csv', metavar='OUT_CSV',
+                    help='导出 instance/Abaqus 节点标签到 Exodus 编号的显式映射')
+    ap.add_argument('--add-node-label-set', action='append', default=[],
+                    metavar='NAME:INSTANCE:LABEL[,LABEL...]',
+                    help='按 instance 与 Abaqus 原始节点标签追加稳定 nodeset，可重复')
     ap.add_argument('--merge-tol', type=float, default=1e-9,
                     help='跨 instance 节点合并容差 (默认 1e-9, 与模型单位一致)')
     ap.add_argument('--tie-tol', type=float, default=20.0,
@@ -1815,6 +1859,8 @@ def main():
         print(f'      追加 nodeset {sanitize(name)}: block={blk} '
               f'{axis}{op}{val} → {len(sel)} 节点')
 
+    add_node_label_sets(gm, nodesets, args.add_node_label_set)
+
     # *MPC BEAM: 生成主-从刚性连杆 (spider) 单元, 等效刚体运动约束
     mpc_links = []
     constraints_audit = []       # 约束提取审核记录 → report['constraints']
@@ -1921,6 +1967,9 @@ def main():
     print(f"[3/3] 写出 Exodus: {args.out}")
     write_exodus(args.out, gm, blocks, block_etype, block_meta, nodesets,
                  sidesets, args.inp)
+    if args.node_map_csv:
+        write_node_map_csv(gm, args.node_map_csv)
+        print(f"      节点映射: {args.node_map_csv}")
 
     # 报告
     xs = [c[0] for c in gm.coords]

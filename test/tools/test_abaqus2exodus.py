@@ -1,3 +1,4 @@
+import csv
 import importlib.util
 import tempfile
 import textwrap
@@ -160,6 +161,33 @@ class Abaqus2Exodus2DTest(unittest.TestCase):
 
         with self.assertRaisesRegex(ValueError, '循环引用'):
             CONVERTER.parse_inp(self.work / 'cycle-a.inp')
+
+    def test_node_mapping_csv_and_stable_label_nodeset(self):
+        source = self.work / 'labels.inp'
+        source.write_text(textwrap.dedent('''\
+            *Part, name=DAM
+            *Node
+            10, 0, 0
+            20, 1, 0
+            30, 1, 1
+            *Element, type=CPS3
+            1, 10, 20, 30
+            *End Part
+            *Assembly, name=A
+            *Instance, name=DAM-1, part=DAM
+            *End Instance
+            *End Assembly
+        '''), encoding='utf-8')
+        gm, *_ = CONVERTER.build_global_mesh(CONVERTER.parse_inp(source), 1e-9)
+        mapping = CONVERTER.write_node_map_csv(gm, self.work / 'node-map.csv')
+        with mapping.open(encoding='utf-8', newline='') as stream:
+            rows = list(csv.DictReader(stream))
+        self.assertEqual(
+            [(row['abaqus_node_label'], row['exodus_node_number'], row['exodus_zero_based_index']) for row in rows],
+            [('10', '1', '0'), ('20', '2', '1'), ('30', '3', '2')])
+        nodesets = {}
+        CONVERTER.add_node_label_sets(gm, nodesets, ['PROBE:DAM-1:20'])
+        self.assertEqual(nodesets['PROBE'], [2])
 
     def test_mass_without_matching_property_is_rejected(self):
         (self.work / 'missing-mass.inp').write_text(textwrap.dedent('''\
