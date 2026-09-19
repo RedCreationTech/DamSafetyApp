@@ -751,7 +751,7 @@ def write_node_map_csv(gm, path):
     """Write the explicit Abaqus-label to Exodus numbering map."""
     path = Path(path)
     with path.open('w', encoding='utf-8', newline='') as stream:
-        writer = csv.DictWriter(stream, fieldnames=(
+        writer = csv.DictWriter(stream, lineterminator='\n', fieldnames=(
             'instance', 'abaqus_node_label', 'exodus_node_number',
             'exodus_zero_based_index', 'x', 'y', 'z'))
         writer.writeheader()
