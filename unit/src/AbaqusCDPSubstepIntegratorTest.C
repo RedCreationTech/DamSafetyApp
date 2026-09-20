@@ -150,6 +150,33 @@ TEST(AbaqusCDPSubstepIntegrator, ElasticReferenceTangentMatchesIsotropicTensor)
   EXPECT_NEAR(tangent.value[5][5], 2.0 * shear, tolerance);
 }
 
+TEST(AbaqusCDPSubstepIntegrator, LocalPlaneStressClosesSigmaZAndCondensesTangent)
+{
+  const auto table = substepReferenceTable();
+  const AbaqusCDPLocalIntegrator local(table, substepLocalParameters());
+  const AbaqusCDPStateIntegrator state_integrator(local, substepStateParameters());
+  const AbaqusCDPSubstepIntegrator integrator(state_integrator, {8, 0.0, 1.0e-8});
+  const AbaqusCDPSubstepIntegrator::SymmetricTensor target =
+      {1.0e-5, -2.0e-6, 0.0, 3.0e-6, 0.0, 0.0};
+
+  const auto result =
+      integrator.integratePlaneStressLinearized({}, target, 1.0e-3, {}, 1.0e-12, 8);
+  const double expected_ezz =
+      -substep_poissons_ratio * (target[0] + target[1]) / (1.0 - substep_poissons_ratio);
+  const double plane_stress_modulus =
+      substep_youngs_modulus / (1.0 - substep_poissons_ratio * substep_poissons_ratio);
+  const double tolerance = 1.0e-9 * substep_youngs_modulus;
+
+  EXPECT_NEAR(result.out_of_plane_strain, expected_ezz, 1.0e-14);
+  EXPECT_DOUBLE_EQ(result.linearized.result.final_result.cauchy_stress[2], 0.0);
+  EXPECT_NEAR(result.linearized.algorithmic_tangent[0][0], plane_stress_modulus, tolerance);
+  EXPECT_NEAR(result.linearized.algorithmic_tangent[1][0],
+              substep_poissons_ratio * plane_stress_modulus,
+              tolerance);
+  for (std::size_t column = 0; column < 6; ++column)
+    EXPECT_NEAR(result.linearized.algorithmic_tangent[column][2], 0.0, tolerance);
+}
+
 TEST(AbaqusCDPSubstepIntegrator, PlasticReferenceTangentMatchesIndependentDirection)
 {
   const auto table = substepReferenceTable();

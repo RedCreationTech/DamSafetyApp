@@ -55,6 +55,18 @@ AbaqusCDPStressUpdate::validParams()
                                     1.0e-8,
                                     "reference_tangent_perturbation > 0",
                                     "Diagnostic reference-tangent perturbation");
+  params.addParam<bool>("enforce_local_plane_stress",
+                        false,
+                        "Solve the out-of-plane strain independently at each quadrature point so "
+                        "that the local out-of-plane stress is zero");
+  params.addRangeCheckedParam<Real>("plane_stress_relative_tolerance",
+                                    1.0e-10,
+                                    "plane_stress_relative_tolerance > 0",
+                                    "Relative local sigma_zz closure tolerance");
+  params.addRangeCheckedParam<unsigned int>("plane_stress_maximum_iterations",
+                                            12,
+                                            "plane_stress_maximum_iterations > 0",
+                                            "Maximum local plane-stress Newton iterations");
   params.addParam<bool>("enable_performance_diagnostics",
                         false,
                         "Measure per-material-call elapsed time and expose detailed local solver "
@@ -64,6 +76,9 @@ AbaqusCDPStressUpdate::validParams()
 
 AbaqusCDPStressUpdate::AbaqusCDPStressUpdate(const InputParameters & parameters)
   : StressUpdateBase(parameters),
+    _enforce_local_plane_stress(getParam<bool>("enforce_local_plane_stress")),
+    _plane_stress_relative_tolerance(getParam<Real>("plane_stress_relative_tolerance")),
+    _plane_stress_maximum_iterations(getParam<unsigned int>("plane_stress_maximum_iterations")),
     _enable_performance_diagnostics(getParam<bool>("enable_performance_diagnostics")),
     _table(getParam<FileName>("compression_hardening_file"),
            getParam<FileName>("compression_damage_file"),
@@ -127,7 +142,11 @@ AbaqusCDPStressUpdate::AbaqusCDPStressUpdate(const InputParameters & parameters)
     _local_factorizations(declareProperty<Real>(_base_name + "cdp_local_factorizations")),
     _local_backsolves(declareProperty<Real>(_base_name + "cdp_local_backsolves")),
     _integration_microseconds(
-        declareProperty<Real>(_base_name + "cdp_integration_microseconds"))
+        declareProperty<Real>(_base_name + "cdp_integration_microseconds")),
+    _local_plane_stress_strain_zz(
+        declareProperty<Real>(_base_name + "cdp_local_plane_stress_strain_zz")),
+    _local_plane_stress_iterations(
+        declareProperty<Real>(_base_name + "cdp_local_plane_stress_iterations"))
 {
 }
 
@@ -154,6 +173,8 @@ AbaqusCDPStressUpdate::initQpStatefulProperties()
   _local_factorizations[_qp] = 0.0;
   _local_backsolves[_qp] = 0.0;
   _integration_microseconds[_qp] = 0.0;
+  _local_plane_stress_strain_zz[_qp] = 0.0;
+  _local_plane_stress_iterations[_qp] = 0.0;
 }
 
 void
@@ -289,8 +310,20 @@ AbaqusCDPStressUpdate::updateState(RankTwoTensor & strain_increment,
   try
   {
     const auto integration_start = std::chrono::steady_clock::now();
-    const auto result =
-        _substep_integrator.integrateLinearized(old_total_strain, new_total_strain, _dt, old_state);
+    const auto plane_stress_result =
+        _enforce_local_plane_stress
+            ? _substep_integrator.integratePlaneStressLinearized(old_total_strain,
+                                                                 new_total_strain,
+                                                                 _dt,
+                                                                 old_state,
+                                                                 _plane_stress_relative_tolerance,
+                                                                 _plane_stress_maximum_iterations)
+            : AbaqusCDPSubstepIntegrator::PlaneStressResult{
+                  _substep_integrator.integrateLinearized(
+                      old_total_strain, new_total_strain, _dt, old_state),
+                  new_total_strain[2],
+                  0};
+    const auto & result = plane_stress_result.linearized;
     const Real integration_microseconds =
         _enable_performance_diagnostics
             ? std::chrono::duration<Real, std::micro>(std::chrono::steady_clock::now() -
@@ -303,10 +336,14 @@ AbaqusCDPStressUpdate::updateState(RankTwoTensor & strain_increment,
       inelastic_increment_array[i] = result.result.final_result.state.viscous_plastic_strain[i] -
                                      old_state.viscous_plastic_strain[i];
     inelastic_strain_increment = toRankTwo(inelastic_increment_array);
+    if (_enforce_local_plane_stress)
+      strain_increment(2, 2) = plane_stress_result.out_of_plane_strain - old_total_strain[2];
     strain_increment -= inelastic_strain_increment;
     if (compute_full_tangent_operator)
       assignTangent(result.algorithmic_tangent, tangent_operator);
     storeState(result, integration_microseconds);
+    _local_plane_stress_strain_zz[_qp] = plane_stress_result.out_of_plane_strain;
+    _local_plane_stress_iterations[_qp] = plane_stress_result.iterations;
   }
   catch (const std::exception & error)
   {

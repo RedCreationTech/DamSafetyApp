@@ -48,6 +48,9 @@ private:
   void storeState(const AbaqusCDPSubstepIntegrator::LinearizedResult & result,
                   Real integration_microseconds);
 
+  const bool _enforce_local_plane_stress;
+  const Real _plane_stress_relative_tolerance;
+  const unsigned int _plane_stress_maximum_iterations;
   const bool _enable_performance_diagnostics;
   const CDPMaterialTable _table;
   const AbaqusCDPLocalIntegrator _local_integrator;
@@ -83,4 +86,6 @@ private:
   MaterialProperty<Real> & _local_factorizations;
   MaterialProperty<Real> & _local_backsolves;
   MaterialProperty<Real> & _integration_microseconds;
+  MaterialProperty<Real> & _local_plane_stress_strain_zz;
+  MaterialProperty<Real> & _local_plane_stress_iterations;
 };

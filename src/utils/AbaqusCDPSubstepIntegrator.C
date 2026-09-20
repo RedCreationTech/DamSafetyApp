@@ -308,6 +308,62 @@ AbaqusCDPSubstepIntegrator::integrateLinearized(const SymmetricTensor & old_tota
   substepError(message.str());
 }
 
+AbaqusCDPSubstepIntegrator::PlaneStressResult
+AbaqusCDPSubstepIntegrator::integratePlaneStressLinearized(
+    const SymmetricTensor & old_total_strain,
+    const SymmetricTensor & new_total_strain,
+    const double time_step,
+    const State & old_state,
+    const double relative_tolerance,
+    const unsigned int maximum_iterations) const
+{
+  if (!std::isfinite(relative_tolerance) || relative_tolerance <= 0.0)
+    substepError("plane-stress relative tolerance must be finite and positive");
+  if (maximum_iterations == 0)
+    substepError("plane-stress maximum iterations must be positive");
+
+  auto target = new_total_strain;
+  auto current = integrateLinearized(old_total_strain, target, time_step, old_state);
+  for (unsigned int iteration = 0; iteration <= maximum_iterations; ++iteration)
+  {
+    const double residual = current.result.final_result.cauchy_stress[2];
+    const double stress_scale = std::max(
+        {1.0,
+         std::abs(current.result.final_result.cauchy_stress[0]),
+         std::abs(current.result.final_result.cauchy_stress[1]),
+         std::abs(current.result.final_result.cauchy_stress[3])});
+    if (std::abs(residual) <= relative_tolerance * stress_scale)
+    {
+      const auto full_tangent = current.algorithmic_tangent;
+      const double normal_tangent = full_tangent[2][2];
+      if (!std::isfinite(normal_tangent) || std::abs(normal_tangent) <= 1.0e-16)
+        substepError("plane-stress condensation encountered a singular C3333 tangent");
+      for (std::size_t column = 0; column < 6; ++column)
+        for (std::size_t row = 0; row < 6; ++row)
+          current.algorithmic_tangent[column][row] =
+              column == 2
+                  ? 0.0
+                  : full_tangent[column][row] -
+                        full_tangent[2][row] * full_tangent[column][2] / normal_tangent;
+      current.result.final_result.cauchy_stress[2] = 0.0;
+      return {std::move(current), target[2], iteration};
+    }
+    if (iteration == maximum_iterations)
+      break;
+
+    const double normal_tangent = current.algorithmic_tangent[2][2];
+    if (!std::isfinite(normal_tangent) || std::abs(normal_tangent) <= 1.0e-16)
+      substepError("plane-stress Newton solve encountered a singular C3333 tangent");
+    target[2] -= residual / normal_tangent;
+    current = integrateLinearized(old_total_strain, target, time_step, old_state);
+  }
+
+  std::ostringstream message;
+  message << "plane-stress Newton solve failed after " << maximum_iterations
+          << " iterations, residual=" << current.result.final_result.cauchy_stress[2];
+  substepError(message.str());
+}
+
 AbaqusCDPSubstepIntegrator::ReferenceTangent
 AbaqusCDPSubstepIntegrator::referenceTangent(const SymmetricTensor & old_total_strain,
                                              const SymmetricTensor & new_total_strain,

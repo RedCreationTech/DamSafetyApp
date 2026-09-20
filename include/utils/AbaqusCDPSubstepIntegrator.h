@@ -54,6 +54,13 @@ public:
     TangentMatrix algorithmic_tangent;
   };
 
+  struct PlaneStressResult
+  {
+    LinearizedResult linearized;
+    double out_of_plane_strain;
+    unsigned int iterations;
+  };
+
   AbaqusCDPSubstepIntegrator(const AbaqusCDPStateIntegrator & state_integrator,
                              Parameters parameters);
 
@@ -71,6 +78,13 @@ public:
                                        const SymmetricTensor & new_total_strain,
                                        double time_step,
                                        const State & old_state) const;
+
+  PlaneStressResult integratePlaneStressLinearized(const SymmetricTensor & old_total_strain,
+                                                   const SymmetricTensor & new_total_strain,
+                                                   double time_step,
+                                                   const State & old_state,
+                                                   double relative_tolerance,
+                                                   unsigned int maximum_iterations) const;
 
   SymmetricTensor directionalDerivative(const SymmetricTensor & old_total_strain,
                                         const SymmetricTensor & new_total_strain,
