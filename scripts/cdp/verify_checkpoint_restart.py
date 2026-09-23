@@ -23,7 +23,7 @@ from pathlib import Path
 REPO = Path(__file__).resolve().parents[2]
 TEST_DIR = REPO / "test/tests/abaqus_cdp_stress_update"
 MATERIAL_DIR = REPO / "test/tests/cdp_material_table/data"
-INPUTS = ("restart_continuous.i", "restart_phase1.i", "restart_phase2.i")
+INPUTS = ("single_hex8_common.i", "restart_continuous.i", "restart_phase1.i", "restart_phase2.i")
 MARKER = "__RESTART_BASE__"
 IGNORED_COLUMNS = {"time"}
 RELATIVE_TOLERANCE = 1e-8
