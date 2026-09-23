@@ -31,7 +31,7 @@ ABSOLUTE_TOLERANCE = 1e-12
 
 
 def run(binary: Path, working: Path, case: str) -> None:
-    result = subprocess.run([str(binary), "-i", case, "--no-gui"], cwd=working,
+    result = subprocess.run([str(binary), "-i", case], cwd=working,
                             capture_output=True, text=True)
     if result.returncode != 0:
         tail = "\n".join((result.stdout + result.stderr).splitlines()[-25:])
