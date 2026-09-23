@@ -25,9 +25,12 @@ TEST_DIR = REPO / "test/tests/abaqus_cdp_stress_update"
 MATERIAL_DIR = REPO / "test/tests/cdp_material_table/data"
 INPUTS = ("single_hex8_common.i", "restart_continuous.i", "restart_phase1.i", "restart_phase2.i")
 MARKER = "__RESTART_BASE__"
-IGNORED_COLUMNS = {"time"}
+# Wall-clock timing diagnostics are excluded: they are not physics and cannot be
+# reproducible run to run. Every other postprocessor must match exactly.
+IGNORED_COLUMNS = {"time", "maximum_integration_microseconds"}
 RELATIVE_TOLERANCE = 1e-8
 ABSOLUTE_TOLERANCE = 1e-12
+SPLIT_TIME = 0.5
 
 
 def run(binary: Path, working: Path, case: str, *extra: str) -> None:
@@ -103,7 +106,7 @@ def main() -> int:
     scratch = working / "abaqus_cdp_stress_update"
 
     run(binary, scratch, "restart_continuous.i")
-    run(binary, scratch, "restart_phase1.i", "--Executioner/end_time", "0.5")
+    run(binary, scratch, "restart_phase1.i", "--Executioner/end_time=0.5")
     base = find_restart_base(scratch, "restart_phase1")
     template = (scratch / "restart_phase2.i").read_text()
     if MARKER not in template:
@@ -112,12 +115,18 @@ def main() -> int:
     run(binary, scratch, "restart_phase2_run.i")
 
     continuous = read_csv(scratch, "restart_continuous_out")
+    phase1_probe = read_csv(scratch, "restart_phase1_out")
+    phase1_end = max(phase1_probe)
+    if abs(phase1_end - SPLIT_TIME) > 1e-9:
+        raise RuntimeError(
+            f"phase 1 ended at t={phase1_end}, expected {SPLIT_TIME}: the CLI override did not "
+            f"apply, so any later mismatch would be a harness artefact rather than a physics result")
     phase1 = read_csv(scratch, "restart_phase1_out")
     phase2 = read_csv(scratch, "restart_phase2_out")
 
-    checks = [compare(continuous, {t: v for t, v in phase1.items() if t <= 0.5 + 1e-9},
+    checks = [compare(continuous, {t: v for t, v in phase1.items() if t <= SPLIT_TIME + 1e-9},
                       "phase1 versus continuous (pre-restart)"),
-              compare(continuous, {t: v for t, v in phase2.items() if t >= 0.5 - 1e-9},
+              compare(continuous, {t: v for t, v in phase2.items() if t >= SPLIT_TIME - 1e-9},
                       "phase2 versus continuous (post-restart)")]
     final = continuous[max(continuous)]
     stateful = {key: final[key] for key in final if re.search(r"damage|kappa|stiffness", key)}
