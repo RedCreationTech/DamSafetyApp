@@ -31,6 +31,10 @@ IGNORED_COLUMNS = {"time", "maximum_integration_microseconds"}
 RELATIVE_TOLERANCE = 1e-8
 ABSOLUTE_TOLERANCE = 1e-12
 SPLIT_TIME = 0.5
+# This MOOSE/PETSc build accepts hit overrides only as a bare "Path/param=value" token; a
+# "--Path/param=value" argument is reported as an option left with no value and is
+# silently ignored, and a two-token form leaves the end time at the file value.
+HIT_OVERRIDE = f"Executioner/end_time={SPLIT_TIME}"
 
 
 def run(binary: Path, working: Path, case: str, *extra: str) -> None:
@@ -106,7 +110,7 @@ def main() -> int:
     scratch = working / "abaqus_cdp_stress_update"
 
     run(binary, scratch, "restart_continuous.i")
-    run(binary, scratch, "restart_phase1.i", "--Executioner/end_time=0.5")
+    run(binary, scratch, "restart_phase1.i", HIT_OVERRIDE)
     base = find_restart_base(scratch, "restart_phase1")
     template = (scratch / "restart_phase2.i").read_text()
     if MARKER not in template:
