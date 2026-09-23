@@ -39,10 +39,9 @@
   []
 []
 
-[Executioner]
-  end_time = 0.5
-  dt = 0.05
-[]
+# This run must stop at the load-path kink, so the harness passes
+# --Executioner/end_time 0.5 on the command line; repeating it in the file would be a
+# duplicate of the value already supplied by single_hex8_common.i.
 
 [Outputs]
   exodus = false

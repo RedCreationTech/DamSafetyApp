@@ -39,10 +39,7 @@
   []
 []
 
-[Executioner]
-  end_time = 1
-  dt = 0.05
-[]
+# Executioner settings come from single_hex8_common.i (end_time = 1, dt = 0.05).
 
 [Outputs]
   exodus = false

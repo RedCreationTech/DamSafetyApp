@@ -30,8 +30,8 @@ RELATIVE_TOLERANCE = 1e-8
 ABSOLUTE_TOLERANCE = 1e-12
 
 
-def run(binary: Path, working: Path, case: str) -> None:
-    result = subprocess.run([str(binary), "-i", case], cwd=working,
+def run(binary: Path, working: Path, case: str, *extra: str) -> None:
+    result = subprocess.run([str(binary), "-i", case, *extra], cwd=working,
                             capture_output=True, text=True)
     if result.returncode != 0:
         tail = "\n".join((result.stdout + result.stderr).splitlines()[-25:])
@@ -103,7 +103,7 @@ def main() -> int:
     scratch = working / "abaqus_cdp_stress_update"
 
     run(binary, scratch, "restart_continuous.i")
-    run(binary, scratch, "restart_phase1.i")
+    run(binary, scratch, "restart_phase1.i", "--Executioner/end_time", "0.5")
     base = find_restart_base(scratch, "restart_phase1")
     template = (scratch / "restart_phase2.i").read_text()
     if MARKER not in template:
