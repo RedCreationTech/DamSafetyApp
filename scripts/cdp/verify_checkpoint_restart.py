@@ -27,6 +27,8 @@ INPUTS = ("single_hex8_common.i", "restart_continuous.i", "restart_phase1.i", "r
 MARKER = "__RESTART_BASE__"
 # Wall-clock timing diagnostics are excluded: they are not physics and cannot be
 # reproducible run to run. Every other postprocessor must match exactly.
+# Columns that are never physics comparisons: the time axis and wall-clock integration cost.
+IGNORED_COLUMNS = {"time", "maximum_integration_microseconds"}
 # Path-dependent counters are reported but never gated: after a restart the Newton and local
 # integration path legitimately differs (6 local iterations versus 3 in the continuous run).
 COUNTER_PREFIXES = ("average_local_iterations", "average_accepted_substeps", "maximum_jacobian",
