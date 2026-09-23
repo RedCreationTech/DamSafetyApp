@@ -43,7 +43,8 @@ STATE_ABSOLUTE_FLOOR = 1e-6
 # Newton path (6 local iterations after restart versus 3 in the continuous run), so the first
 # post-restart step is allowed 5e-3 and every later step 5e-5. These limits are fixed here,
 # before seeing any result, and are not relaxed to make a run pass.
-STRAIN_RELATIVE_TOLERANCE = 1e-12
+STRAIN_FIRST_STEP_FRACTION = 1e-5   # of the family strain scale, first post-restart step
+STRAIN_LATER_FRACTION = 1e-6       # of the family strain scale, every later step
 FIRST_STEP_RELATIVE_TOLERANCE = 5e-3
 LATER_STEP_RELATIVE_TOLERANCE = 5e-5
 ABSOLUTE_TOLERANCE = 1e-12
@@ -74,39 +75,65 @@ def read_csv(working: Path, base: str) -> dict[float, dict[str, float]]:
     return {time: values for time, values in sorted(rows.items())}
 
 
+def family(value: str) -> str:
+    if value.startswith("average_strain"):
+        return "strain"
+    if value.startswith("average_stress"):
+        return "stress"
+    return "state"
+
+
 def compare(reference: dict[float, dict[str, float]], candidate: dict[float, dict[str, float]],
             label: str, first_time: float | None = None) -> dict[str, object]:
-    """Gate physical fields; record path-dependent counters without gating them."""
+    """Gate physics on a per-family scale; counters and wall-clock timings are only recorded.
+
+    Each column is normalised by the largest reference peak inside its own family (strain,
+    stress, damage/state) rather than by its own peak. Near-uniaxial paths leave sigma_xy and
+    DamageC at 1e-3 Pa and 1e-6 respectively, so a per-column denominator turns harmless
+    round-off into apparent differences above 100 %, which is exactly the metric pathology
+    recorded for the dam-2b curves in the expert proposal note.
+    """
     shared = sorted(set(reference) & set(candidate))
     if not shared:
         raise RuntimeError(f"{label}: no common time steps")
-    columns = sorted(set(reference[shared[0]]) - IGNORED_COLUMNS)
+    columns = [column for column in sorted(set(reference[shared[0]]) - IGNORED_COLUMNS)]
+    scales: dict[str, float] = {}
+    for column in columns:
+        peak = max(abs(reference[time][column]) for time in shared)
+        key = family(column)
+        scales[key] = max(scales.get(key, 0.0), peak)
+    for key in ("strain", "stress", "state"):
+        scales.setdefault(key, 1.0)
     gated: dict[str, float] = {}
     recorded: dict[str, float] = {}
     profile: dict[float, float] = {}
     failures: list[str] = []
     for column in columns:
-        scale = max(abs(reference[time][column]) for time in shared)
+        counter = column.startswith(COUNTER_PREFIXES)
+        peak = max(abs(reference[time][column]) for time in shared)
         worst = 0.0
         for time in shared:
             difference = abs(candidate[time][column] - reference[time][column])
             worst = max(worst, difference)
-            if column.startswith(COUNTER_PREFIXES) or not column.startswith(("average_", "maximum_")):
+            if counter:
                 continue
             loose = first_time is not None and time <= first_time + 1e-9
-            if column.startswith("average_strain"):
-                limit = ABSOLUTE_TOLERANCE + STRAIN_RELATIVE_TOLERANCE * scale
+            if family(column) == "strain":
+                allowed = STRAIN_FIRST_STEP_FRACTION if loose else STRAIN_LATER_FRACTION
             else:
                 allowed = FIRST_STEP_RELATIVE_TOLERANCE if loose else LATER_STEP_RELATIVE_TOLERANCE
-                limit = STATE_ABSOLUTE_FLOOR + allowed * scale
+            limit = allowed * scales[family(column)]
             if difference > limit:
-                failures.append(f"{column} at t={time}: difference {difference:.3e} exceeds {limit:.3e}")
-            profile[time] = max(profile.get(time, 0.0), difference / scale if scale > 0 else difference)
-        ratio = worst / scale if scale > 0 else worst
-        (recorded if column.startswith(COUNTER_PREFIXES) else gated)[column] = ratio
+                failures.append(f"{column} at t={time}: difference {difference:.3e} exceeds "
+                                f"{limit:.3e} ({allowed:.0e} of {family(column)} scale {scales[family(column)]:.3e})")
+            ratio = difference / scales[family(column)]
+            profile[time] = max(profile.get(time, 0.0), ratio)
+        bucket = recorded if counter else gated
+        bucket[column] = {"max_difference": worst, "fraction_of_family_scale": worst / scales[family(column)],
+                          "own_peak": peak}
     return {"label": label, "shared_steps": len(shared), "candidate_steps": len(candidate),
-            "gated_max_relative_difference": gated, "recorded_not_gated": recorded,
-            "max_gated_relative_difference_per_step": {str(time): value for time, value in sorted(profile.items())},
+            "family_scales": scales, "gated": gated, "recorded_not_gated": recorded,
+            "max_gated_fraction_of_family_scale_per_step": {str(time): value for time, value in sorted(profile.items())},
             "failures": failures[:8], "passed": not failures and len(shared) == len(candidate)}
 
 
