@@ -104,7 +104,8 @@ class Abaqus2Exodus2DTest(unittest.TestCase):
         part = model.parts['DAM']
         self.assertEqual(part.elem_types, {1: 'CPS4R', 2: 'CPS3'})
         self.assertEqual(len(part.point_elems), 2)
-        self.assertEqual(part.point_mass[101], [10.0, 20.0, 0.0])
+        # Abaqus merges repeated same-name elsets; the last *Mass wins.
+        self.assertEqual(part.point_mass[101], [30.0, 40.0, 0.0])
         self.assertEqual(part.point_mass[102], [30.0, 40.0, 0.0])
         self.assertEqual(model.amplitude_options['EQ']['time'], 'TOTAL TIME')
         self.assertEqual(model.initial_boundaries[0]['dof2'], 2)
@@ -131,7 +132,7 @@ class Abaqus2Exodus2DTest(unittest.TestCase):
         self.assertEqual(len(props), 2)
         self.assertEqual(
             [sum(row['mass'][i] for row in props) for i in range(3)],
-            [40.0, 60.0, 0.0])
+            [60.0, 80.0, 0.0])
 
         mass_files = CONVERTER.write_nodal_mass_csv(
             props, self.work / 'added_mass')

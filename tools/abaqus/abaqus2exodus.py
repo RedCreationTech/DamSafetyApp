@@ -74,6 +74,7 @@ class Part:
         self.etype = None        # backward-compatible last structural type
         self.point_elems = {}    # id -> {type, elset, conn}
         self.point_mass = {}     # point element id -> [mx, my, mz]
+        self.point_mass_by_elset = {}  # elset -> latest *Mass definition
         self.nsets = {}
         self.elsets = {}
         self.sections = []       # [(elset, material, area)]
@@ -354,8 +355,15 @@ def parse_inp(path):
                         else:
                             mass = [vals[0], vals[0], vals[0]]
                         if last_point_part is not None and last_point_eids:
-                            for eid in last_point_eids:
-                                last_point_part.point_mass[eid] = list(mass)
+                            mass_elset = kv.get('elset')
+                            if not mass_elset:
+                                mass_elset = last_point_part.point_elems[
+                                    last_point_eids[0]]['elset']
+                            mass_key = mass_elset.upper()
+                            last_point_part.point_mass_by_elset[mass_key] = list(mass)
+                            for eid, elem in last_point_part.point_elems.items():
+                                if (elem['elset'] or '').upper() == mass_key:
+                                    last_point_part.point_mass[eid] = list(mass)
                         else:
                             # 兼容原 assembly 级标量质量结构。
                             m.asm_mass[kv.get('elset')] = mass[0]
@@ -515,6 +523,10 @@ def parse_inp(path):
                             'elset': inst,
                             'conn': vals[1:],
                         }
+                        mass = cur_part.point_mass_by_elset.get(
+                            (inst or '').upper())
+                        if mass is not None:
+                            cur_part.point_mass[eid] = list(mass)
                         last_point_eids.append(eid)
                 elif kind in ('nset', 'elset'):
                     ids = _ids(line)
