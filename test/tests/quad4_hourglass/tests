@@ -1,0 +1,9 @@
+[Tests]
+  design = 'DES-CDPC-QUAD4-HG-001'
+  issues = '#TASK-CDPC-QUAD4-HG-001'
+  [constant_strain]
+    type = RunApp
+    input = constant_strain.i
+    requirement = 'The stabilized one-point QUAD4 shall preserve a constant-strain solution.'
+  []
+[]
