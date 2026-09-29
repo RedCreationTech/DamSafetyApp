@@ -14,5 +14,5 @@ protected:
 
   const Real _coefficient;
   const Real _shear_modulus;
-  const ADDofValues & _dof_values;
+  const MooseArray<ADReal> & _dof_values;
 };
