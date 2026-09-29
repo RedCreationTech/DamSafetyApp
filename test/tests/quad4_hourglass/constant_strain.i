@@ -8,11 +8,18 @@
 
 [GlobalParams]
   displacements = 'disp_x disp_y'
+  out_of_plane_strain = strain_zz
+[]
+
+[Variables/strain_zz]
+  family = MONOMIAL
+  order = CONSTANT
 []
 
 [Physics/SolidMechanics/QuasiStatic/all]
   strain = SMALL
   add_variables = true
+  planar_formulation = WEAK_PLANE_STRESS
   generate_output = 'stress_xx strain_xx'
 []
 
