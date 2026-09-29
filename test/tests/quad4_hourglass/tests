@@ -6,4 +6,9 @@
     input = constant_strain.i
     requirement = 'The stabilized one-point QUAD4 shall preserve a constant-strain solution.'
   []
+  [zero_energy_mode]
+    type = RunApp
+    input = zero_energy_mode.i
+    requirement = 'The hourglass penalty shall give the otherwise free non-affine QUAD4 mode positive stiffness.'
+  []
 []
