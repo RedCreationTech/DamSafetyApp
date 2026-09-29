@@ -29,12 +29,16 @@
     variable = disp_x
     coefficient = 1
     shear_modulus = 1.2666666666666666e10
+    zeta = 0.00113
+    alpha = -0.05
   []
   [hourglass_y]
     type = ADQuad4HourglassControl
     variable = disp_y
     coefficient = 1
     shear_modulus = 1.2666666666666666e10
+    zeta = 0.00113
+    alpha = -0.05
   []
 []
 

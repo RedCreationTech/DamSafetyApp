@@ -14,6 +14,9 @@ ADQuad4HourglassControl::validParams()
       "coefficient", "coefficient > 0", "Dimensionless hourglass stiffness coefficient");
   params.addRequiredRangeCheckedParam<Real>(
       "shear_modulus", "shear_modulus > 0", "Undamaged elastic shear modulus");
+  params.addParam<MaterialPropertyName>(
+      "zeta", 0.0, "Stiffness-proportional Rayleigh damping coefficient");
+  params.addParam<Real>("alpha", 0.0, "HHT time integration parameter");
   return params;
 }
 
@@ -21,7 +24,11 @@ ADQuad4HourglassControl::ADQuad4HourglassControl(const InputParameters & paramet
   : ADKernel(parameters),
     _coefficient(getParam<Real>("coefficient")),
     _shear_modulus(getParam<Real>("shear_modulus")),
-    _dof_values(_var.adDofValues())
+    _zeta(getMaterialProperty<Real>("zeta")),
+    _alpha(getParam<Real>("alpha")),
+    _dof_values(_var.adDofValues()),
+    _dof_values_old(_var.dofValuesOld()),
+    _dof_values_older(_var.dofValuesOlder())
 {
 }
 
@@ -42,8 +49,19 @@ ADQuad4HourglassControl::computeQpResidual()
 
   const auto gamma = Quad4Hourglass::mode(nodes);
   ADReal amplitude = 0.0;
+  Real amplitude_old = 0.0;
+  Real amplitude_older = 0.0;
   for (unsigned int i = 0; i < 4; ++i)
+  {
     amplitude += gamma[i] * _dof_values[i];
+    amplitude_old += gamma[i] * _dof_values_old[i];
+    amplitude_older += gamma[i] * _dof_values_older[i];
+  }
+
+  if (_dt > 0)
+    amplitude = amplitude * (1.0 + _alpha + (1.0 + _alpha) * _zeta[_qp] / _dt) -
+                amplitude_old * (_alpha + (1.0 + 2.0 * _alpha) * _zeta[_qp] / _dt) +
+                amplitude_older * _alpha * _zeta[_qp] / _dt;
 
   const Real length_squared = Quad4Hourglass::characteristicLengthSquared(nodes);
   return _coefficient * _shear_modulus / length_squared * gamma[_i] * amplitude;

@@ -4,7 +4,7 @@
   [constant_strain]
     type = RunApp
     input = constant_strain.i
-    requirement = 'The stabilized one-point QUAD4 shall preserve a constant-strain weak-plane-stress solution without leaving out-of-plane strain null modes.'
+    requirement = 'The dynamically damped stabilized one-point QUAD4 shall preserve a constant-strain weak-plane-stress solution without leaving out-of-plane strain null modes.'
   []
   [zero_energy_mode]
     type = RunApp
