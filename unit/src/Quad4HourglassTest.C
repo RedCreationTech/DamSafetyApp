@@ -51,3 +51,19 @@ TEST(Quad4Hourglass, RejectsDegenerateElement)
   EXPECT_THROW(Quad4Hourglass::mode(nodes), std::runtime_error);
   EXPECT_THROW(Quad4Hourglass::area(nodes), std::runtime_error);
 }
+
+TEST(Quad4Hourglass, RestoresExactConsistentMassForSquare)
+{
+  const Quad4Hourglass::Nodes nodes = {{{{0, 0}}, {{2, 0}}, {{2, 2}}, {{0, 2}}}};
+  const auto correction = Quad4Hourglass::consistentMassCorrection(nodes);
+  for (unsigned int i = 0; i < 4; ++i)
+  {
+    double row_sum = 0.0;
+    for (const auto value : correction[i])
+      row_sum += value;
+    EXPECT_NEAR(row_sum, 0.0, 1e-14);
+    EXPECT_NEAR(correction[i][i], 7.0 / 36.0, 1e-14);
+    EXPECT_NEAR(correction[i][(i + 1) % 4], -1.0 / 36.0, 1e-14);
+    EXPECT_NEAR(correction[i][(i + 2) % 4], -5.0 / 36.0, 1e-14);
+  }
+}

@@ -10,6 +10,7 @@ class Quad4Hourglass
 public:
   using Nodes = std::array<std::array<double, 2>, 4>;
   using Mode = std::array<double, 4>;
+  using Matrix = std::array<std::array<double, 4>, 4>;
 
   static Mode mode(const Nodes & nodes)
   {
@@ -92,5 +93,47 @@ public:
     if (value < 1e-14)
       throw std::runtime_error("degenerate QUAD4 edge length");
     return value;
+  }
+
+  static Matrix consistentMassCorrection(const Nodes & nodes)
+  {
+    Matrix correction = {};
+    constexpr double gauss = 0.57735026918962576451;
+    for (const double xi : {-gauss, gauss})
+      for (const double eta : {-gauss, gauss})
+      {
+        const std::array<double, 4> shape = {{0.25 * (1.0 - xi) * (1.0 - eta),
+                                              0.25 * (1.0 + xi) * (1.0 - eta),
+                                              0.25 * (1.0 + xi) * (1.0 + eta),
+                                              0.25 * (1.0 - xi) * (1.0 + eta)}};
+        const std::array<std::array<double, 2>, 4> derivative =
+            {{{{-0.25 * (1.0 - eta), -0.25 * (1.0 - xi)}},
+              {{0.25 * (1.0 - eta), -0.25 * (1.0 + xi)}},
+              {{0.25 * (1.0 + eta), 0.25 * (1.0 + xi)}},
+              {{-0.25 * (1.0 + eta), 0.25 * (1.0 - xi)}}}};
+        double dx_dxi = 0.0;
+        double dx_deta = 0.0;
+        double dy_dxi = 0.0;
+        double dy_deta = 0.0;
+        for (unsigned int i = 0; i < 4; ++i)
+        {
+          dx_dxi += nodes[i][0] * derivative[i][0];
+          dx_deta += nodes[i][0] * derivative[i][1];
+          dy_dxi += nodes[i][1] * derivative[i][0];
+          dy_deta += nodes[i][1] * derivative[i][1];
+        }
+        const double determinant = dx_dxi * dy_deta - dx_deta * dy_dxi;
+        if (determinant <= 1e-14)
+          throw std::runtime_error("degenerate or inverted QUAD4 Jacobian");
+        for (unsigned int i = 0; i < 4; ++i)
+          for (unsigned int j = 0; j < 4; ++j)
+            correction[i][j] += shape[i] * shape[j] * determinant;
+      }
+
+    const double reduced_entry = area(nodes) / 16.0;
+    for (auto & row : correction)
+      for (auto & value : row)
+        value -= reduced_entry;
+    return correction;
   }
 };
