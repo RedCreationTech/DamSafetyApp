@@ -85,11 +85,11 @@ patch_file(K / "WeakPlaneStress.C", [
                         "correction, so that the Jacobian includes the matching B-bar terms");
 
   return params;"""),
-    ("""    _disp_coupled(isCoupled("displacements")),
-    _ndisp(_disp_coupled ? coupledComponents("displacements") : 0),""",
-     """    _disp_coupled(isCoupled("displacements")),
-    _volumetric_locking_correction(getParam<bool>("volumetric_locking_correction")),
-    _ndisp(_disp_coupled ? coupledComponents("displacements") : 0),"""),
+    ("""    _temp_coupled(isCoupled("temperature")),
+    _temp_var(_temp_coupled ? coupled("temperature") : 0)""",
+     """    _temp_coupled(isCoupled("temperature")),
+    _temp_var(_temp_coupled ? coupled("temperature") : 0),
+    _volumetric_locking_correction(getParam<bool>("volumetric_locking_correction"))"""),
     ("""Real
 WeakPlaneStress::computeQpJacobian()
 {
