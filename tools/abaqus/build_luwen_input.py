@@ -141,11 +141,21 @@ def assemble(source, stage):
         add('AuxVariables', variable, family='MONOMIAL', order='CONSTANT', block=names(aac))
         add('AuxKernels', variable, type='MaterialRealAux', variable=variable, property=prop,
             block=names(aac), execute_on="'initial timestep_end'")
-    for variable, prop in (('S22','stress'),('E22','total_strain')):
-        add('AuxVariables', variable, family='MONOMIAL', order='CONSTANT', block=names(solid))
-        add('AuxKernels', variable, type='RankTwoAux', variable=variable, rank_two_tensor=prop,
-            index_i=1, index_j=1, block=names(solid), execute_on="'initial timestep_end'")
-    for variable, prop in (('steel_axial_stress','axial_stress'),('steel_peeq','equivalent_plastic_strain')):
+    # Preserve tensor components in their actual definitions. In particular,
+    # small total strain is not Abaqus LE, and the two CDP plastic tensors are
+    # not relabeled PE/PEEQ without an independent definition check.
+    tensor_outputs = (('S', 'stress', solid), ('E', 'total_strain', solid),
+                      ('cdp_backbone_p', 'cdp_backbone_plastic_strain', aac),
+                      ('cdp_viscous_p', 'cdp_viscous_plastic_strain', aac))
+    for prefix, prop, output_blocks in tensor_outputs:
+        for i, j in ((0,0),(1,1),(2,2),(0,1),(0,2),(1,2)):
+            variable = f'{prefix}{i+1}{j+1}'
+            add('AuxVariables', variable, family='MONOMIAL', order='CONSTANT', block=names(output_blocks))
+            add('AuxKernels', variable, type='RankTwoAux', variable=variable, rank_two_tensor=prop,
+                index_i=i, index_j=j, block=names(output_blocks), execute_on="'initial timestep_end'")
+    for variable, prop in (('steel_axial_stress','axial_stress'),('steel_peeq','equivalent_plastic_strain'),
+                           ('steel_total_strain','total_stretch'),('steel_elastic_strain','elastic_stretch'),
+                           ('steel_plastic_strain','plastic_stretch')):
         add('AuxVariables', variable, family='MONOMIAL', order='CONSTANT', block=names(steel))
         add('AuxKernels', variable, type='MaterialRealAux', variable=variable, property=prop,
             block=names(steel), execute_on="'initial timestep_end'")
@@ -154,6 +164,13 @@ def assemble(source, stage):
     add('Postprocessors','RP_U2_m',type='FunctionValuePostprocessor',function='rp_y_loading')
     for variable in ('DamageC','DamageT'):
         add('Postprocessors',variable+'_max',type='ElementExtremeValue',variable=variable,block=names(aac),value_type='max')
+        add('Postprocessors',variable+'_aac_volume_mean',type='ElementAverageValue',variable=variable,block=names(aac))
+    for material_name, output_blocks in (('aac',aac),('c40',c40)):
+        for prefix in ('S','E'):
+            for component in ('11','22','33','12','13','23'):
+                variable = prefix+component
+                add('Postprocessors',f'{variable}_{material_name}_volume_mean',type='ElementAverageValue',
+                    variable=variable,block=names(output_blocks))
     add('Postprocessors','dt',type='TimestepSize')
     add('Postprocessors','newton_iterations',type='NumNonlinearIterations')
     add('Preconditioning','smp',type='SMP',full='true')
