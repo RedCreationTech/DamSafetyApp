@@ -173,7 +173,7 @@ def assemble(source, stage):
             if name:lines.append('  []')
         lines+=['[]','']
     custom=[geometry['blocks'][b]['id'] for b in solid]
-    lines+=['[Problem]', '  type = FEProblem', '[]', '', '[Quadrature]',
+    lines+=['[Problem]', '  type = FEProblem', '[]', '', '[Executioner/Quadrature]',
             '  type = GAUSS', '  order = SECOND',
             '  custom_blocks = '+names(custom),
             '  custom_orders = '+names(['FIRST']*len(custom)), '[]','',
