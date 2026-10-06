@@ -9,11 +9,12 @@ class RigidPlaneMomentConstraint : public NodalScalarKernel
 public:
   static InputParameters validParams();
   RigidPlaneMomentConstraint(const InputParameters & parameters);
+  void reinit() override {}
   void computeResidual() override;
   void computeJacobian() override;
 protected:
   Real coefficient(unsigned int rotation, unsigned int traction, unsigned int node) const;
+  dof_id_type tractionDof(unsigned int traction, unsigned int node) const;
   const std::vector<unsigned int> _traction_numbers;
-  const std::vector<const VariableValue *> _tractions;
   std::vector<RealVectorValue> _moments;
 };

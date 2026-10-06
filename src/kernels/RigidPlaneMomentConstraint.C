@@ -2,6 +2,8 @@
 #include "DelimitedFileReader.h"
 #include "Assembly.h"
 #include "MooseMesh.h"
+#include "MooseVariableScalar.h"
+#include "SystemBase.h"
 #include <map>
 #include <cmath>
 
@@ -17,10 +19,9 @@ InputParameters RigidPlaneMomentConstraint::validParams()
 }
 
 RigidPlaneMomentConstraint::RigidPlaneMomentConstraint(const InputParameters & parameters)
-  : NodalScalarKernel(parameters), _traction_numbers(coupledIndices("tractions")),
-    _tractions(coupledValues("tractions"))
+  : NodalScalarKernel(parameters), _traction_numbers(coupledIndices("tractions"))
 {
-  if (_tractions.size() != 3)
+  if (_traction_numbers.size() != 3)
     paramError("tractions", "Supply three traction fields in x/y/z order.");
   MooseUtils::DelimitedFileReader reader(getParam<FileName>("moment_file"));
   reader.setHeaderFlag(MooseUtils::DelimitedFileReader::HeaderFlag::ON);
@@ -53,6 +54,14 @@ RigidPlaneMomentConstraint::RigidPlaneMomentConstraint(const InputParameters & p
   }
 }
 
+dof_id_type RigidPlaneMomentConstraint::tractionDof(unsigned int traction, unsigned int n) const
+{
+  const auto * node = _mesh.getMesh().query_node_ptr(_node_ids.at(n));
+  if (!node || node->n_dofs(_sys.number(), _traction_numbers.at(traction)) != 1)
+    mooseError("RP surface node ", _node_ids.at(n), " must have exactly one traction DOF.");
+  return node->dof_number(_sys.number(), _traction_numbers[traction], 0);
+}
+
 Real RigidPlaneMomentConstraint::coefficient(unsigned int rotation, unsigned int traction,
                                            unsigned int node) const
 {
@@ -67,34 +76,32 @@ void RigidPlaneMomentConstraint::computeResidual()
   prepareVectorTag(_assembly, _var.number());
   if (_local_re.size() != 3)
     mooseError("RP moment residual must have three rows, got ", _local_re.size());
-  for (unsigned int d = 0; d < 3; ++d)
-    if (_tractions[d]->size() != _node_ids.size())
-      mooseError("RP traction ", d, " has ", _tractions[d]->size(),
-                 " nodal values, expected ", _node_ids.size());
   for (unsigned int r = 0; r < 3; ++r)
   {
     _local_re(r) = 0.0;
     for (unsigned int d = 0; d < 3; ++d)
       for (unsigned int n = 0; n < _node_ids.size(); ++n)
-        _local_re(r) += coefficient(r, d, n) * (*_tractions[d])[n];
+        _local_re(r) += coefficient(r, d, n) * (*_sys.currentSolution())(tractionDof(d, n));
   }
   assignTaggedLocalResidual();
 }
 
 void RigidPlaneMomentConstraint::computeJacobian()
 {
-  prepareMatrixTag(_assembly, _var.number(), _var.number());
-  _local_ke.zero();
-  assignTaggedLocalMatrix();
+  const auto & rows = _var.dofIndices();
+  if (rows.size() != 3)
+    mooseError("RP moment Jacobian must have three scalar DOFs.");
+  // These are global surface moments, not an element-local field block.
+  // Cache entries using the actual nodal global DOFs, avoiding stale/local
+  // block dimensions and the finite capacity of a single global AD vector.
   for (unsigned int d = 0; d < 3; ++d)
   {
-    prepareMatrixTag(_assembly, _var.number(), _traction_numbers[d]);
-    if (_local_ke.m() != 3 || _local_ke.n() != _node_ids.size())
-      mooseError("RP moment Jacobian for traction ", d, " is ", _local_ke.m(), " x ",
-                 _local_ke.n(), "; expected 3 x ", _node_ids.size());
     for (unsigned int r = 0; r < 3; ++r)
       for (unsigned int n = 0; n < _node_ids.size(); ++n)
-        _local_ke(r,n) = coefficient(r,d,n);
-    assignTaggedLocalMatrix();
+      {
+        const Real value = coefficient(r, d, n);
+        if (value != 0)
+          addJacobianElement(_assembly, value, rows[r], tractionDof(d, n), _var.scalingFactor());
+      }
   }
 }
