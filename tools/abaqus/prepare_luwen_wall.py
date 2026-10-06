@@ -14,6 +14,7 @@ from pathlib import Path
 import abaqus2exodus as mesh
 import abaqus_cdp as cdp
 from embedded_host_map import prepare_embedded_hosts
+from rigid_plane_map import prepare_rigid_plane
 
 
 SOURCE_SHA = '21299c9694ecb4597c84e1259050d645b5299ddf72d63e9647782b9c37327d25'
@@ -49,6 +50,7 @@ def prepare(source, output):
         raise ValueError('Non-positive HEX8 corner Jacobian')
     embedded_audit = prepare_embedded_hosts(model, gm, blocks, types, output)
     write_json(output / 'embedded-host-audit.json', embedded_audit)
+    write_json(output / 'rp-constraint-audit.json', prepare_rigid_plane(model, gm, output))
     mesh.write_exodus(output / 'wall_mesh.e', gm, blocks, types, meta,
                        nodesets, sidesets, 'luwen-wxz geometry in metres; formulation pending')
     mesh.write_node_map_csv(gm, output / 'node-map.csv')
