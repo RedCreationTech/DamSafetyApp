@@ -29,9 +29,14 @@ UniformHex8StressDivergence::UniformHex8StressDivergence(const InputParameters &
 
 const UniformHex8::Operators & UniformHex8StressDivergence::operators()
 {
+  // Residual assembly does not prepare trial shapes. Assembly::_phi can still
+  // refer to a previous Jacobian column or mortar element at this point.
+  // Only the variable's test shapes and constitutive rule are required here.
   if (_current_elem->type() != libMesh::HEX8 || _qrule->n_points() != 1 ||
-      _test.size() != 8 || _phi.size() != 8)
-    mooseError("Uniform HEX8 requires first-order HEX8 and one constitutive integration point.");
+      _test.size() != 8)
+    mooseError("Uniform HEX8 requires first-order HEX8 and one constitutive integration point: ",
+               "type=", _current_elem->type(), ", qp=", _qrule->n_points(),
+               ", test shapes=", _test.size());
   auto it = _operators.find(_current_elem->id());
   if (it == _operators.end())
   {
@@ -59,6 +64,9 @@ Real UniformHex8StressDivergence::computeQpResidual()
 
 Real UniformHex8StressDivergence::stiffness(unsigned int column)
 {
+  if (_phi.size() != 8)
+    mooseError("Uniform HEX8 displacement Jacobian requires eight prepared trial shapes; got ",
+               _phi.size());
   const auto & op = operators();
   Real value = 0.0;
   for (unsigned int k = 0; k < 3; ++k)
