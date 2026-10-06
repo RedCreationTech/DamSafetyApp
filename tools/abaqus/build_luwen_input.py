@@ -69,6 +69,11 @@ def assemble(source, stage):
             previous = current
     for axis in 'xyz':
         add('Variables', 'disp_'+axis, family='LAGRANGE', order='FIRST')
+    # The RP lower-dimensional surface carries Lagrange multipliers only.
+    # Register an unused zero property to satisfy FEProblem material coverage;
+    # no mechanics object consumes it and it contributes no stiffness.
+    add('Materials', 'rp_surface_registry', type='GenericConstantMaterial', block=500,
+        prop_names='rp_surface_unused_zero', prop_values=0)
     add('Materials', 'uniform_strain', type='ComputeUniformHex8IncrementalStrain', block=names(solid),
         displacements="'disp_x disp_y disp_z'", volumetric_locking_correction='false')
     for material, material_blocks in (('C40', c40), ('aac201-lunwen', aac)):
