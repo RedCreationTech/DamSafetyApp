@@ -16,6 +16,46 @@ SPEC.loader.exec_module(CONVERTER)
 
 
 class Abaqus2Exodus2DTest(unittest.TestCase):
+    def test_contact_instances_keep_distinct_nodes_and_all_hex_faces(self):
+        model = CONVERTER.InpModel()
+        part = CONVERTER.Part('CUBE')
+        part.nodes = dict(enumerate(((0, 0, 0), (1, 0, 0), (1, 1, 0), (0, 1, 0),
+                                    (0, 0, 1), (1, 0, 1), (1, 1, 1), (0, 1, 1)), 1))
+        part.elems = {10: list(range(1, 9))}
+        part.elem_types = {10: 'C3D8R'}
+        model.parts = {'CUBE': part}
+        model.instances = [CONVERTER.Instance(name, 'CUBE') for name in ('A', 'B')]
+        # An assembly RP may share coordinates with an actual solid node.
+        model.asm_nodes = {100: (0, 0, 0)}
+        model.asm_elsets = {'EA': {'A': [10]}, 'EB': {'B': [10]}}
+        model.surfaces = {f'FACE{i}': [('EA', f'S{i}')] for i in range(1, 7)}
+        model.surfaces['SECONDARY'] = [('EB', 'S1')]
+        gm, blocks, types, meta, nodesets, sidesets = CONVERTER.build_global_mesh(
+            model, 1e-9, preserve_instance_nodes=True)
+        self.assertEqual(len(gm.coords), 17)
+        self.assertEqual(gm.merged_count, 0)
+        self.assertEqual(len(set(gm.node_map.values())), 17)
+        self.assertTrue(set(nodesets['SURF_FACE1']).isdisjoint(nodesets['SURF_SECONDARY']))
+        self.assertNotIn(gm.asm_node_map[100], nodesets['SURF_FACE1'])
+        output = self.work / 'contact.e'
+        CONVERTER.write_exodus(output, gm, blocks, types, meta, nodesets, sidesets, 'test')
+        # Decode the stored Exodus side with the independent HEX8 side convention,
+        # then compare the actual four node IDs, including the reordered S1/S2.
+        exodus_faces = {1: (1, 2, 6, 5), 2: (2, 3, 7, 6), 3: (3, 4, 8, 7),
+                        4: (1, 5, 8, 4), 5: (1, 4, 3, 2), 6: (5, 6, 7, 8)}
+        with netCDF4.Dataset(output) as nc:
+            names = [row.tobytes().decode('ascii').rstrip('\0') for row in nc['ss_names'][:]]
+            for i in range(1, 7):
+                ss = names.index(f'FACE{i}') + 1
+                elem = int(nc[f'elem_ss{ss}'][0])
+                side = int(nc[f'side_ss{ss}'][0])
+                conn = nc['connect1'][elem - 1]
+                actual = {int(conn[k - 1]) for k in exodus_faces[side]}
+                self.assertEqual(actual, set(nodesets[f'SURF_FACE{i}']))
+        # Legacy callers retain their original coordinate-merge behavior.
+        merged = CONVERTER.build_global_mesh(model, 1e-9)[0]
+        self.assertEqual(len(merged.coords), 8)
+
     def test_c3d8_full_integration_topology_and_surface(self):
         source = self.work / 'hex.inp'
         source.write_text('*Part, name=CUBE\n*Node\n1,0,0,0\n2,1,0,0\n3,1,1,0\n4,0,1,0\n'

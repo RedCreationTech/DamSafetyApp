@@ -150,6 +150,10 @@ EXODUS_SIDE_MAP = {
     'CPS4': {'S1': 1, 'S2': 2, 'S3': 3, 'S4': 4},
     'CPS4R': {'S1': 1, 'S2': 2, 'S3': 3, 'S4': 4},
     'CPS3': {'S1': 1, 'S2': 2, 'S3': 3},
+    # HEX8 keeps Abaqus node order. Exodus sides 1..4 are the lateral
+    # faces, 5 is the bottom and 6 is the top (Abaqus S1/S2).
+    'C3D8': {'S1': 5, 'S2': 6, 'S3': 1, 'S4': 2, 'S5': 3, 'S6': 4},
+    'C3D8R': {'S1': 5, 'S2': 6, 'S3': 1, 'S4': 2, 'S5': 3, 'S6': 4},
 }
 
 # 材料子关键字 -> 报告字段名
@@ -728,8 +732,11 @@ def sanitize(name):
 class GlobalMesh:
     """全局合并网格"""
 
-    def __init__(self, tol):
+    def __init__(self, tol, merge_coincident=True):
+        if not math.isfinite(tol) or tol <= 0:
+            raise ValueError('Node merge tolerance must be finite and positive')
         self.tol = tol
+        self.merge_coincident = merge_coincident
         self.coords = []          # global_id-1 -> (x,y,z)
         self._hash = {}
         self.node_map = {}        # (instance, local_id) -> global_id
@@ -737,6 +744,13 @@ class GlobalMesh:
         self.merged_count = 0
 
     def add(self, key, xyz):
+        if not self.merge_coincident:
+            if key in self.node_map:
+                raise ValueError(f'Duplicate node identity: {key}')
+            gid = len(self.coords) + 1
+            self.coords.append(xyz)
+            self.node_map[key] = gid
+            return gid
         h = (round(xyz[0] / self.tol), round(xyz[1] / self.tol),
              round(xyz[2] / self.tol))
         # 允许邻近 8 格碰撞检查
@@ -797,8 +811,8 @@ def add_node_label_sets(gm, nodesets, specs):
             gm.node_map[(instance, label)] for label in labels})
 
 
-def build_global_mesh(model, tol):
-    gm = GlobalMesh(tol)
+def build_global_mesh(model, tol, preserve_instance_nodes=False):
+    gm = GlobalMesh(tol, merge_coincident=not preserve_instance_nodes)
     gm.elem_origin = {}          # 全局单元 id -> (instance, part 单元 id)
     gm.elem_block = {}           # 全局单元 id -> block 名
     gm.block_beam = {}           # block -> {material, section, dims, n1}
@@ -946,7 +960,7 @@ def build_global_mesh(model, tol):
         if nodes:
             nodesets[sanitize(f"ELSET_{name}")] = sorted(nodes)
 
-    # 3) surfaces -> nodesets + 二维真实 sidesets
+    # 3) surfaces -> nodesets + 二维/三维真实 sidesets
     sidesets = defaultdict(list)  # name -> [(global element id, Exodus side)]
     origin2geid = {origin: geid for geid, origin in gm.elem_origin.items()}
     for name, entries in model.surfaces.items():
@@ -1731,6 +1745,9 @@ def main():
                     help='按 instance 与 Abaqus 原始节点标签追加稳定 nodeset，可重复')
     ap.add_argument('--merge-tol', type=float, default=1e-9,
                     help='跨 instance 节点合并容差 (默认 1e-9, 与模型单位一致)')
+    ap.add_argument('--preserve-instance-nodes', action='store_true',
+                    help='保留每个实例及RP的节点身份，不按重合坐标合并；'
+                         '接触模型必须使用，并配合 --no-rebar-stitch')
     ap.add_argument('--tie-tol', type=float, default=20.0,
                     help='*Tie 面节点缝合容差 (默认 20, 等效 adjust=yes)')
     ap.add_argument('--no-rebar-stitch', action='store_true',
@@ -1749,16 +1766,22 @@ def main():
                     help='约束 (*MPC 等) 无法解析时仅警告 '
                          '(默认: 硬失败退出 — 约束丢失会导致模型连接不完整)')
     args = ap.parse_args()
+    if args.preserve_instance_nodes and not args.no_rebar_stitch:
+        ap.error('--preserve-instance-nodes requires --no-rebar-stitch')
 
     print(f"[1/3] 解析 {args.inp} ...")
     model = parse_inp(args.inp)
+    if args.preserve_instance_nodes and model.ties:
+        ap.error('Preserving instance nodes requires explicit *Tie constraints; '
+                 'the existing stitch approximation is disabled in this mode')
     print(f"      parts={len(model.parts)} instances={len(model.instances)} "
           f"materials={len(model.materials)} surfaces={len(model.surfaces)} "
           f"ties={len(model.ties)} steps={len(model.steps)}")
 
     print(f"[2/3] 装配全局网格 (merge_tol={args.merge_tol}) ...")
     (gm, blocks, block_etype, block_meta,
-     nodesets, sidesets) = build_global_mesh(model, args.merge_tol)
+     nodesets, sidesets) = build_global_mesh(
+         model, args.merge_tol, args.preserve_instance_nodes)
     print(f"      全局节点={len(gm.coords)} (合并 {gm.merged_count}) "
           f"单元={sum(len(v) for v in blocks.values())} "
           f"块={len(blocks)} nodesets={len(nodesets)} "
@@ -1991,6 +2014,7 @@ def main():
         'source': args.inp,
         'source_files': model.source_files,
         'merge_tol': args.merge_tol,
+        'preserve_instance_nodes': args.preserve_instance_nodes,
         'tie_tol': args.tie_tol,
         'tie_merged': tie_merged,
         'rebar_stitched': rebar_stitched,

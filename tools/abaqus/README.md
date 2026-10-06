@@ -87,6 +87,28 @@ HEX8 未复现 C3D8R 减缩积分与沙漏控制，本算例只作诊断对照�
 
 ## 转换
 
+### 三维接触节点保护与 luwen-wxz 准备包
+
+`--preserve-instance-nodes --no-rebar-stitch` 保留跨实例重合节点和参考点身份，
+不按坐标合并；此模式遇到尚未显式实现的 `*Tie` 则拒绝近邻缝合。
+三维 `C3D8/C3D8R` 的六个面现在可导出真实 Exodus sideset。仅改变拓扑导出，
+不提供 C3D8R 减缩积分、沙漏或原始接触本构。
+
+本件的 `prepare_luwen_wall.py` 仅接受已审查源哈希，输出保留全部节点/单元的
+SI 网格、原始标签映射、AAC 四张 SI 表、材料片段与七对接触的来源/面映射。
+输出目录必须不存在，避免覆盖旧快照：
+
+```bash
+python3 tools/abaqus/prepare_luwen_wall.py \
+  --inp /path/to/luwen-wxz.inp --output /path/to/new-preparation
+```
+
+状态为 `geometry-and-material-data-prepared-not-runnable`，不生成提交清单、
+不启动求解。钢筋截面原始 mm² 保存在约束/截面记录中，后续求解接线须乘 1e−6；
+原件 C3D8R、MAXS/位移损伤接触、embedded、RP 耦合尚待实现，不能用此准备包
+宣称全墙已可运行。6项转换测试覆盖三维六面写出、双实例重合节点与RP隔离，
+并保留原二维转换测试。
+
 ```bash
 .build/abaqus-converter-env/bin/python \
   tools/abaqus/abaqus2exodus.py \
