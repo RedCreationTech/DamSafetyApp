@@ -54,12 +54,14 @@ def prepare_rigid_plane(model, gm, output):
     # Included by the main input once the displacement variables/mesh exist.
     # Top-face displacement DOFs are shared by the HEX8 and lower face block.
     lines = ['# RP fragment; requires surface block 500 and disp_x/disp_y/disp_z.',
-             '[Variables]', '  [rp_rotations]', '    family = SCALAR',
-             '    order = THIRD', '  []']
+             '[Variables]']
     for axis in ('x', 'y', 'z'):
         lines += [f'  [rp_traction_{axis}]', '    family = LAGRANGE',
                   '    order = FIRST', '    block = 500', '  []']
-    lines += ['[]', '[Functions]', '  [rp_y_loading]', '    type = PiecewiseLinear',
+    # Locked SystemBase::applyScalingFactors applies field factors first,
+    # then scalar factors. Register all field variables before this scalar.
+    lines += ['  [rp_rotations]', '    family = SCALAR', '    order = THIRD', '  []',
+              '[]', '[Functions]', '  [rp_y_loading]', '    type = PiecewiseLinear',
               "    x = '0 1'", "    y = '0 -0.020'", '  []', '[]', '[Kernels]']
     for component, axis in enumerate(('x', 'y', 'z')):
         lines += [f'  [rp_kinematics_{axis}]', '    type = RigidPlaneConstraint',

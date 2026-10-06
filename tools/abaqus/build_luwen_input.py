@@ -182,8 +182,7 @@ def assemble(source, stage):
     # Main sections merge with the source-preserving AAC/embedded/RP fragments.
     lines=['# Original luwen-wxz wall; precheck and first calculation remain pending.',
            '# SI m-N-s-kg-Pa; no added loads, contacts, core columns or artificial ties.',
-           '!include aac-material-fragment.i', '!include embedded-constraint-fragment.i',
-           '!include rp-constraint-fragment.i', '']
+           '!include aac-material-fragment.i', '!include embedded-constraint-fragment.i', '']
     for section, objects in sections.items():
         lines.append('['+section+']')
         if section=='Mesh':
@@ -194,6 +193,10 @@ def assemble(source, stage):
             for key,value in params.items():lines.append(indent+key+' = '+str(value))
             if name:lines.append('  []')
         lines+=['[]','']
+        if section == 'Variables':
+            # Field-variable registration must precede the RP scalar for the
+            # locked framework's scaling-factor vector layout.
+            lines += ['!include rp-constraint-fragment.i', '']
     custom=[geometry['blocks'][b]['id'] for b in solid]
     # Embedded and nonlocal mortar couplings extend the mesh adjacency graph.
     # Upstream embedded-constraint tests use hash assembly for this pattern.
