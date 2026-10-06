@@ -17,6 +17,11 @@ InputParameters RigidPlaneMomentConstraint::validParams()
   params.addRequiredCoupledVar("tractions", "Three nodal LM traction fields in x/y/z order.");
   params.addRequiredParam<FileName>("moment_file", "Reference surface nodal-integral CSV.");
   params.addParam<SubdomainID>("surface_block", 500, "Lower-dimensional RP surface block.");
+  // This replicated-mesh wall also has non-topological embedded node/element
+  // hosts. Keep their solution DOFs available on every rank before upstream
+  // embedded constraints reinitialize neighbor variables. Algebraic ghosting
+  // does not create a dense matrix coupling graph or change the equations.
+  params.addRelationshipManager("GhostEverything", Moose::RelationshipManagerType::ALGEBRAIC);
   return params;
 }
 
