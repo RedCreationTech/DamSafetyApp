@@ -15,11 +15,13 @@ InputParameters RigidPlaneMomentConstraint::validParams()
   params.addClassDescription("Moment equilibrium for three free rotations of a coupled rigid plane.");
   params.addRequiredCoupledVar("tractions", "Three nodal LM traction fields in x/y/z order.");
   params.addRequiredParam<FileName>("moment_file", "Reference surface nodal-integral CSV.");
+  params.addParam<SubdomainID>("surface_block", 500, "Lower-dimensional RP surface block.");
   return params;
 }
 
 RigidPlaneMomentConstraint::RigidPlaneMomentConstraint(const InputParameters & parameters)
-  : NodalScalarKernel(parameters), _traction_numbers(coupledIndices("tractions"))
+  : NodalScalarKernel(parameters), _traction_numbers(coupledIndices("tractions")),
+    _surface_block(getParam<SubdomainID>("surface_block"))
 {
   if (_traction_numbers.size() != 3)
     paramError("tractions", "Supply three traction fields in x/y/z order.");
@@ -41,24 +43,48 @@ RigidPlaneMomentConstraint::RigidPlaneMomentConstraint(const InputParameters & p
   }
   if (data.size() != _node_ids.size())
     paramError("moment_file", "Moment rows must match the complete top nodeset.");
-  for (const auto id : _node_ids)
+  // Source labels are evidence keys, not persistent runtime mesh node IDs.
+  for (const auto & entry : data)
   {
-    const auto it = data.find(id);
-    const auto * node = _mesh.getMesh().query_node_ptr(id);
-    if (it == data.end() || !node)
-      paramError("moment_file", "Unknown top node ", id);
-    for (unsigned int d = 0; d < 3; ++d)
-      if (std::abs((*node)(d) - it->second[d]) > 1e-10)
-        paramError("moment_file", "Node numbering/coordinates do not match the input mesh.");
-    _moments.emplace_back(it->second[3], it->second[4], it->second[5]);
+    _reference_nodes.emplace_back(entry.second[0], entry.second[1], entry.second[2]);
+    _moments.emplace_back(entry.second[3], entry.second[4], entry.second[5]);
   }
+}
+
+void RigidPlaneMomentConstraint::initialSetup()
+{
+  std::set<const Node *> nodes;
+  for (const auto * elem : _mesh.getMesh().active_element_ptr_range())
+    if (elem->subdomain_id() == _surface_block)
+      for (unsigned int n = 0; n < elem->n_nodes(); ++n)
+        nodes.insert(elem->node_ptr(n));
+  if (nodes.size() != _reference_nodes.size())
+    mooseError("RP surface has ", nodes.size(), " nodes, expected ", _reference_nodes.size());
+  for (const auto & point : _reference_nodes)
+  {
+    const Node * match = nullptr;
+    for (const auto * node : nodes)
+      if ((*node - point).norm() <= 1e-10)
+      {
+        if (match) mooseError("Nonunique RP surface coordinate mapping.");
+        match = node;
+      }
+    if (!match) mooseError("Original RP surface point is absent: ", point);
+    _surface_nodes.push_back(match);
+  }
+  for (unsigned int d = 0; d < 3; ++d)
+    for (unsigned int n = 0; n < _surface_nodes.size(); ++n)
+      tractionDof(d, n);
+  mooseInfo("RP surface coordinate identity verified for ", _surface_nodes.size(), " nodes.");
 }
 
 dof_id_type RigidPlaneMomentConstraint::tractionDof(unsigned int traction, unsigned int n) const
 {
-  const auto * node = _mesh.getMesh().query_node_ptr(_node_ids.at(n));
+  const auto * node = _surface_nodes.at(n);
   if (!node || node->n_dofs(_sys.number(), _traction_numbers.at(traction)) != 1)
-    mooseError("RP surface node ", _node_ids.at(n), " must have exactly one traction DOF.");
+    mooseError("RP surface node ", node->id(), " at ", *node,
+               " must have exactly one traction DOF in system ", _sys.number(),
+               " variable ", _traction_numbers.at(traction));
   return node->dof_number(_sys.number(), _traction_numbers[traction], 0);
 }
 
