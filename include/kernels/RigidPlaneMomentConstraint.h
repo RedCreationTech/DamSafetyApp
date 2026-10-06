@@ -10,7 +10,7 @@ public:
   static InputParameters validParams();
   RigidPlaneMomentConstraint(const InputParameters & parameters);
   void initialSetup() override;
-  void reinit() override {}
+  void reinit() override;
   void computeResidual() override;
   void computeJacobian() override;
 protected:
@@ -21,4 +21,5 @@ protected:
   std::vector<Point> _reference_nodes;
   std::vector<const Node *> _surface_nodes;
   std::vector<RealVectorValue> _moments;
+  std::vector<libMesh::Number> _parallel_solution;
 };

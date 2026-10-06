@@ -195,7 +195,10 @@ def assemble(source, stage):
             if name:lines.append('  []')
         lines+=['[]','']
     custom=[geometry['blocks'][b]['id'] for b in solid]
-    lines+=['[Problem]', '  type = FEProblem', '[]', '', '[Executioner/Quadrature]',
+    # Embedded and nonlocal mortar couplings extend the mesh adjacency graph.
+    # Upstream embedded-constraint tests use hash assembly for this pattern.
+    lines+=['[Problem]', '  type = FEProblem',
+            '  use_hash_table_matrix_assembly = true', '[]', '', '[Executioner/Quadrature]',
             '  type = GAUSS', '  order = SECOND',
             '  custom_blocks = '+names(custom),
             '  custom_orders = '+names(['FIRST']*len(custom)), '[]','',

@@ -4,6 +4,7 @@
 #include "MooseMesh.h"
 #include "MooseVariableScalar.h"
 #include "SystemBase.h"
+#include "libmesh/numeric_vector.h"
 #include <map>
 #include <cmath>
 
@@ -88,6 +89,16 @@ dof_id_type RigidPlaneMomentConstraint::tractionDof(unsigned int traction, unsig
   return node->dof_number(_sys.number(), _traction_numbers[traction], 0);
 }
 
+void RigidPlaneMomentConstraint::reinit()
+{
+  // Scalar-kernel reinit is called on every rank before the scalar-DOF owner
+  // assembles its rows. The surface moments need all 224 nodal tractions;
+  // geometric mesh replication does not replicate a distributed solution.
+  // Collect collectively here, never inside owner-only computeResidual().
+  if (_communicator.size() > 1)
+    _sys.currentSolution()->localize(_parallel_solution);
+}
+
 Real RigidPlaneMomentConstraint::coefficient(unsigned int rotation, unsigned int traction,
                                            unsigned int node) const
 {
@@ -107,7 +118,12 @@ void RigidPlaneMomentConstraint::computeResidual()
     _local_re(r) = 0.0;
     for (unsigned int d = 0; d < 3; ++d)
       for (unsigned int n = 0; n < _node_ids.size(); ++n)
-        _local_re(r) += coefficient(r, d, n) * (*_sys.currentSolution())(tractionDof(d, n));
+      {
+        const auto dof = tractionDof(d, n);
+        const auto traction = _communicator.size() > 1 ? _parallel_solution.at(dof)
+                                                       : (*_sys.currentSolution())(dof);
+        _local_re(r) += coefficient(r, d, n) * traction;
+      }
   }
   assignTaggedLocalResidual();
 }

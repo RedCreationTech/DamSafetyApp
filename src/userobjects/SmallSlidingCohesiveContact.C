@@ -103,7 +103,10 @@ void SmallSlidingCohesiveContact::finalize()
     _communicator.sum(covered);_communicator.sum(bonded);_communicator.sum(area);
     if(_expected_nodes && covered!=_expected_nodes)
       mooseError(name()," reference mortar coverage is ",covered," nodes, expected ",_expected_nodes);
-    mooseInfo(name()," initial interface coverage: ",covered," nodes, original-contact eligible: ",bonded,"; area m2: ",area);
+    // mooseInfo uses one shared template-level once guard. Use the repeated
+    // public logger with our per-interface guard so all seven pairs appear.
+    if (processor_id() == 0)
+      ::mooseInfoRepeated(name()," initial interface coverage: ",covered," nodes, original-contact eligible: ",bonded,"; area m2: ",area);
     _coverage_reported=true;
   }
   if(_mci_fe_problem.getCurrentExecuteOnFlag()==EXEC_TIMESTEP_END)
