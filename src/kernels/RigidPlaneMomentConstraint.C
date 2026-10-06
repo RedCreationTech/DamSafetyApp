@@ -65,6 +65,12 @@ void RigidPlaneMomentConstraint::computeResidual()
 {
   if (_u.size() != 3) mooseError("RP rotations must be a THIRD-order SCALAR variable.");
   prepareVectorTag(_assembly, _var.number());
+  if (_local_re.size() != 3)
+    mooseError("RP moment residual must have three rows, got ", _local_re.size());
+  for (unsigned int d = 0; d < 3; ++d)
+    if (_tractions[d]->size() != _node_ids.size())
+      mooseError("RP traction ", d, " has ", _tractions[d]->size(),
+                 " nodal values, expected ", _node_ids.size());
   for (unsigned int r = 0; r < 3; ++r)
   {
     _local_re(r) = 0.0;
@@ -83,6 +89,9 @@ void RigidPlaneMomentConstraint::computeJacobian()
   for (unsigned int d = 0; d < 3; ++d)
   {
     prepareMatrixTag(_assembly, _var.number(), _traction_numbers[d]);
+    if (_local_ke.m() != 3 || _local_ke.n() != _node_ids.size())
+      mooseError("RP moment Jacobian for traction ", d, " is ", _local_ke.m(), " x ",
+                 _local_ke.n(), "; expected 3 x ", _node_ids.size());
     for (unsigned int r = 0; r < 3; ++r)
       for (unsigned int n = 0; n < _node_ids.size(); ++n)
         _local_ke(r,n) = coefficient(r,d,n);
