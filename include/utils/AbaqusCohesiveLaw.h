@@ -26,7 +26,9 @@ Result<T> evaluate(const Parameters & p, const State & old,
                    const std::array<T,3> & jump, const T & pressure, Real dt, bool bonded=true)
 {
   using std::sqrt; using std::abs;
-  auto positive=[](const T & x)->T { return x > 0 ? x : T(0); };
+  // Select the tensile generalized derivative at zero separation. This avoids
+  // an artificial zero tangent for a closed, initially undamaged bond.
+  auto positive=[](const T & x)->T { return x >= 0 ? x : T(0); };
   const T opening=positive(jump[0]);
   const T effective=sqrt(opening*opening+jump[1]*jump[1]+jump[2]*jump[2]);
   T onset=old[0];

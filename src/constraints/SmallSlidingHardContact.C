@@ -25,7 +25,9 @@ void SmallSlidingHardContact::post()
     if(node->processor_id()!=processor_id())continue;
     const auto dof=node->dof_number(_sys.number(),_var->number(),0);
     ADReal pressure=(*_sys.currentSolution())(dof);Moose::derivInsert(pressure.derivatives(),dof,1.0);
-    const ADReal residual=std::min(pressure,_c*entry.second.first/entry.second.second);
+    const ADReal gap_residual=_c*entry.second.first/entry.second.second;
+    // At the closed/unloaded corner choose the active contact tangent.
+    const ADReal residual=pressure<gap_residual ? pressure:gap_residual;
     addResidualsAndJacobian(_assembly,std::array<ADReal,1>{residual},std::array<dof_id_type,1>{dof},_var->scalingFactor());
   }
 }

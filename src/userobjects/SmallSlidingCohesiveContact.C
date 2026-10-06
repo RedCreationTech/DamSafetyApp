@@ -21,6 +21,7 @@ InputParameters SmallSlidingCohesiveContact::validParams()
   p.addRangeCheckedParam<Real>("friction_coefficient",0,"friction_coefficient >= 0","Original Coulomb coefficient.");
   p.addRequiredRangeCheckedParam<Real>("critical_elastic_slip","critical_elastic_slip > 0","Slip tolerance times reference contact-element length, m.");
   p.addRangeCheckedParam<Real>("initial_bond_tolerance",1e-10,"initial_bond_tolerance > 0","Geometry roundoff tolerance for original-contact eligibility, m.");
+  p.addParam<unsigned int>("expected_secondary_nodes",0,"Strict full interface coverage count; zero disables the count check.");
   p.set<bool>("use_displaced_mesh")=false;
   p.set<bool>("interpolate_normals")=false;
   p.set<ExecFlagEnum>("execute_on")={EXEC_LINEAR,EXEC_NONLINEAR,EXEC_TIMESTEP_END};
@@ -39,6 +40,7 @@ SmallSlidingCohesiveContact::SmallSlidingCohesiveContact(const InputParameters &
                {getParam<std::vector<Real>>("strength").at(0),getParam<std::vector<Real>>("strength").at(1),getParam<std::vector<Real>>("strength").at(2)},
                getParam<Real>("failure_increment"),getParam<Real>("viscosity"),getParam<Real>("friction_coefficient"),getParam<Real>("critical_elastic_slip")},
    _bond_tolerance(getParam<Real>("initial_bond_tolerance")),
+   _expected_nodes(getParam<unsigned int>("expected_secondary_nodes")),
    _history(declareRestartableData<std::unordered_map<dof_id_type,AbaqusCohesiveLaw::State>>("accepted_contact_history"))
 {
   if (getParam<bool>("use_displaced_mesh") || interpolateNormals())
@@ -89,6 +91,21 @@ void SmallSlidingCohesiveContact::finalize()
   communicateRealObject(_jumps,_mci_mesh,true,_communicator,true);
   communicateRealObject(_reference_normals,_mci_mesh,true,_communicator,true);
   communicateRealObject(_initial_gaps,_mci_mesh,true,_communicator,true);
+  if(!_coverage_reported)
+  {
+    unsigned int covered=0,bonded=0;Real area=0;
+    for(const auto & entry:_gaps)
+      if(entry.first->processor_id()==processor_id())
+      {
+        ++covered;area+=entry.second.second;
+        if(_initial_gaps.at(entry.first)/entry.second.second<=_bond_tolerance)++bonded;
+      }
+    _communicator.sum(covered);_communicator.sum(bonded);_communicator.sum(area);
+    if(_expected_nodes && covered!=_expected_nodes)
+      mooseError(name()," reference mortar coverage is ",covered," nodes, expected ",_expected_nodes);
+    mooseInfo(name()," initial interface coverage: ",covered," nodes, original-contact eligible: ",bonded,"; area m2: ",area);
+    _coverage_reported=true;
+  }
   if(_mci_fe_problem.getCurrentExecuteOnFlag()==EXEC_TIMESTEP_END)
     for(const auto & entry : _gaps)
       _history[entry.first->id()]=evaluateNode(static_cast<const Node *>(entry.first)).state;
@@ -108,12 +125,16 @@ AbaqusCohesiveLaw::Result<ADReal> SmallSlidingCohesiveContact::evaluateNode(cons
   std::array<ADReal,3> local{jump*rotation[0],jump*rotation[1],jump*rotation[2]};
   const auto dof=node->dof_number(_system.number(),_pressure_var->number(),0);
   ADReal pressure=(*_system.currentSolution())(dof); Moose::derivInsert(pressure.derivatives(),dof,1.0);
-  const bool bonded=std::abs(_initial_gaps.at(node)/_gaps.at(node).second)<=_bond_tolerance;
-  return AbaqusCohesiveLaw::evaluate(_parameters,_history[node->id()],local,pressure,_dt,bonded);
+  const bool bonded=_initial_gaps.at(node)/_gaps.at(node).second<=_bond_tolerance;
+  return AbaqusCohesiveLaw::evaluate(_parameters,_history[node->id()],local,pressure,_mci_fe_problem.dt(),bonded);
 }
 void SmallSlidingCohesiveContact::reinit()
 {
-  for(auto & field:_traction) {field.resize(_qrule_msm->n_points()); for(auto & x:field)x=0;}
+  for(auto & field:_traction)
+  {
+    field.resize(_qrule_msm->n_points());
+    for(unsigned int qp=0;qp<field.size();++qp)field[qp]=0;
+  }
   for(unsigned int i=0;i<_shape->size();++i)
   {
     const auto * node=_lower_secondary_elem->node_ptr(i);
@@ -124,4 +145,25 @@ void SmallSlidingCohesiveContact::reinit()
         for(unsigned int k=0;k<3;++k)
           _traction[d][qp]+=(*_shape)[i][qp]*frame[k](d)*local.traction[k];
   }
+}
+Real SmallSlidingCohesiveContact::nodeValue(const Node * node,unsigned int quantity) const
+{
+  const auto it=_gaps.find(node);
+  if(it==_gaps.end())return 0;
+  const auto history=_history.find(node->id());
+  const Real damage=history==_history.end() ? 0:history->second[7];
+  if(quantity==0)return damage;
+  if(quantity==1)return MetaPhysicL::raw_value(it->second.first)/it->second.second;
+  const auto dof=node->dof_number(_system.number(),_pressure_var->number(),0);
+  const Real pressure=(*_system.currentSolution())(dof);
+  if(quantity==2)return pressure;
+  const auto frame=basis(node);const auto jump=MetaPhysicL::raw_value(_jumps.at(node))/it->second.second;
+  if(quantity>=3 && quantity<=5)return jump*frame[quantity-3];
+  const unsigned int d=quantity-6;
+  if(d>2)mooseError("Unknown contact output quantity.");
+  const Real separation=jump*frame[d];
+  Real residual=-(1-damage)*_parameters.stiffness[d]*(d==0 ? std::max(separation,0.0):separation);
+  if(d==0)residual+=pressure;
+  else if(history!=_history.end())residual-=damage*_parameters.friction*std::max(pressure,0.0)*history->second[4+d]/_parameters.critical_slip;
+  return residual;
 }

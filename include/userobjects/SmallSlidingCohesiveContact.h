@@ -15,6 +15,7 @@ public:
   void reinit() override;
   const auto & weightedGaps() const { return _gaps; }
   const ADVariableValue & traction(unsigned int d) const { return _traction[d]; }
+  Real nodeValue(const Node * node, unsigned int quantity) const;
 protected:
   AbaqusCohesiveLaw::Result<ADReal> evaluateNode(const Node * node);
   std::array<Point,3> basis(const Node * node) const;
@@ -26,6 +27,8 @@ protected:
   const MooseArray<Real> & _coord;
   const AbaqusCohesiveLaw::Parameters _parameters;
   const Real _bond_tolerance;
+  const unsigned int _expected_nodes;
+  bool _coverage_reported=false;
   std::unordered_map<const DofObject *,std::pair<ADReal,Real>> _gaps;
   std::unordered_map<const DofObject *,ADRealVectorValue> _jumps, _reference_normals;
   std::unordered_map<const DofObject *,Real> _initial_gaps;
