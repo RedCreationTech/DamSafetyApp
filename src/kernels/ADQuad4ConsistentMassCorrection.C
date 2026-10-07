@@ -1,6 +1,7 @@
 #include "ADQuad4ConsistentMassCorrection.h"
 
 #include "libmesh/elem.h"
+#include "Function.h"
 
 registerMooseObject("DamSafetyApp", ADQuad4ConsistentMassCorrection);
 
@@ -18,6 +19,8 @@ ADQuad4ConsistentMassCorrection::validParams()
   params.addParam<MaterialPropertyName>("density", "density", "Density material property");
   params.addParam<MaterialPropertyName>(
       "eta", 0.0, "Mass-proportional Rayleigh damping material property");
+  params.addParam<FunctionName>("ground_acceleration", "Optional relative-coordinate ground acceleration");
+  params.addParam<FunctionName>("ground_velocity", "Optional relative-coordinate ground velocity");
   params.set<bool>("use_displaced_mesh") = false;
   return params;
 }
@@ -25,6 +28,8 @@ ADQuad4ConsistentMassCorrection::validParams()
 ADQuad4ConsistentMassCorrection::ADQuad4ConsistentMassCorrection(
     const InputParameters & parameters)
   : ADKernel(parameters),
+    _ground_acceleration(isParamValid("ground_acceleration") ? &getFunction("ground_acceleration") : nullptr),
+    _ground_velocity(isParamValid("ground_velocity") ? &getFunction("ground_velocity") : nullptr),
     _beta(getParam<Real>("beta")),
     _gamma(getParam<Real>("gamma")),
     _alpha(getParam<Real>("alpha")),
@@ -55,6 +60,14 @@ ADQuad4ConsistentMassCorrection::computeQpResidual()
   }
   const auto correction = Quad4Hourglass::consistentMassCorrection(nodes);
 
+  // The correction row sum is generally nonzero on distorted quads. Restore
+  // this part of M*1*ground_load as well as the relative-coordinate mass.
+  if (bool(_ground_acceleration) != bool(_ground_velocity))
+    mooseError(name(), " requires both ground_acceleration and ground_velocity, or neither");
+  const Real ground_load = _ground_acceleration ?
+      _ground_acceleration->value(_t, _q_point[_qp]) + _eta[_qp] *
+      ((1.0 + _alpha) * _ground_velocity->value(_t, _q_point[_qp]) -
+       _alpha * _ground_velocity->value(_t - _dt, _q_point[_qp])) : 0.0;
   ADReal force = 0.0;
   for (unsigned int j = 0; j < 4; ++j)
   {
@@ -65,7 +78,7 @@ ADQuad4ConsistentMassCorrection::computeQpResidual()
     const ADReal velocity = _velocity_old[j] + _dt * (1.0 - _gamma) * _acceleration_old[j] +
                             _gamma * _dt * acceleration;
     force += correction[_i][j] *
-             (acceleration +
+             (acceleration + ground_load +
               _eta[_qp] * ((1.0 + _alpha) * velocity - _alpha * _velocity_old[j]));
   }
   return _density[_qp] * force / Quad4Hourglass::area(nodes);

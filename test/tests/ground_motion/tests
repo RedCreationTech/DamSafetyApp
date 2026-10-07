@@ -1,0 +1,13 @@
+[Tests]
+  [elastic_relative]
+    type = RunApp
+    input = elastic-relative.i
+    requirement = 'Relative-coordinate free-solve elastic model uses analytic base U/V/A in inertia and mass damping.'
+  []
+  [elastic_retry]
+    type = RunApp
+    input = elastic-relative-retry.i
+    expect_out = GROUND_MOTION_REJECT
+    requirement = 'A deliberately rejected converged trial is restored before retrying prescribed ground motion.'
+  []
+[]

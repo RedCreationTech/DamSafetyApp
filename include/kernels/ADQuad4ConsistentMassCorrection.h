@@ -12,6 +12,8 @@ public:
 protected:
   ADReal computeQpResidual() override;
 
+  const Function * const _ground_acceleration;
+  const Function * const _ground_velocity;
   const Real _beta;
   const Real _gamma;
   const Real _alpha;
