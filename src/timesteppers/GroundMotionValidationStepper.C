@@ -22,11 +22,11 @@ void GroundMotionValidationStepper::step()
     _rejected = true;
     _converged = false;
     ++_failure_count;
-    _console << std::setprecision(17) << "GROUND_MOTION_REJECT time=" << _time << " dt=" << _dt << '\n';
+    _console << std::setprecision(17) << "GROUND_MOTION_REJECT time=" << _time << " dt=" << _dt << std::endl;
   }
 }
 void GroundMotionValidationStepper::acceptStep()
 {
   TimeSequenceStepper::acceptStep();
-  _console << std::setprecision(17) << "GROUND_MOTION_ACCEPT time=" << _time << " dt=" << _dt << '\n';
+  _console << std::setprecision(17) << "GROUND_MOTION_ACCEPT time=" << _time << " dt=" << _dt << std::endl;
 }
