@@ -11,10 +11,6 @@
 []
 [Problem]
   type = FEProblem
-  [Quadrature]
-    type = GAUSS
-    order = CONSTANT
-  []
 []
 [Variables]
   [q_x]
@@ -185,11 +181,11 @@
     poissons_ratio = 0.2
   []
   [strain]
-    type = ComputeIncrementalSmallStrain
+    type = ComputeIncrementalStrain
     displacements = 'q_x q_y'
   []
   [stress]
-    type = ComputeLinearElasticStress
+    type = ComputeFiniteStrainElasticStress
   []
 []
 [Postprocessors]
@@ -382,6 +378,10 @@
 []
 [Executioner]
   type = Transient
+  [Quadrature]
+    type = GAUSS
+    order = FIRST
+  []
   solve_type = NEWTON
   end_time = 0.2
   dtmin = 1e-8
@@ -398,14 +398,15 @@
   []
 []
 [Outputs]
-  exodus = true
-  csv = true
-  print_linear_residuals = false
-  [console]
+  console = false
+  [validation_console]
     type = Console
-    precision = 17
   []
-  [csv]
+  [field]
+    type = Exodus
+  []
+  [history]
+    type = CSV
     precision = 17
   []
 []
