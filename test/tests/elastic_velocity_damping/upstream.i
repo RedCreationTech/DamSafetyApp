@@ -1,7 +1,6 @@
 # Elastic velocity-rate diagnostic, NOT a dam model or an Abaqus reference.
 [GlobalParams]
   displacements = 'q_x q_y'
-  out_of_plane_strain = strain_zz
 []
 [Mesh]
   type = GeneratedMesh
