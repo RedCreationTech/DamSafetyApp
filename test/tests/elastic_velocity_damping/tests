@@ -1,0 +1,63 @@
+[Tests]
+  [default_off]
+    type = RunApp
+    input = default-off.i
+    requirement = 'The elastic velocity Physics defaults to the upstream formulation without a thickness rate equation.'
+  []
+  [upstream_control]
+    type = RunApp
+    input = upstream.i
+    requirement = 'The unchanged upstream weak-plane-stress dynamics provides the default-off comparison control.'
+  []
+  [velocity_10ms]
+    type = RunApp
+    input = velocity-10ms.i
+    requirement = 'Strict elastic Newmark velocity damping solves the free two-direction weak-plane-stress small model at 10ms.'
+  []
+  [velocity_5ms]
+    type = RunApp
+    input = velocity-5ms.i
+    requirement = 'Strict elastic Newmark velocity damping solves the same small model at 5ms.'
+  []
+  [jacobian]
+    type = PetscJacobianTester
+    input = velocity-10ms.i
+    ratio_tol = 1e-7
+    difference_tol = 1e-6
+    requirement = 'Static thickness and algebraic rate columns and both displacement directions have a consistent full Jacobian.'
+  []
+  [retry]
+    type = RunApp
+    input = velocity-retry.i
+    expect_out = GROUND_MOTION_REJECT
+    requirement = 'An intentionally rejected converged elastic trial restores accepted displacement, auxiliary histories and algebraic thickness rate.'
+  []
+  [reject_unacknowledged]
+    type = RunException
+    input = velocity-10ms.i
+    cli_args = 'Physics/SolidMechanics/ElasticVelocityDynamic/elastic/strict_elastic_model=false'
+    expect_err = 'Elastic velocity candidate requires acknowledged'
+    requirement = 'The candidate cannot silently activate on an unaudited material.'
+  []
+  [reject_finite_strain]
+    type = RunException
+    input = velocity-10ms.i
+    cli_args = 'Physics/SolidMechanics/ElasticVelocityDynamic/elastic/strain=FINITE'
+    expect_err = 'Elastic velocity candidate requires acknowledged'
+    requirement = 'The elastic-only candidate rejects finite-strain mechanics.'
+  []
+  [reject_mismatched_rate_space]
+    type = RunException
+    input = velocity-10ms.i
+    cli_args = 'Variables/strain_zz_rate/family=MONOMIAL Variables/strain_zz_rate/order=CONSTANT'
+    expect_err = 'same FE/block space'
+    requirement = 'The algebraic thickness rate must share the original thickness FE space.'
+  []
+  [reject_wrong_elasticity]
+    type = RunException
+    input = velocity-10ms.i
+    cli_args = 'Materials/elasticity/youngs_modulus=90'
+    expect_err = 'declared constant isotropic elasticity and tangent'
+    requirement = 'The candidate checks the actual constant elastic tensor against its declared identity.'
+  []
+[]

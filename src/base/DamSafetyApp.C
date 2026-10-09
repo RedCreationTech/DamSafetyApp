@@ -29,6 +29,7 @@ DamSafetyApp::registerAll(Factory & f, ActionFactory & af, Syntax & syntax)
 
   registerSyntax("CDPQuasiStaticPhysics", "Physics/SolidMechanics/CDPQuasiStatic/*");
   registerSyntax("AcceptedIntervalDynamicPhysics", "Physics/SolidMechanics/AcceptedIntervalDynamic/*");
+  registerSyntax("ElasticVelocityDynamicPhysics", "Physics/SolidMechanics/ElasticVelocityDynamic/*");
 }
 
 void
