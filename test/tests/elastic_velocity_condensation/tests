@@ -1,0 +1,36 @@
+[Tests]
+  [pointwise_jacobian]
+    type = PetscJacobianTester
+    run_sim = true
+    input = pointwise-10ms.i
+    ratio_tol = 1e-7
+    difference_tol = 1e-6
+    requirement = 'The observable elastic rate Schur derivative preserves the original static thickness column and both displacement columns.'
+  []
+  [pointwise_5ms]
+    type = RunApp
+    input = pointwise-5ms.i
+    requirement = 'The explicitly audited reduced-quadrature elastic candidate retains mass compensation and hourglass contributions and supports checkpoint recovery.'
+  []
+  [reject_without_rank_audit]
+    type = RunException
+    input = pointwise-10ms.i
+    cli_args = 'Physics/SolidMechanics/ElasticVelocityDynamic/elastic/pointwise_rate_equivalence_audited=false'
+    expect_err = 'Pointwise rate requires explicit audited equivalence'
+    requirement = 'Pointwise rate elimination requires explicit external observable-space evidence acknowledgement.'
+  []
+  [reject_extra_rate_unknown]
+    type = RunException
+    input = same-space-10ms.i
+    cli_args = 'Physics/SolidMechanics/ElasticVelocityDynamic/elastic/thickness_rate_formulation=pointwise Physics/SolidMechanics/ElasticVelocityDynamic/elastic/pointwise_rate_equivalence_audited=true'
+    expect_err = 'Pointwise rate requires explicit audited equivalence'
+    requirement = 'Pointwise rate elimination rejects an unused algebraic rate variable entry.'
+  []
+  [reject_multiple_quadrature_points]
+    type = RunException
+    input = pointwise-10ms.i
+    cli_args = 'Executioner/Quadrature/order=THIRD'
+    expect_err = 'Audited pointwise rate requires one-point'
+    requirement = 'The frozen one-point proof cannot be silently reused for full quadrature.'
+  []
+[]

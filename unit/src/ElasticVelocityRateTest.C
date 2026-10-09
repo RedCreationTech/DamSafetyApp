@@ -1,6 +1,8 @@
 #include "ElasticVelocityRate.h"
 #include "gtest/gtest.h"
 #include <cmath>
+#include "RankTwoTensor.h"
+#include "RankFourTensor.h"
 
 TEST(ElasticVelocityRate, ConstantAccelerationUsesAcceptedHistoryOnRetry)
 {
@@ -44,4 +46,35 @@ TEST(ElasticVelocityRate, InitialAssemblyDoesNotAttemptZeroIntervalNewmark)
 {
   EXPECT_THROW(ElasticVelocityRate::trialVelocity(0.,0.,0.,0.,0.,.25,.5), std::invalid_argument);
   EXPECT_THROW(ElasticVelocityRate::displacementDerivative(.01,0.,.5), std::invalid_argument);
+}
+
+TEST(ElasticVelocityRate, ObservableClosureAndSchurDerivativeAgree)
+{
+  const double E = 100, nu = .2;
+  const double mu = E / (2*(1+nu)), lambda = E*nu / ((1+nu)*(1-2*nu));
+  RankFourTensor C;
+  for (unsigned int i=0;i<3;++i)
+    for (unsigned int j=0;j<3;++j)
+      for (unsigned int k=0;k<3;++k)
+        for (unsigned int l=0;l<3;++l)
+          C(i,j,k,l) = lambda*(i==j)*(k==l)+mu*((i==k)*(j==l)+(i==l)*(j==k));
+  RankTwoTensor rate;
+  rate(0,0)=.07;rate(1,1)=-.02;rate(0,1)=rate(1,0)=.013;
+  const auto closed = ElasticVelocityRate::closePlaneStressRate(C,rate);
+  const auto tangent = ElasticVelocityRate::planeStressRateTangent(C);
+  EXPECT_NEAR((C*closed)(2,2),0,1e-13);
+  EXPECT_NEAR((C*closed - tangent*rate).L2norm(),0,1e-13);
+  // A plane-strain rate is an explicit wrong alternative, not another valid closure.
+  EXPECT_GT(std::abs((C*rate)(0,0)-(C*closed)(0,0)), .1);
+  for (double h : {.01,.005,.0037})
+  {
+    const double c=ElasticVelocityRate::displacementDerivative(h,.275625,.55), e=1e-6;
+    RankTwoTensor direction;
+    direction(0,0)=.3;direction(1,1)=-.1;
+    direction(0,1)=direction(1,0)=.05;
+    const auto plus=ElasticVelocityRate::closePlaneStressRate(C,rate+direction*(e*c));
+    const auto minus=ElasticVelocityRate::closePlaneStressRate(C,rate-direction*(e*c));
+    EXPECT_NEAR(((C*(plus-minus))/(2*e) - (tangent*direction)*c).L2norm(),0,1e-7);
+  }
+  EXPECT_THROW(ElasticVelocityRate::planeStressRateTangent(RankFourTensor()),std::invalid_argument);
 }

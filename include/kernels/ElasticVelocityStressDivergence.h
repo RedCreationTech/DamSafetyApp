@@ -12,6 +12,8 @@ protected:
   Real computeQpOffDiagJacobian(unsigned int jvar) override;
   const Real _beta, _gamma;
   const unsigned int _rate_var;
+  const bool _rate_coupled;
   const MaterialProperty<RankFourTensor> & _elasticity;
+  const MaterialProperty<RankFourTensor> & _rate_tangent;
   const MaterialProperty<RankTwoTensor> & _damping_stress;
 };

@@ -1,5 +1,6 @@
 #include "ElasticVelocityStressDivergence.h"
 #include "ElasticVelocityRate.h"
+#include "ElasticityTensorTools.h"
 
 registerMooseObject("DamSafetyApp", ElasticVelocityStressDivergence);
 
@@ -10,15 +11,17 @@ ElasticVelocityStressDivergence::validParams()
   params.addClassDescription("Strict elastic HHT stress divergence using reconstructed Newmark velocity; constitutive stress output is unchanged.");
   params.addRequiredParam<Real>("beta", "Same Newmark beta as inertia");
   params.addRequiredParam<Real>("gamma", "Same Newmark gamma as inertia");
-  params.addRequiredCoupledVar("out_of_plane_strain_rate", "Algebraic weak thickness rate");
+  params.addCoupledVar("out_of_plane_strain_rate", "Algebraic weak thickness rate; absent for audited observable elimination");
   return params;
 }
 
 ElasticVelocityStressDivergence::ElasticVelocityStressDivergence(const InputParameters & parameters)
   : DynamicStressDivergenceTensors(parameters),
     _beta(getParam<Real>("beta")), _gamma(getParam<Real>("gamma")),
-    _rate_var(coupled("out_of_plane_strain_rate")),
+    _rate_var(isCoupled("out_of_plane_strain_rate") ? coupled("out_of_plane_strain_rate") : 0),
+    _rate_coupled(isCoupled("out_of_plane_strain_rate")),
     _elasticity(getMaterialPropertyByName<RankFourTensor>(_base_name + "elasticity_tensor")),
+    _rate_tangent(getMaterialPropertyByName<RankFourTensor>(_base_name + "elastic_velocity_rate_tangent")),
     _damping_stress(getMaterialPropertyByName<RankTwoTensor>(_base_name + "elastic_velocity_damping_stress"))
 {
   if (_ndisp != 2 || _component > 1 || !_out_of_plane_strain_coupled ||
@@ -43,8 +46,10 @@ ElasticVelocityStressDivergence::computeQpJacobian()
 {
   if (_dt <= 0)
     return 0;
-  return StressDivergenceTensors::computeQpJacobian() * (1 + _alpha) *
-      (1 + _zeta[_qp] * ElasticVelocityRate::displacementDerivative(_dt, _beta, _gamma));
+  return (1 + _alpha) * (StressDivergenceTensors::computeQpJacobian() +
+      _zeta[_qp] * ElasticVelocityRate::displacementDerivative(_dt, _beta, _gamma) *
+      ElasticityTensorTools::elasticJacobian(_rate_tangent[_qp], _component, _component,
+                                            _grad_test[_i][_qp], _grad_phi[_j][_qp]));
 }
 
 Real
@@ -52,7 +57,7 @@ ElasticVelocityStressDivergence::computeQpOffDiagJacobian(unsigned int jvar)
 {
   if (_dt <= 0)
     return 0;
-  if (jvar == _rate_var)
+  if (_rate_coupled && jvar == _rate_var)
   {
     Real derivative = 0;
     for (unsigned int d = 0; d < 2; ++d)
@@ -61,8 +66,10 @@ ElasticVelocityStressDivergence::computeQpOffDiagJacobian(unsigned int jvar)
   }
   for (unsigned int c = 0; c < _ndisp; ++c)
     if (jvar == _disp_var[c])
-      return StressDivergenceTensors::computeQpOffDiagJacobian(jvar) * (1 + _alpha) *
-          (1 + _zeta[_qp] * ElasticVelocityRate::displacementDerivative(_dt, _beta, _gamma));
+      return (1 + _alpha) * (StressDivergenceTensors::computeQpOffDiagJacobian(jvar) +
+          _zeta[_qp] * ElasticVelocityRate::displacementDerivative(_dt, _beta, _gamma) *
+          ElasticityTensorTools::elasticJacobian(_rate_tangent[_qp], _component, c,
+                                                _grad_test[_i][_qp], _grad_phi[_j][_qp]));
   // Original thickness strain belongs only to static stress, not trial velocity.
   return (1 + _alpha) * StressDivergenceTensors::computeQpOffDiagJacobian(jvar);
 }

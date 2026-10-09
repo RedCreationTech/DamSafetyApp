@@ -4,6 +4,8 @@
 #include "MooseMesh.h"
 #include <algorithm>
 #include <cmath>
+#include "libmesh/elem.h"
+#include "libmesh/quadrature.h"
 
 registerMooseObject("DamSafetyApp", ElasticVelocityRateMaterial);
 
@@ -16,7 +18,9 @@ ElasticVelocityRateMaterial::validParams()
   params.addRequiredCoupledVar("velocities", "Accepted Newmark velocity Aux variables");
   params.addRequiredCoupledVar("accelerations", "Accepted Newmark acceleration Aux variables");
   params.addRequiredCoupledVar("out_of_plane_strain", "Original weak-plane-stress unknown");
-  params.addRequiredCoupledVar("out_of_plane_strain_rate", "Algebraic thickness rate in the same FE/block space");
+  params.addCoupledVar("out_of_plane_strain_rate", "Algebraic thickness rate in the same FE/block space");
+  params.addParam<bool>("pointwise_plane_stress_rate", false, "Use independently audited observable rate elimination");
+  params.addParam<bool>("pointwise_rate_equivalence_audited", false, "Explicit acknowledgement of mesh/space/constraint rank audit");
   params.addRequiredParam<Real>("beta", "Newmark beta, identical to inertia/Aux update");
   params.addRequiredParam<Real>("gamma", "Newmark gamma, identical to inertia/Aux update");
   params.addParam<Real>("alpha", 0, "HHT alpha, identical to inertia");
@@ -35,14 +39,19 @@ ElasticVelocityRateMaterial::ElasticVelocityRateMaterial(const InputParameters &
     _beta(getParam<Real>("beta")), _gamma(getParam<Real>("gamma")),
     _alpha(getParam<Real>("alpha")), _youngs(getParam<Real>("expected_youngs_modulus")),
     _poisson(getParam<Real>("expected_poissons_ratio")),
+    _pointwise_rate(getParam<bool>("pointwise_plane_stress_rate")),
     _elasticity(getMaterialPropertyByName<RankFourTensor>(_prefix + "elasticity_tensor")),
     _tangent(getMaterialPropertyByName<RankFourTensor>(_prefix + "Jacobian_mult")),
     _zeta(getMaterialProperty<Real>("zeta")),
-    _rate_zz(coupledValue("out_of_plane_strain_rate")),
-    _rate_zz_old(coupledValueOld("out_of_plane_strain_rate")),
+    _rate_zz(isCoupled("out_of_plane_strain_rate") ? &coupledValue("out_of_plane_strain_rate") : nullptr),
+    _rate_zz_old(isCoupled("out_of_plane_strain_rate") ? &coupledValueOld("out_of_plane_strain_rate") : nullptr),
     _rate_stress(declareProperty<RankTwoTensor>(_prefix + "elastic_velocity_rate_stress")),
-    _damping_stress(declareProperty<RankTwoTensor>(_prefix + "elastic_velocity_damping_stress"))
+    _damping_stress(declareProperty<RankTwoTensor>(_prefix + "elastic_velocity_damping_stress")),
+    _rate_tangent(declareProperty<RankFourTensor>(_prefix + "elastic_velocity_rate_tangent"))
 {
+  if ((_pointwise_rate && (!getParam<bool>("pointwise_rate_equivalence_audited") || _rate_zz)) ||
+      (!_pointwise_rate && !_rate_zz))
+    mooseError("Elastic pointwise rate requires an audited equivalence and no rate variable; same-space requires its rate variable");
   if (!getParam<bool>("strict_elastic_model") || getParam<bool>("use_displaced_mesh") ||
       !(_beta > 0) || !(_gamma > 0) || !(_youngs > 0) ||
       !(_poisson > -1 && _poisson < 0.5) || !(_alpha >= -1.0 / 3 && _alpha <= 0))
@@ -64,15 +73,17 @@ ElasticVelocityRateMaterial::initialSetup()
 {
   Material::initialSetup();
   auto * z = getVar("out_of_plane_strain", 0);
-  auto * r = getVar("out_of_plane_strain_rate", 0);
-  if (z->number() == r->number() || z->feType() != r->feType() || z->blockIDs() != r->blockIDs())
+  auto * r = _pointwise_rate ? nullptr : getVar("out_of_plane_strain_rate", 0);
+  if (r && (z->number() == r->number() || z->feType() != r->feType() || z->blockIDs() != r->blockIDs()))
     mooseError("Elastic thickness strain and rate must be distinct nonlinear variables in the same FE/block space");
-  if (z->kind() != Moose::VAR_SOLVER || r->kind() != Moose::VAR_SOLVER)
+  if (z->kind() != Moose::VAR_SOLVER || (r && r->kind() != Moose::VAR_SOLVER))
     mooseError("Elastic thickness strain and rate must be nonlinear variables");
+  if (_pointwise_rate && (z->feType().family != LAGRANGE || z->feType().order != FIRST))
+    mooseError("Audited pointwise rate requires original FIRST LAGRANGE thickness space");
   for (unsigned int c = 0; c < 2; ++c)
   {
     auto * u = getVar("displacements", c);
-    if (u->number() == r->number() || u->number() == z->number() ||
+    if ((r && u->number() == r->number()) || u->number() == z->number() ||
         getVar("velocities", c)->kind() != Moose::VAR_AUXILIARY ||
         getVar("accelerations", c)->kind() != Moose::VAR_AUXILIARY ||
         u->feType() != getVar("velocities", c)->feType() ||
@@ -90,6 +101,9 @@ ElasticVelocityRateMaterial::initialSetup()
 void
 ElasticVelocityRateMaterial::computeQpProperties()
 {
+  if (_pointwise_rate && (_qrule->n_points() != 1 ||
+      (_current_elem->type() != QUAD4 && _current_elem->type() != TRI3)))
+    mooseError("Audited pointwise rate requires one-point QUAD4 or TRI3 quadrature");
   // Checking both tensors prevents accidentally using a degraded/rotated tangent or a
   // nonconstant elastic tensor. This candidate is deliberately restricted, not a CDP model.
   const Real mu = _youngs / (2 * (1 + _poisson));
@@ -120,12 +134,23 @@ ElasticVelocityRateMaterial::computeQpProperties()
           : old_gradient(c,d);
     }
   const RankTwoTensor old_rate = (old_gradient + old_gradient.transpose()) * 0.5;
-  if (_t_step <= 1 && (old_rate.L2norm() > 1e-14 || std::abs(_rate_zz_old[_qp]) > 1e-14))
+  if (_t_step <= 1 && (old_rate.L2norm() > 1e-14 ||
+      (_rate_zz_old && std::abs((*_rate_zz_old)[_qp]) > 1e-14)))
     mooseError("Elastic velocity candidate requires zero initial strain rate; nonzero initial acceleration is retained");
   RankTwoTensor rate = (gradient + gradient.transpose()) * 0.5;
-  rate(2,2) = _rate_zz[_qp];
   RankTwoTensor previous_rate = old_rate;
-  previous_rate(2,2) = _rate_zz_old[_qp];
+  if (_pointwise_rate)
+  {
+    rate = ElasticVelocityRate::closePlaneStressRate(_elasticity[_qp], rate);
+    previous_rate = ElasticVelocityRate::closePlaneStressRate(_elasticity[_qp], previous_rate);
+    _rate_tangent[_qp] = ElasticVelocityRate::planeStressRateTangent(_elasticity[_qp]);
+  }
+  else
+  {
+    rate(2,2) = (*_rate_zz)[_qp];
+    previous_rate(2,2) = (*_rate_zz_old)[_qp];
+    _rate_tangent[_qp] = _elasticity[_qp];
+  }
   _rate_stress[_qp] = _elasticity[_qp] * rate;
   _damping_stress[_qp] = _dt > 0 ? _elasticity[_qp] *
       (rate * (1 + _alpha) - previous_rate * _alpha) * _zeta[_qp] : RankTwoTensor();
