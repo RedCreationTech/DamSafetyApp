@@ -1,0 +1,99 @@
+[Tests]
+  [cdp_new_5ms]
+    type = RunApp
+    input = cdp-new-5ms.i
+    requirement = 'The 3D diagnostic records accepted histories and separated stress, strain and damage observables for paired offline verification.'
+  []
+  [cdp_old_5ms]
+    type = RunApp
+    input = cdp-old-5ms.i
+    requirement = 'The 3D diagnostic records accepted histories and separated stress, strain and damage observables for paired offline verification.'
+  []
+  [cdp_default_off]
+    type = RunApp
+    input = cdp-default-off.i
+    requirement = 'The 3D diagnostic records accepted histories and separated stress, strain and damage observables for paired offline verification.'
+  []
+  [cdp_new_zero]
+    type = RunApp
+    input = cdp-new-zero.i
+    requirement = 'The 3D diagnostic records accepted histories and separated stress, strain and damage observables for paired offline verification.'
+  []
+  [cdp_old_zero]
+    type = RunApp
+    input = cdp-old-zero.i
+    requirement = 'The 3D diagnostic records accepted histories and separated stress, strain and damage observables for paired offline verification.'
+  []
+  [elastic_new_5ms]
+    type = RunApp
+    input = elastic-new-5ms.i
+    requirement = 'The 3D diagnostic records accepted histories and separated stress, strain and damage observables for paired offline verification.'
+  []
+  [elastic_old_5ms]
+    type = RunApp
+    input = elastic-old-5ms.i
+    requirement = 'The 3D diagnostic records accepted histories and separated stress, strain and damage observables for paired offline verification.'
+  []
+  [cdp_retry]
+    type = RunApp
+    input = cdp-retry.i
+    expect_out = GROUND_MOTION_REJECT
+    requirement = 'The 3D diagnostic records accepted histories and separated stress, strain and damage observables for paired offline verification.'
+  []
+  [cdp_retry_control]
+    type = RunApp
+    input = cdp-retry-control.i
+    requirement = 'The 3D diagnostic records accepted histories and separated stress, strain and damage observables for paired offline verification.'
+  []
+  [reject_unacknowledged]
+    type = RunException
+    input = cdp-new-5ms.i
+    cli_args = 'Physics/SolidMechanics/CDPVelocityDynamic/all/diagnostic_3d_model=false'
+    expect_err = 'requires acknowledged'
+    requirement = 'Unsupported diagnostic settings fail instead of silently changing the intended damping formula.'
+  []
+  [reject_finite_strain]
+    type = RunException
+    input = cdp-new-5ms.i
+    cli_args = 'Physics/SolidMechanics/CDPVelocityDynamic/all/strain=FINITE'
+    expect_err = 'requires acknowledged'
+    requirement = 'Unsupported diagnostic settings fail instead of silently changing the intended damping formula.'
+  []
+  [reject_bbar]
+    type = RunException
+    input = cdp-new-5ms.i
+    cli_args = 'Physics/SolidMechanics/CDPVelocityDynamic/all/volumetric_locking_correction=true'
+    expect_err = 'requires acknowledged'
+    requirement = 'Unsupported diagnostic settings fail instead of silently changing the intended damping formula.'
+  []
+  [reject_wrong_C0]
+    type = RunException
+    input = cdp-new-5ms.i
+    cli_args = 'Materials/elasticity/youngs_modulus=3e10'
+    expect_err = 'declared constant undamaged elasticity'
+    requirement = 'Unsupported diagnostic settings fail instead of silently changing the intended damping formula.'
+  []
+  [reject_wrong_zeta]
+    type = RunException
+    input = cdp-new-5ms.i
+    cli_args = 'Physics/SolidMechanics/CDPVelocityDynamic/all/stiffness_damping_coefficient=0.02'
+    expect_err = 'declared constant nonnegative damping coefficient'
+    requirement = 'Unsupported diagnostic settings fail instead of silently changing the intended damping formula.'
+  []
+  [jacobian_elastic_new_5ms]
+    type = PetscJacobianTester
+    run_sim = true
+    input = elastic-new-5ms.i
+    ratio_tol = 1e-6
+    difference_tol = 1e-5
+    requirement = 'All three displacement columns include the elastic velocity-rate derivative and the existing constitutive tangent.'
+  []
+  [jacobian_cdp_new_5ms]
+    type = PetscJacobianTester
+    run_sim = true
+    input = cdp-new-5ms.i
+    ratio_tol = 1e-6
+    difference_tol = 1e-5
+    requirement = 'All three displacement columns include the elastic velocity-rate derivative and the existing constitutive tangent.'
+  []
+[]

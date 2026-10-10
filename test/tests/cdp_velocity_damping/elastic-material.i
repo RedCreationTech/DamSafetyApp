@@ -1,0 +1,5 @@
+[Materials]
+  [stress]
+    type = ComputeFiniteStrainElasticStress
+  []
+[]
