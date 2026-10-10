@@ -168,7 +168,7 @@ TEST(AbaqusCDPFrozenPrincipal, ExactRepeatedRootHasDifferentOneSidedDerivatives)
   {
     const auto v=center.vectors;
     const long double block=v[i][1]*v[j][1]+v[i][2]*v[j][2];
-    const long double expected=i==2&&j==2?1:(i<2&&j<2?.5L:0.L);
+    const long double expected=i==2&&j==2?1:(i<2&&j<2?(i==j?.5L:-.5L):0.L);
     EXPECT_NEAR(static_cast<double>(block),static_cast<double>(expected),1e-12);
   }
 }
