@@ -62,6 +62,10 @@
   []
 []
 [Executioner]
+  [Quadrature]
+    type = GAUSS
+    order = SECOND
+  []
   type = Transient
   solve_type = NEWTON
   end_time = 0.12

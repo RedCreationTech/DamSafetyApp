@@ -1,8 +1,10 @@
 # 3D formula diagnostic; not a dam model or an Abaqus reference.
 !include common.i
+!include qp-tensor-observables.i
 !include cdp-load.i
 !include cdp-material.i
 !include damage-observables.i
+!include qp-damage-observables.i
 
 [Physics/SolidMechanics/CDPVelocityDynamic/all]
   add_variables = true

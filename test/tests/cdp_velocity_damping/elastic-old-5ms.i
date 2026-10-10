@@ -1,5 +1,6 @@
 # 3D formula diagnostic; not a dam model or an Abaqus reference.
 !include common.i
+!include qp-tensor-observables.i
 !include elastic-load.i
 !include elastic-material.i
 
