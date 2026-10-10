@@ -231,3 +231,63 @@ TEST(AbaqusCDPSubstepIntegrator, RejectsInvalidConfigurationAndDirection)
                    {}, {}, 1.0e-3, {}, {1.0, 0.0, 0.0, 0.0, 0.0, 0.0}, 0.0),
                std::runtime_error);
 }
+
+TEST(AbaqusCDPSubstepIntegrator, PassiveTracePreservesCompleteLinearizedResult)
+{
+  const auto table = substepReferenceTable();
+  const AbaqusCDPLocalIntegrator local(table, substepLocalParameters());
+  const AbaqusCDPStateIntegrator state_integrator(local, substepStateParameters(5.0e-4));
+  const double strength =
+      table.responseByEquivalentPlasticStrain(CDPMaterialTable::Branch::TENSION, 0.0).stress.value;
+  const auto target = substepUniaxialElasticStrain(1.05 * strength);
+  const AbaqusCDPSubstepIntegrator integrator(
+      state_integrator, {16, std::abs(target[0]) / 3.0, 1.0e-8});
+  const auto control = integrator.integrateLinearized({}, target, 1.0e-3, {});
+  AbaqusCDPSubstepIntegrator::Trace trace;
+  const auto observed = integrator.integrateLinearized({}, target, 1.0e-3, {}, &trace);
+  EXPECT_EQ(control.algorithmic_tangent, observed.algorithmic_tangent);
+  EXPECT_EQ(control.result.final_result.cauchy_stress, observed.result.final_result.cauchy_stress);
+  EXPECT_EQ(control.result.final_result.state.backbone.plastic_strain,
+            observed.result.final_result.state.backbone.plastic_strain);
+  EXPECT_EQ(control.result.final_result.state.viscous_plastic_strain,
+            observed.result.final_result.state.viscous_plastic_strain);
+  EXPECT_EQ(control.result.accepted_substeps, observed.result.accepted_substeps);
+  EXPECT_EQ(control.result.cutback_count, observed.result.cutback_count);
+  ASSERT_EQ(trace.size(), observed.result.accepted_substeps);
+  for (std::size_t i = 0; i < trace.size(); ++i)
+  {
+    EXPECT_TRUE(trace[i].succeeded);
+    EXPECT_TRUE(trace[i].error.empty());
+    EXPECT_EQ(trace[i].substep, i + 1);
+    EXPECT_EQ(trace[i].partition, observed.result.accepted_substeps);
+    if (i)
+      EXPECT_EQ(trace[i].old_state.backbone.plastic_strain,
+                trace[i - 1].result.state.backbone.plastic_strain);
+  }
+  EXPECT_EQ(trace.back().chained_tangent, observed.algorithmic_tangent);
+  EXPECT_EQ(trace.back().result.cauchy_stress, observed.result.final_result.cauchy_stress);
+}
+
+TEST(AbaqusCDPSubstepIntegrator, PassiveTraceRetainsOriginalFailuresAndResetHistory)
+{
+  const auto table = substepReferenceTable();
+  const AbaqusCDPLocalIntegrator local(table, substepLocalParameters(0));
+  const AbaqusCDPStateIntegrator state_integrator(local, substepStateParameters());
+  const AbaqusCDPSubstepIntegrator integrator(state_integrator, {4, 0.0, 1.0e-8});
+  const double strength =
+      table.responseByEquivalentPlasticStrain(CDPMaterialTable::Branch::TENSION, 0.0).stress.value;
+  AbaqusCDPSubstepIntegrator::Trace trace;
+  EXPECT_THROW(integrator.integrateLinearized(
+                   {}, substepUniaxialElasticStrain(100 * strength), 1.0e-3, {}, &trace),
+               std::runtime_error);
+  ASSERT_EQ(trace.size(), 3u);
+  for (std::size_t i = 0; i < trace.size(); ++i)
+  {
+    EXPECT_FALSE(trace[i].succeeded);
+    EXPECT_FALSE(trace[i].error.empty());
+    EXPECT_EQ(trace[i].partition, 1u << i);
+    EXPECT_EQ(trace[i].substep, 1u);
+    EXPECT_EQ(trace[i].old_state.backbone.plastic_strain,
+              AbaqusCDPSubstepIntegrator::State{}.backbone.plastic_strain);
+  }
+}

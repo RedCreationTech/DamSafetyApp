@@ -178,7 +178,8 @@ AbaqusCDPSubstepIntegrator::LinearizedResult
 AbaqusCDPSubstepIntegrator::integrateLinearized(const SymmetricTensor & old_total_strain,
                                                 const SymmetricTensor & new_total_strain,
                                                 const double time_step,
-                                                const State & old_state) const
+                                                const State & old_state,
+                                                Trace * trace) const
 {
   if (!finiteSubstepTensor(old_total_strain) || !finiteSubstepTensor(new_total_strain))
     substepError("old or new total strain contains a non-finite value");
@@ -223,6 +224,8 @@ AbaqusCDPSubstepIntegrator::integrateLinearized(const SymmetricTensor & old_tota
     {
       const double fraction = static_cast<double>(i) / substeps;
       const auto target = substepInterpolate(old_total_strain, total_increment, fraction);
+      // Snapshot before the real local call; no diagnostic reintegration.
+      const State trace_old_state = trace ? working_state : State{};
       try
       {
         auto step_result = _state_integrator.integrateLinearized(
@@ -265,6 +268,10 @@ AbaqusCDPSubstepIntegrator::integrateLinearized(const SymmetricTensor & old_tota
         }
         state_sensitivity = new_state_sensitivity;
         tangent = new_tangent;
+        if (trace)
+          trace->push_back({substeps, i, time_step / static_cast<double>(substeps),
+                            target, trace_old_state, true, "", step_result.result,
+                            step_result.derivative, tangent});
         working_state = step_result.result.state;
         final_result = std::move(step_result);
       }
@@ -272,6 +279,9 @@ AbaqusCDPSubstepIntegrator::integrateLinearized(const SymmetricTensor & old_tota
       {
         partition_succeeded = false;
         last_error = error.what();
+        if (trace)
+          trace->push_back({substeps, i, time_step / static_cast<double>(substeps),
+                            target, trace_old_state, false, last_error});
         last_failed_substep = i;
         last_partition = substeps;
         break;

@@ -3,6 +3,8 @@
 #include "AbaqusCDPStateIntegrator.h"
 
 #include <array>
+#include <string>
+#include <vector>
 
 /**
  * Transactional binary substepping and numerical reference tangent for B-009A.
@@ -48,6 +50,23 @@ public:
     double perturbation;
   };
 
+  // Passive snapshots from the actual call, including unsuccessful partitions.
+  // A null Trace pointer performs no observation or additional integration.
+  struct TraceEntry
+  {
+    unsigned int partition;
+    unsigned int substep;
+    double substep_dt;
+    SymmetricTensor target;
+    State old_state;
+    bool succeeded = false;
+    std::string error;
+    AbaqusCDPStateIntegrator::Result result = {};
+    AbaqusCDPStateIntegrator::TransitionJacobian transition = {};
+    TangentMatrix chained_tangent = {};
+  };
+  using Trace = std::vector<TraceEntry>;
+
   struct LinearizedResult
   {
     Result result;
@@ -70,7 +89,8 @@ public:
   LinearizedResult integrateLinearized(const SymmetricTensor & old_total_strain,
                                        const SymmetricTensor & new_total_strain,
                                        double time_step,
-                                       const State & old_state) const;
+                                       const State & old_state,
+                                       Trace * trace = nullptr) const;
 
   SymmetricTensor directionalDerivative(const SymmetricTensor & old_total_strain,
                                         const SymmetricTensor & new_total_strain,

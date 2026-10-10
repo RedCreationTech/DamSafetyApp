@@ -1,6 +1,8 @@
 #include "AbaqusCDPStressUpdate.h"
 
 #include "MooseException.h"
+#include "CDPAssemblyProbe.h"
+#include "libmesh/elem.h"
 
 #include <array>
 #include <chrono>
@@ -289,8 +291,22 @@ AbaqusCDPStressUpdate::updateState(RankTwoTensor & strain_increment,
   try
   {
     const auto integration_start = std::chrono::steady_clock::now();
-    const auto result =
-        _substep_integrator.integrateLinearized(old_total_strain, new_total_strain, _dt, old_state);
+    AbaqusCDPSubstepIntegrator::Trace trace;
+    const bool observing = CDPAssemblyProbe::capturingSubsteps();
+    const auto result = [&]() {
+      try
+      {
+        return _substep_integrator.integrateLinearized(
+            old_total_strain, new_total_strain, _dt, old_state, observing ? &trace : nullptr);
+      }
+      catch (...)
+      {
+        if (observing) CDPAssemblyProbe::recordSubsteps(_current_elem->id(), _qp, trace);
+        throw;
+      }
+    }();
+    if (observing)
+      CDPAssemblyProbe::recordSubsteps(_current_elem->id(), _qp, trace);
     const Real integration_microseconds =
         _enable_performance_diagnostics
             ? std::chrono::duration<Real, std::micro>(std::chrono::steady_clock::now() -

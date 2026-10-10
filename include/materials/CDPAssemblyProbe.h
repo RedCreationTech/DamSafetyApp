@@ -1,5 +1,6 @@
 #pragma once
 #include "Material.h"
+#include "AbaqusCDPSubstepIntegrator.h"
 #include "RankTwoTensor.h"
 #include "RankFourTensor.h"
 #include <set>
@@ -10,8 +11,12 @@ class CDPAssemblyProbe : public Material
 public:
   static InputParameters validParams();
   CDPAssemblyProbe(const InputParameters & p);
-  static void beginCapture(const std::string & path, bool tangent, bool all_elements = false);
+  static void beginCapture(const std::string & path, bool tangent, bool all_elements = false,
+                           bool substeps = false);
   static void endCapture();
+  static bool capturingSubsteps();
+  static void recordSubsteps(dof_id_type element, unsigned int qp,
+                             const AbaqusCDPSubstepIntegrator::Trace & trace);
 protected:
   void computeQpProperties() override;
   const MaterialProperty<RankFourTensor> & _probe_tangent;
