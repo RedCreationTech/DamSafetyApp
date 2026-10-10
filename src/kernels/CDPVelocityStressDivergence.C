@@ -33,6 +33,9 @@ CDPVelocityStressDivergence::CDPVelocityStressDivergence(const InputParameters &
 Real
 CDPVelocityStressDivergence::computeQpResidual()
 {
+  // Preserve the original arithmetic and nonlinear path at exact zero damping.
+  if (_zeta[_qp] == 0.0)
+    return DynamicStressDivergenceTensors::computeQpResidual();
   if (_dt <= 0)
     return 0;
   const auto stress = _stress[_qp] * (1 + _alpha) - _stress_old[_qp] * _alpha + _damping_stress[_qp];
@@ -42,6 +45,8 @@ CDPVelocityStressDivergence::computeQpResidual()
 Real
 CDPVelocityStressDivergence::computeQpJacobian()
 {
+  if (_zeta[_qp] == 0.0)
+    return DynamicStressDivergenceTensors::computeQpJacobian();
   if (_dt <= 0)
     return 0;
   return (1 + _alpha) * (StressDivergenceTensors::computeQpJacobian() +
@@ -53,6 +58,8 @@ CDPVelocityStressDivergence::computeQpJacobian()
 Real
 CDPVelocityStressDivergence::computeQpOffDiagJacobian(unsigned int jvar)
 {
+  if (_zeta[_qp] == 0.0)
+    return DynamicStressDivergenceTensors::computeQpOffDiagJacobian(jvar);
   if (_dt <= 0)
     return 0;
   for (unsigned int c = 0; c < _ndisp; ++c)

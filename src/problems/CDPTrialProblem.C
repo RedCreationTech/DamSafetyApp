@@ -21,6 +21,8 @@ InputParameters CDPTrialProblem::validParams()
   p.addParam<Real>("audit_time", 0.57, "Exact attempted time for derivative audit");
   p.addParam<unsigned int>("audit_iteration", 1, "SNES accepted iterate for derivative audit");
   p.addParam<bool>("capture_actual_jacobian", false, "Passively write actual assembled solver matrices in the trial window");
+  p.addParam<bool>("capture_material_jacobian", false,
+                   "Passively capture QP stress, actual tangent and substep branches during the real Jacobian evaluation; does not reassemble");
   p.addParam<bool>("capture_linear_system", false,
                    "Read live PREONLY KSP right-hand side, operator and solution through a passive monitor; requires capture_actual_jacobian");
   p.addParam<bool>("capture_dof_map", false,
@@ -48,6 +50,29 @@ bool CDPTrialProblem::capturing() const
   const auto & times = getParam<std::vector<Real>>("trial_capture_times");
   return times.empty() || std::any_of(times.begin(), times.end(),
       [this](Real t) { return std::abs(time()-t) < 1e-9; });
+}
+void CDPTrialProblem::computeJacobian(const NumericVector<Number> & x,
+                                     SparseMatrix<Number> & jacobian, unsigned int n)
+{
+  if (!getParam<bool>("capture_material_jacobian") || !capturing())
+  {
+    FEProblem::computeJacobian(x, jacobian, n);
+    return;
+  }
+  const auto stem = _prefix + "_material_jac_eval" + std::to_string(_evaluation);
+  // Observe the material evaluation already requested by the solver. Never
+  // close, print, or replace the live matrix inside the assembly callback.
+  x.print_matlab(stem + "_u.m");
+  CDPAssemblyProbe::beginCapture(stem + "_ip_rank" + std::to_string(processor_id()) + ".csv", true, true);
+  try { FEProblem::computeJacobian(x, jacobian, n); }
+  catch (...) { CDPAssemblyProbe::endCapture(); throw; }
+  CDPAssemblyProbe::endCapture();
+  if (processor_id() == 0)
+  {
+    std::ofstream f(_prefix + "_material_jacobians.csv", std::ios::app);
+    f << std::setprecision(17) << _evaluation << ',' << time() << ',' << dt() << '\n';
+    if (!f) mooseError("Cannot write material Jacobian observation index");
+  }
 }
 void CDPTrialProblem::computeResidual(const NumericVector<Number> & x,
                                       NumericVector<Number> & r, unsigned int n)
