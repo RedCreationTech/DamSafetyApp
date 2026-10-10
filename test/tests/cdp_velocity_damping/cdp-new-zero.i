@@ -1,5 +1,6 @@
 # 3D formula diagnostic; not a dam model or an Abaqus reference.
 !include common.i
+!include cdp-load.i
 !include cdp-material.i
 !include damage-observables.i
 !include rate-observables.i
@@ -20,8 +21,4 @@
   expected_poissons_ratio = 0.2
   expected_stiffness_damping = 0
   require_cdp_material = true
-[]
-
-[Physics/SolidMechanics/CDPVelocityDynamic/all]
-  stiffness_damping_coefficient = 0
 []

@@ -14,7 +14,6 @@
   [load]
     type = PiecewiseLinear
     x = '0 0.02 0.04 0.08 0.12'
-    y = '0 0.0002 0 -0.0015 0'
   []
 []
 [BCs]

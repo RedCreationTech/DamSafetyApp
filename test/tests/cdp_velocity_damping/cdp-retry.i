@@ -1,5 +1,6 @@
 # 3D formula diagnostic; not a dam model or an Abaqus reference.
 !include common.i
+!include cdp-load.i
 !include cdp-material.i
 !include damage-observables.i
 !include rate-observables.i

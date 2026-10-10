@@ -1,5 +1,6 @@
 # 3D formula diagnostic; not a dam model or an Abaqus reference.
 !include common.i
+!include cdp-load.i
 !include cdp-material.i
 !include damage-observables.i
 
@@ -14,8 +15,4 @@
   stiffness_damping_coefficient = 0
   generate_output = 'stress_xx stress_yy stress_zz stress_xy strain_xx strain_yy strain_zz strain_xy'
   enable_cdp_velocity_damping = false
-[]
-
-[Physics/SolidMechanics/CDPVelocityDynamic/all]
-  stiffness_damping_coefficient = 0
 []

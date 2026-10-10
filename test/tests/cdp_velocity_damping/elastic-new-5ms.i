@@ -1,5 +1,6 @@
 # 3D formula diagnostic; not a dam model or an Abaqus reference.
 !include common.i
+!include elastic-load.i
 !include elastic-material.i
 !include rate-observables.i
 
@@ -19,8 +20,4 @@
   expected_poissons_ratio = 0.2
   expected_stiffness_damping = 0.03
   require_cdp_material = false
-[]
-
-[Functions/load]
-  y = '0 1e-7 0 -1e-7 0'
 []
