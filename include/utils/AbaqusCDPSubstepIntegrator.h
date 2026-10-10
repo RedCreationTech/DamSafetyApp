@@ -64,6 +64,7 @@ public:
     AbaqusCDPStateIntegrator::Result result = {};
     AbaqusCDPStateIntegrator::TransitionJacobian transition = {};
     TangentMatrix chained_tangent = {};
+    AbaqusCDPLocalIntegrator::NewtonTrace local_newton;
   };
   using Trace = std::vector<TraceEntry>;
 
@@ -90,7 +91,8 @@ public:
                                        const SymmetricTensor & new_total_strain,
                                        double time_step,
                                        const State & old_state,
-                                       Trace * trace = nullptr) const;
+                                       Trace * trace = nullptr,
+                                       bool local_newton = false) const;
 
   SymmetricTensor directionalDerivative(const SymmetricTensor & old_total_strain,
                                         const SymmetricTensor & new_total_strain,

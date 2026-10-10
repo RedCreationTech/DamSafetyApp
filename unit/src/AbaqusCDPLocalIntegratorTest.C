@@ -3,6 +3,7 @@
 #include "gtest/gtest.h"
 
 #include <cmath>
+#include <algorithm>
 #include <stdexcept>
 #include <string>
 
@@ -290,4 +291,96 @@ TEST(AbaqusCDPLocalIntegrator, ReusedPlasticStrainColumnsPreserveTransitionAndEi
       }
     }
   }
+}
+
+TEST(AbaqusCDPLocalIntegrator, PassiveNewtonTracePreservesRootAndFullTransition)
+{
+  const auto table = referenceTable();
+  for (const bool automatic : {true, false})
+  {
+    const AbaqusCDPLocalIntegrator integrator(table, parameters(40, automatic));
+    for (const auto branch : {CDPMaterialTable::Branch::TENSION,
+                              CDPMaterialTable::Branch::COMPRESSION})
+    {
+      const double strength = table.responseByEquivalentPlasticStrain(branch, 0.0).stress.value;
+      const auto target = uniaxialElasticStrain(
+          (branch == CDPMaterialTable::Branch::TENSION ? 1.05 : -1.05) * strength);
+      AbaqusCDPLocalIntegrator::State old;
+      const auto snapshot = old;
+      const auto control = integrator.integrateLinearized(target, old);
+      AbaqusCDPLocalIntegrator::NewtonTrace trace;
+      const auto observed = integrator.integrateLinearized(target, old, &trace);
+      EXPECT_EQ(control.derivative, observed.derivative);
+      EXPECT_EQ(control.result.effective_stress, observed.result.effective_stress);
+      EXPECT_EQ(control.result.state.plastic_strain, observed.result.state.plastic_strain);
+      EXPECT_EQ(control.result.state.tensile_equivalent_plastic_strain,
+                observed.result.state.tensile_equivalent_plastic_strain);
+      EXPECT_EQ(control.result.state.compressive_equivalent_plastic_strain,
+                observed.result.state.compressive_equivalent_plastic_strain);
+      EXPECT_EQ(control.result.residual_norm, observed.result.residual_norm);
+      EXPECT_EQ(control.result.iterations, observed.result.iterations);
+      EXPECT_EQ(control.result.jacobian_fallbacks, observed.result.jacobian_fallbacks);
+      EXPECT_EQ(control.result.local_factorizations, observed.result.local_factorizations);
+      EXPECT_EQ(control.result.local_backsolves, observed.result.local_backsolves);
+      EXPECT_EQ(control.result.automatic_jacobian_evaluations,
+                observed.result.automatic_jacobian_evaluations);
+      EXPECT_EQ(control.result.finite_difference_jacobian_evaluations,
+                observed.result.finite_difference_jacobian_evaluations);
+      EXPECT_EQ(old.plastic_strain, snapshot.plastic_strain);
+      EXPECT_EQ(old.tensile_equivalent_plastic_strain, snapshot.tensile_equivalent_plastic_strain);
+      EXPECT_EQ(old.compressive_equivalent_plastic_strain, snapshot.compressive_equivalent_plastic_strain);
+      ASSERT_FALSE(trace.empty());
+      EXPECT_EQ(trace.front().event, "initial");
+      EXPECT_EQ(trace.back().event, "tangent_jacobian");
+      bool direction_seen = false;
+      for (const auto & entry : trace)
+      {
+        if (entry.event != "direction") continue;
+        direction_seen = true;
+        ASSERT_TRUE(entry.has_jacobian);
+        ASSERT_TRUE(entry.has_direction);
+        // The recorded direction must solve the actual recorded nine-equation system.
+        for (std::size_t row = 0; row < 9; ++row)
+        {
+          double value = entry.residual[row], magnitude = std::abs(value);
+          for (std::size_t column = 0; column < 9; ++column)
+          {
+            const double term = entry.jacobian[row][column] * entry.direction[column];
+            value += term;
+            magnitude += std::abs(term);
+          }
+          EXPECT_LE(std::abs(value), 1e-12 * std::max(1.0, magnitude));
+        }
+      }
+      EXPECT_TRUE(direction_seen);
+    }
+  }
+}
+
+TEST(AbaqusCDPLocalIntegrator, PassiveNewtonTraceKeepsFailureAndImmutableHistory)
+{
+  const auto table = referenceTable();
+  const AbaqusCDPLocalIntegrator integrator(table, parameters(0));
+  const double strength = table.responseByEquivalentPlasticStrain(
+      CDPMaterialTable::Branch::TENSION, 0.0).stress.value;
+  const auto target = uniaxialElasticStrain(1.05 * strength);
+  AbaqusCDPLocalIntegrator::State old;
+  const auto snapshot = old;
+  std::string control_error, observed_error;
+  try { integrator.integrateLinearized(target, old); }
+  catch (const std::runtime_error & error) { control_error = error.what(); }
+  AbaqusCDPLocalIntegrator::NewtonTrace trace;
+  try { integrator.integrateLinearized(target, old, &trace); }
+  catch (const std::runtime_error & error) { observed_error = error.what(); }
+  ASSERT_FALSE(control_error.empty());
+  EXPECT_EQ(observed_error, control_error);
+  ASSERT_EQ(trace.size(), 2u);
+  EXPECT_EQ(trace.front().event, "initial");
+  EXPECT_EQ(trace.back().event, "iteration_limit");
+  EXPECT_NE(control_error.find(trace.back().error), std::string::npos);
+  EXPECT_TRUE(trace.back().evaluated);
+  EXPECT_FALSE(trace.back().accepted);
+  EXPECT_EQ(old.plastic_strain, snapshot.plastic_strain);
+  EXPECT_EQ(old.tensile_equivalent_plastic_strain, snapshot.tensile_equivalent_plastic_strain);
+  EXPECT_EQ(old.compressive_equivalent_plastic_strain, snapshot.compressive_equivalent_plastic_strain);
 }

@@ -25,6 +25,8 @@ InputParameters CDPTrialProblem::validParams()
                    "Passively capture QP stress, actual tangent and substep branches during the real Jacobian evaluation; does not reassemble");
   p.addParam<bool>("capture_material_substeps", false,
                    "Passively record actual internal CDP substeps, transition derivatives and original recovery exceptions; requires material capture");
+  p.addParam<bool>("capture_material_local_newton", false,
+                   "Passively record real local Newton matrices and line searches; requires internal substep capture");
   p.addParam<bool>("capture_linear_system", false,
                    "Read live PREONLY KSP right-hand side, operator and solution through a passive monitor; requires capture_actual_jacobian");
   p.addParam<bool>("capture_dof_map", false,
@@ -44,6 +46,8 @@ CDPTrialProblem::CDPTrialProblem(const InputParameters & p)
     paramError("capture_linear_system", "Requires capture_actual_jacobian to identify the stored linear operator");
   if (getParam<bool>("capture_material_substeps") && !getParam<bool>("capture_material_jacobian"))
     paramError("capture_material_substeps", "Requires capture_material_jacobian");
+  if (getParam<bool>("capture_material_local_newton") && !getParam<bool>("capture_material_substeps"))
+    paramError("capture_material_local_newton", "Requires capture_material_substeps");
   for (const Real t : getParam<std::vector<Real>>("trial_capture_times"))
     if (!std::isfinite(t) || t < _start-1e-9 || t > _end+1e-9)
       paramError("trial_capture_times", "Times must be finite and within trial_start/trial_end");
@@ -67,7 +71,7 @@ void CDPTrialProblem::computeJacobian(const NumericVector<Number> & x,
   // Observe the material evaluation already requested by the solver. Never
   // close, print, or replace the live matrix inside the assembly callback.
   x.print_matlab(stem + "_u.m");
-  CDPAssemblyProbe::beginCapture(stem + "_ip_rank" + std::to_string(processor_id()) + ".csv", true, true, getParam<bool>("capture_material_substeps"));
+  CDPAssemblyProbe::beginCapture(stem + "_ip_rank" + std::to_string(processor_id()) + ".csv", true, true, getParam<bool>("capture_material_substeps"), getParam<bool>("capture_material_local_newton"));
   try { FEProblem::computeJacobian(x, jacobian, n); }
   catch (...) { CDPAssemblyProbe::endCapture(); throw; }
   CDPAssemblyProbe::endCapture();
@@ -101,7 +105,7 @@ void CDPTrialProblem::computeResidual(const NumericVector<Number> & x,
   PetscInt iteration = -1;
   if (SNESGetIterationNumber(snes, &iteration)) mooseError("Cannot query SNES iteration");
   x.print_matlab(stem + "_u.m");
-  CDPAssemblyProbe::beginCapture(stem + "_ip_rank" + std::to_string(processor_id()) + ".csv", false, false, getParam<bool>("capture_material_substeps"));
+  CDPAssemblyProbe::beginCapture(stem + "_ip_rank" + std::to_string(processor_id()) + ".csv", false, false, getParam<bool>("capture_material_substeps"), getParam<bool>("capture_material_local_newton"));
   try { FEProblem::computeResidual(x,r,n); }
   catch (...) { CDPAssemblyProbe::endCapture(); throw; }
   CDPAssemblyProbe::endCapture();

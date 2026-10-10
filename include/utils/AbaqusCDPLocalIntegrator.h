@@ -5,6 +5,7 @@
 
 #include <array>
 #include <string>
+#include <vector>
 
 /**
  * Material-point effective-stress integrator for the B-006B prototype.
@@ -93,11 +94,37 @@ public:
     LocalMatrix finite_difference;
   };
 
+  // Snapshots of the real Newton call, never a diagnostic reintegration.
+  struct NewtonTraceEntry
+  {
+    std::string event;
+    unsigned int iteration;
+    std::string jacobian_mode;
+    double line_search;
+    bool evaluated;
+    bool accepted;
+    double stress_scale;
+    double strain_scale;
+    LocalVector unknown;
+    LocalVector residual;
+    SymmetricTensor stress;
+    SymmetricTensor plastic_increment;
+    ActiveBranch branch;
+    bool has_jacobian;
+    LocalMatrix jacobian;
+    bool has_direction;
+    LocalVector direction;
+    std::string error;
+  };
+  using NewtonTrace = std::vector<NewtonTraceEntry>;
+
   AbaqusCDPLocalIntegrator(const CDPMaterialTable & table, Parameters parameters);
 
-  Result integrate(const SymmetricTensor & total_strain, const State & old_state) const;
+  Result integrate(const SymmetricTensor & total_strain, const State & old_state,
+                   NewtonTrace * trace = nullptr) const;
   LinearizedResult integrateLinearized(const SymmetricTensor & total_strain,
-                                       const State & old_state) const;
+                                       const State & old_state,
+                                       NewtonTrace * trace = nullptr) const;
   SymmetricTensor elasticStress(const SymmetricTensor & elastic_strain) const;
   SymmetricTensor elasticStrain(const SymmetricTensor & stress) const;
   CDPMaterialTable::Response materialResponse(CDPMaterialTable::Branch branch,

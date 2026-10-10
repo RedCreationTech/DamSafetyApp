@@ -2,12 +2,15 @@
 #include "libmesh/elem.h"
 #include <fstream>
 #include <iomanip>
+#include <algorithm>
+#include <cmath>
 
 registerMooseObject("DamSafetyApp", CDPAssemblyProbe);
 namespace
 {
 std::ofstream cdp_probe_stream;
 std::ofstream cdp_substep_stream;
+std::ofstream cdp_local_stream;
 unsigned int cdp_substep_call = 0;
 bool cdp_probe_tangent = false;
 bool cdp_probe_all = false;
@@ -51,10 +54,29 @@ CDPAssemblyProbe::CDPAssemblyProbe(const InputParameters & p)
   for (const auto id : getParam<std::vector<dof_id_type>>("probe_elements"))
     _probe_elements.insert(id);
 }
-void CDPAssemblyProbe::beginCapture(const std::string & path, bool tangent, bool all_elements, bool substeps)
+void CDPAssemblyProbe::beginCapture(const std::string & path, bool tangent, bool all_elements,
+                                    bool substeps, bool local_newton)
 {
   if (libMesh::n_threads() != 1)
     ::mooseError("CDPAssemblyProbe requires one thread per MPI rank");
+  if (local_newton && !substeps)
+    ::mooseError("Local Newton capture requires internal substep capture");
+  if (local_newton)
+  {
+    cdp_local_stream.open(path + "_local_newton.csv");
+    if (!cdp_local_stream) ::mooseError("Cannot open passive CDP local Newton trace");
+    cdp_local_stream << std::setprecision(17)
+                     << "element,qp,call,partition,substep,entry,event,iteration,jacobian_mode"
+                     << ",line_search,evaluated,accepted,stress_scale,strain_scale,branch,residual_norm,error";
+    for (const auto name : {"unknown", "residual", "direction"})
+      for (unsigned int i = 0; i < 9; ++i) cdp_local_stream << ',' << name << i;
+    for (const auto name : {"stress", "plastic_increment"})
+      for (unsigned int i = 0; i < 6; ++i) cdp_local_stream << ',' << name << i;
+    for (const auto name : {"principal_stress", "principal_plastic_increment"})
+      for (unsigned int i = 0; i < 3; ++i) cdp_local_stream << ',' << name << i;
+    for (unsigned int i = 0; i < 81; ++i) cdp_local_stream << ",J" << i;
+    cdp_local_stream << '\n';
+  }
   if (substeps)
   {
     cdp_substep_call = 0;
@@ -94,6 +116,11 @@ void CDPAssemblyProbe::endCapture()
 {
   if (!cdp_probe_stream) ::mooseError("Assembly probe write failed");
   cdp_probe_stream.close();
+  if (cdp_local_stream.is_open())
+  {
+    if (!cdp_local_stream) ::mooseError("Passive CDP local Newton trace write failed");
+    cdp_local_stream.close();
+  }
   if (cdp_substep_stream.is_open())
   {
     if (!cdp_substep_stream) ::mooseError("Passive CDP substep trace write failed");
@@ -125,6 +152,10 @@ bool CDPAssemblyProbe::capturingSubsteps()
 {
   return cdp_substep_stream.is_open();
 }
+bool CDPAssemblyProbe::capturingLocalNewton()
+{
+  return cdp_local_stream.is_open();
+}
 void CDPAssemblyProbe::recordSubsteps(dof_id_type element, unsigned int qp,
                                      const AbaqusCDPSubstepIntegrator::Trace & trace)
 {
@@ -139,6 +170,52 @@ void CDPAssemblyProbe::recordSubsteps(dof_id_type element, unsigned int qp,
   };
   for (const auto & e : trace)
   {
+    if (capturingLocalNewton())
+    {
+      unsigned int entry = 0;
+      for (const auto & n : e.local_newton)
+      {
+        cdp_local_stream << element << ',' << qp << ',' << call << ',' << e.partition << ','
+                         << e.substep << ',' << ++entry << ',' << n.event << ',' << n.iteration
+                         << ',' << n.jacobian_mode << ',' << n.line_search << ',' << n.evaluated
+                         << ',' << n.accepted << ',' << n.stress_scale << ',' << n.strain_scale << ',';
+        if (n.evaluated || n.event == "tangent_jacobian")
+          cdp_local_stream << static_cast<unsigned int>(n.branch);
+        cdp_local_stream << ',';
+        if (n.evaluated)
+        {
+          double norm = 0.0;
+          for (const auto x : n.residual) norm = std::max(norm, std::abs(x));
+          cdp_local_stream << norm;
+        }
+        cdp_local_stream << ",\"";
+        for (const char c : n.error)
+        {
+          if (c == '"') cdp_local_stream << '"';
+          cdp_local_stream << c;
+        }
+        cdp_local_stream << '"';
+        const auto write = [&](const auto & values, bool present) {
+          for (const auto x : values)
+          {
+            cdp_local_stream << ',';
+            if (present) cdp_local_stream << x;
+          }
+        };
+        write(n.unknown, true);
+        write(n.residual, n.evaluated);
+        write(n.direction, n.has_direction);
+        const bool has_stress = n.evaluated || n.event == "tangent_jacobian";
+        write(n.stress, has_stress);
+        write(n.plastic_increment, n.evaluated);
+        write(has_stress ? AbaqusCDPFormula::stressInvariants(n.stress).principal_stress
+                         : std::array<double, 3>{}, has_stress);
+        write(n.evaluated ? AbaqusCDPFormula::stressInvariants(n.plastic_increment).principal_stress
+                          : std::array<double, 3>{}, n.evaluated);
+        for (const auto & row : n.jacobian) write(row, n.has_jacobian);
+        cdp_local_stream << '\n';
+      }
+    }
     cdp_substep_stream << element << ',' << qp << ',' << call << ',' << e.partition << ','
                        << e.substep << ',' << e.substep_dt << ',' << e.succeeded << ",\"";
     for (const char c : e.error)
@@ -170,4 +247,6 @@ void CDPAssemblyProbe::recordSubsteps(dof_id_type element, unsigned int qp,
     cdp_substep_stream << '\n';
   }
   if (!cdp_substep_stream) ::mooseError("Passive CDP substep trace write failed");
+  if (capturingLocalNewton() && !cdp_local_stream)
+    ::mooseError("Passive CDP local Newton trace write failed");
 }

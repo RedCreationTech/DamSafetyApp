@@ -244,7 +244,7 @@ TEST(AbaqusCDPSubstepIntegrator, PassiveTracePreservesCompleteLinearizedResult)
       state_integrator, {16, std::abs(target[0]) / 3.0, 1.0e-8});
   const auto control = integrator.integrateLinearized({}, target, 1.0e-3, {});
   AbaqusCDPSubstepIntegrator::Trace trace;
-  const auto observed = integrator.integrateLinearized({}, target, 1.0e-3, {}, &trace);
+  const auto observed = integrator.integrateLinearized({}, target, 1.0e-3, {}, &trace, true);
   EXPECT_EQ(control.algorithmic_tangent, observed.algorithmic_tangent);
   EXPECT_EQ(control.result.final_result.cauchy_stress, observed.result.final_result.cauchy_stress);
   EXPECT_EQ(control.result.final_result.state.backbone.plastic_strain,
@@ -266,6 +266,8 @@ TEST(AbaqusCDPSubstepIntegrator, PassiveTracePreservesCompleteLinearizedResult)
   }
   EXPECT_EQ(trace.back().chained_tangent, observed.algorithmic_tangent);
   EXPECT_EQ(trace.back().result.cauchy_stress, observed.result.final_result.cauchy_stress);
+  EXPECT_FALSE(trace.back().local_newton.empty());
+  EXPECT_EQ(trace.back().local_newton.back().event, "tangent_jacobian");
 }
 
 TEST(AbaqusCDPSubstepIntegrator, PassiveTraceRetainsOriginalFailuresAndResetHistory)
@@ -278,7 +280,7 @@ TEST(AbaqusCDPSubstepIntegrator, PassiveTraceRetainsOriginalFailuresAndResetHist
       table.responseByEquivalentPlasticStrain(CDPMaterialTable::Branch::TENSION, 0.0).stress.value;
   AbaqusCDPSubstepIntegrator::Trace trace;
   EXPECT_THROW(integrator.integrateLinearized(
-                   {}, substepUniaxialElasticStrain(100 * strength), 1.0e-3, {}, &trace),
+                   {}, substepUniaxialElasticStrain(100 * strength), 1.0e-3, {}, &trace, true),
                std::runtime_error);
   ASSERT_EQ(trace.size(), 3u);
   for (std::size_t i = 0; i < trace.size(); ++i)
@@ -289,5 +291,8 @@ TEST(AbaqusCDPSubstepIntegrator, PassiveTraceRetainsOriginalFailuresAndResetHist
     EXPECT_EQ(trace[i].substep, 1u);
     EXPECT_EQ(trace[i].old_state.backbone.plastic_strain,
               AbaqusCDPSubstepIntegrator::State{}.backbone.plastic_strain);
+    ASSERT_FALSE(trace[i].local_newton.empty());
+    EXPECT_EQ(trace[i].local_newton.back().event, "iteration_limit");
+    EXPECT_NE(trace[i].error.find(trace[i].local_newton.back().error), std::string::npos);
   }
 }

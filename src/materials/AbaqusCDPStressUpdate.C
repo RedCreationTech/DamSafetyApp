@@ -297,7 +297,8 @@ AbaqusCDPStressUpdate::updateState(RankTwoTensor & strain_increment,
       try
       {
         return _substep_integrator.integrateLinearized(
-            old_total_strain, new_total_strain, _dt, old_state, observing ? &trace : nullptr);
+            old_total_strain, new_total_strain, _dt, old_state, observing ? &trace : nullptr,
+            CDPAssemblyProbe::capturingLocalNewton());
       }
       catch (...)
       {

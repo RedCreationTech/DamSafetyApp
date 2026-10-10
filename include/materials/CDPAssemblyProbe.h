@@ -12,9 +12,10 @@ public:
   static InputParameters validParams();
   CDPAssemblyProbe(const InputParameters & p);
   static void beginCapture(const std::string & path, bool tangent, bool all_elements = false,
-                           bool substeps = false);
+                           bool substeps = false, bool local_newton = false);
   static void endCapture();
   static bool capturingSubsteps();
+  static bool capturingLocalNewton();
   static void recordSubsteps(dof_id_type element, unsigned int qp,
                              const AbaqusCDPSubstepIntegrator::Trace & trace);
 protected:

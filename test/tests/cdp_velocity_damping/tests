@@ -1,4 +1,11 @@
 [Tests]
+  [reject_local_newton_without_substeps]
+    type = RunException
+    input = cdp-local-newton-trace.i
+    cli_args = 'Problem/capture_material_substeps=false'
+    expect_err = 'Requires capture_material_substeps'
+    requirement = 'Local Newton capture requires the existing passive substep identity and cannot run as an unassociated observation.'
+  []
   [cdp_new_5ms]
     type = RunApp
     input = cdp-new-5ms.i

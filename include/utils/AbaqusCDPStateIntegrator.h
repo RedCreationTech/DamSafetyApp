@@ -65,7 +65,8 @@ public:
                    const State & old_state) const;
   LinearizedResult integrateLinearized(const SymmetricTensor & total_strain,
                                        double time_step,
-                                       const State & old_state) const;
+                                       const State & old_state,
+                                       AbaqusCDPLocalIntegrator::NewtonTrace * trace = nullptr) const;
 
 private:
   Result assembleResult(const SymmetricTensor & total_strain,
