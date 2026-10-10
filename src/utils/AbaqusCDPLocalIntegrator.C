@@ -1099,3 +1099,33 @@ AbaqusCDPLocalIntegrator::branchName(const ActiveBranch branch)
   }
   return "unknown";
 }
+
+AbaqusCDPLocalIntegrator::FixedStateDiagnostic
+AbaqusCDPLocalIntegrator::fixedStateDiagnostic(const LocalVector & unknown,
+                                               const SymmetricTensor & total_strain,
+                                               const State & old_state) const
+{
+  const double scale = stressScale(total_strain, old_state);
+  const auto evaluation = evaluate(unknown, total_strain, old_state, scale);
+  return {evaluation.residual,
+          automaticDifferentiationJacobian(unknown, total_strain, old_state, scale),
+          numericalJacobian(unknown, total_strain, old_state, scale),
+          evaluation.stress, scale, _strain_scale};
+}
+
+AbaqusCDPLocalIntegrator::PrincipalStressDiagnostic
+AbaqusCDPLocalIntegrator::principalStressDiagnostic(const SymmetricTensor & stress)
+{
+  DualTensor seeded;
+  for (std::size_t i = 0; i < 6; ++i)
+    seeded[i] = Dual9::variable(stress[i], i);
+  const auto principal = dualPrincipalStress(seeded);
+  PrincipalStressDiagnostic result;
+  for (std::size_t k = 0; k < 3; ++k)
+  {
+    result.values[k] = principal[k].value;
+    for (std::size_t i = 0; i < 6; ++i)
+      result.gradient[k][i] = principal[k].derivative[i];
+  }
+  return result;
+}

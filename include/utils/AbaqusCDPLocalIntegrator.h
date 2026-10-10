@@ -94,6 +94,24 @@ public:
     LocalMatrix finite_difference;
   };
 
+  // Read-only evaluation of a saved Newton unknown; never calls integrate().
+  struct FixedStateDiagnostic
+  {
+    LocalVector residual;
+    LocalMatrix automatic_differentiation;
+    LocalMatrix finite_difference;
+    SymmetricTensor stress;
+    double stress_scale;
+    double strain_scale;
+  };
+
+  struct PrincipalStressDiagnostic
+  {
+    std::array<double, 3> values;
+    // Physical tensor shear convention: off-diagonal derivatives include 2*v_i*v_j.
+    std::array<SymmetricTensor, 3> gradient;
+  };
+
   // Snapshots of the real Newton call, never a diagnostic reintegration.
   struct NewtonTraceEntry
   {
@@ -133,6 +151,10 @@ public:
                                                   const State & old_state) const;
 
   static std::string branchName(ActiveBranch branch);
+  FixedStateDiagnostic fixedStateDiagnostic(const LocalVector & unknown,
+                                             const SymmetricTensor & total_strain,
+                                             const State & old_state) const;
+  static PrincipalStressDiagnostic principalStressDiagnostic(const SymmetricTensor & stress);
 
 private:
   struct LocalFactorization
