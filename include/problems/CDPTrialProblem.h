@@ -9,6 +9,7 @@ public:
   CDPTrialProblem(const InputParameters & p);
   void computeResidual(const NumericVector<Number> &, NumericVector<Number> &, unsigned int) override;
   static PetscErrorCode monitor(SNES, PetscInt, PetscReal, void *);
+  static PetscErrorCode linearMonitor(KSP, PetscInt, PetscReal, void *);
 private:
   bool capturing() const;
   void auditDirections(SNES);

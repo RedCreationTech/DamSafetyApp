@@ -7,7 +7,10 @@
 #include "libmesh/nonlinear_implicit_system.h"
 #include "MaterialPropertyStorage.h"
 #include "MooseMesh.h"
+#include "MooseVariableFieldBase.h"
 #include "RankTwoTensor.h"
+#include <algorithm>
+#include <cmath>
 #include <fstream>
 #include <iomanip>
 registerMooseObject("DamSafetyApp", CDPTrialProblem);
@@ -18,6 +21,12 @@ InputParameters CDPTrialProblem::validParams()
   p.addParam<Real>("audit_time", 0.57, "Exact attempted time for derivative audit");
   p.addParam<unsigned int>("audit_iteration", 1, "SNES accepted iterate for derivative audit");
   p.addParam<bool>("capture_actual_jacobian", false, "Passively write actual assembled solver matrices in the trial window");
+  p.addParam<bool>("capture_linear_system", false,
+                   "Read live PREONLY KSP right-hand side, operator and solution through a passive monitor; requires capture_actual_jacobian");
+  p.addParam<bool>("capture_dof_map", false,
+                   "Read nodal DOF coordinates, variable names and current row scaling at each observed residual");
+  p.addParam<std::vector<Real>>("trial_capture_times", {},
+                               "Optional residual observation times within the trial window; never forces time steps");
   p.addParam<Real>("trial_start", 0.425, "First observed actual residual time");
   p.addParam<Real>("trial_end", 0.430, "Last observed actual residual time");
   p.addParam<std::string>("trial_prefix", "trial", "Output prefix");
@@ -25,8 +34,21 @@ InputParameters CDPTrialProblem::validParams()
 }
 CDPTrialProblem::CDPTrialProblem(const InputParameters & p)
   : FEProblem(p), _start(getParam<Real>("trial_start")), _end(getParam<Real>("trial_end")),
-    _prefix(getParam<std::string>("trial_prefix")) {}
-bool CDPTrialProblem::capturing() const { return time() >= _start-1e-9 && time() <= _end+1e-9; }
+    _prefix(getParam<std::string>("trial_prefix"))
+{
+  if (getParam<bool>("capture_linear_system") && !getParam<bool>("capture_actual_jacobian"))
+    paramError("capture_linear_system", "Requires capture_actual_jacobian to identify the stored linear operator");
+  for (const Real t : getParam<std::vector<Real>>("trial_capture_times"))
+    if (!std::isfinite(t) || t < _start-1e-9 || t > _end+1e-9)
+      paramError("trial_capture_times", "Times must be finite and within trial_start/trial_end");
+}
+bool CDPTrialProblem::capturing() const
+{
+  if (time() < _start-1e-9 || time() > _end+1e-9) return false;
+  const auto & times = getParam<std::vector<Real>>("trial_capture_times");
+  return times.empty() || std::any_of(times.begin(), times.end(),
+      [this](Real t) { return std::abs(time()-t) < 1e-9; });
+}
 void CDPTrialProblem::computeResidual(const NumericVector<Number> & x,
                                       NumericVector<Number> & r, unsigned int n)
 {
@@ -38,6 +60,12 @@ void CDPTrialProblem::computeResidual(const NumericVector<Number> & x,
   // avoids a rank-dependent stale pointer cache and collective viewer hangs.
   if (SNESMonitorSet(snes, monitor, this, nullptr))
     mooseError("Cannot attach passive SNES monitor");
+  if (getParam<bool>("capture_linear_system"))
+  {
+    KSP ksp;
+    if (SNESGetKSP(snes, &ksp) || KSPMonitorSet(ksp, linearMonitor, this, nullptr))
+      mooseError("Cannot attach passive linear monitor");
+  }
   if (!capturing()) { FEProblem::computeResidual(x,r,n); return; }
   const auto id = ++_evaluation;
   const auto stem = _prefix + "_eval" + std::to_string(id);
@@ -49,6 +77,21 @@ void CDPTrialProblem::computeResidual(const NumericVector<Number> & x,
   catch (...) { CDPAssemblyProbe::endCapture(); throw; }
   CDPAssemblyProbe::endCapture();
   r.print_matlab(stem + "_r.m");
+  if (getParam<bool>("capture_dof_map"))
+  {
+    // Observe the scaling used by this actual evaluation, without reassembly.
+    auto & nl = getNonlinearSystem(n);
+    const auto & sys = nl.system();
+    std::ofstream map(stem + "_map_rank" + std::to_string(processor_id()) + ".csv");
+    map << std::setprecision(17) << "node,x,y,z,variable,dof,scaling\n";
+    for (const auto * node : mesh().getMesh().local_node_ptr_range())
+      for (unsigned int v=0; v<sys.n_vars(); ++v)
+        if (node->n_dofs(sys.number(),v))
+          map << node->id() << ',' << (*node)(0) << ',' << (*node)(1) << ',' << (*node)(2)
+              << ',' << sys.variable_name(v) << ',' << node->dof_number(sys.number(),v,0)
+              << ',' << nl.getVariable(0,v).scalingFactor() << '\n';
+    if (!map) mooseError("Cannot write passive trial DOF map");
+  }
   if (processor_id()==0)
   {
     std::ofstream f(_prefix + "_evaluations.csv", std::ios::app);
@@ -103,6 +146,59 @@ PetscErrorCode CDPTrialProblem::monitor(SNES snes, PetscInt iteration, PetscReal
   {
     p._directions_done = true;
     p.auditDirections(snes);
+  }
+  return PETSC_SUCCESS;
+}
+
+PetscErrorCode CDPTrialProblem::linearMonitor(KSP ksp, PetscInt iteration,
+                                              PetscReal norm, void * context)
+{
+  auto & p = *static_cast<CDPTrialProblem *>(context);
+  if (!p.capturing()) return PETSC_SUCCESS;
+  KSPType type;
+  PetscCall(KSPGetType(ksp, &type));
+  PetscCheck(std::string(type) == KSPPREONLY, PetscObjectComm((PetscObject)ksp),
+             PETSC_ERR_SUP, "Passive linear capture currently requires PREONLY");
+  const auto stem = p._prefix + "_linear_eval" + std::to_string(p._evaluation);
+  PetscViewer viewer;
+  Vec value;
+  if (iteration == 0)
+  {
+    // Save the real RHS before a later SNES residual evaluation can overwrite
+    // its storage. Do not assume KSPGetRhs at an SNES monitor is the old RHS.
+    PetscCall(KSPGetRhs(ksp, &value));
+    PetscCall(PetscViewerASCIIOpen(PetscObjectComm((PetscObject)ksp),
+                                 (stem+"_rhs.m").c_str(), &viewer));
+    PetscCall(PetscViewerPushFormat(viewer, PETSC_VIEWER_ASCII_MATLAB));
+    PetscCall(VecView(value, viewer));
+    PetscCall(PetscViewerDestroy(&viewer));
+    Mat op, pc, copy;
+    PetscCall(KSPGetOperators(ksp, &op, &pc));
+    PetscCall(MatDuplicate(op, MAT_COPY_VALUES, &copy));
+    PetscCall(PetscViewerASCIIOpen(PetscObjectComm((PetscObject)ksp),
+                                 (stem+"_J.m").c_str(), &viewer));
+    PetscCall(PetscViewerPushFormat(viewer, PETSC_VIEWER_ASCII_MATLAB));
+    PetscCall(MatView(copy, viewer));
+    PetscCall(PetscViewerDestroy(&viewer));
+    PetscCall(MatDestroy(&copy));
+  }
+  else
+  {
+    // PREONLY exposes its one completed correction here, before line search.
+    // Offline K*x=b validation remains mandatory; output alone is not proof.
+    PetscCall(KSPGetSolution(ksp, &value));
+    PetscCall(PetscViewerASCIIOpen(PetscObjectComm((PetscObject)ksp),
+                                 (stem+"_solution.m").c_str(), &viewer));
+    PetscCall(PetscViewerPushFormat(viewer, PETSC_VIEWER_ASCII_MATLAB));
+    PetscCall(VecView(value, viewer));
+    PetscCall(PetscViewerDestroy(&viewer));
+  }
+  if (p.processor_id() == 0)
+  {
+    std::ofstream f(p._prefix+"_linear_solves.csv", std::ios::app);
+    f << std::setprecision(17) << p._evaluation << ',' << p.time() << ',' << p.dt()
+      << ',' << iteration << ',' << norm << '\n';
+    if (!f) return PETSC_ERR_FILE_WRITE;
   }
   return PETSC_SUCCESS;
 }

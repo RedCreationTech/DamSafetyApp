@@ -1,0 +1,36 @@
+[Tests]
+  [control]
+    type = RunApp
+    input = control.i
+    max_parallel = 1
+    max_threads = 1
+    requirement = 'The unchanged deficient elastic model provides the same-binary passive observation control.'
+  []
+  [capture]
+    type = RunApp
+    input = capture.i
+    max_parallel = 1
+    max_threads = 1
+    requirement = 'Bounded passive observation captures stored linear systems and nodal row scaling without adding residual evaluations.'
+  []
+  [verify]
+    type = RunCommand
+    command = 'python3 verify_capture.py'
+    prereq = 'control capture'
+    requirement = 'Captured systems retain three original null directions, satisfy the stored linear equation, match accepted residual identities and preserve observable motion.'
+  []
+  [reject_without_matrix]
+    type = RunException
+    input = capture.i
+    cli_args = 'Problem/capture_actual_jacobian=false'
+    expect_err = 'Requires capture_actual_jacobian'
+    requirement = 'A linear system capture cannot silently omit its actual operator identity.'
+  []
+  [reject_outside_window]
+    type = RunException
+    input = capture.i
+    cli_args = 'Problem/trial_capture_times=0.09'
+    expect_err = 'Times must be finite and within'
+    requirement = 'Selective observation times must belong to the declared trial window.'
+  []
+[]
