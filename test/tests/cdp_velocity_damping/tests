@@ -115,5 +115,31 @@
     cli_args = '--check-input'
     requirement = 'The shared value/projector spectrum candidate is explicitly selectable without changing damping.'
   []
+  [cdp_2d_old_check]
+    type = RunApp
+    input = cdp-2d-old.i
+    cli_args = '--check-input'
+    requirement = 'The 2D default-off control preserves static CDP weak plane stress and original H22 material parameters.'
+  []
+  [cdp_2d_projection_check]
+    type = RunApp
+    input = cdp-2d-projection.i
+    cli_args = '--check-input'
+    requirement = 'Surrogate P is explicitly acknowledged and uses undamaged projected damping without changing static CDP thickness.'
+  []
+  [reject_cdp_2d_without_projection_ack]
+    type = RunException
+    input = cdp-2d-projection.i
+    cli_args = '--check-input Physics/SolidMechanics/CDPVelocityDynamic/all/diagnostic_2d_plane_stress_projection=false'
+    expect_err = 'requires acknowledged'
+    requirement = '2D CDP damping cannot be silently selected through the 3D-only path.'
+  []
+  [reject_cdp_2d_wrong_thickness_space]
+    type = RunException
+    input = cdp-2d-projection.i
+    cli_args = '--check-input Variables/strain_zz/order=SECOND'
+    expect_err = 'FIRST LAGRANGE'
+    requirement = 'Surrogate P retains the original FIRST LAGRANGE static CDP thickness space.'
+  []
 
 []

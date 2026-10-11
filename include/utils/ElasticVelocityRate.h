@@ -20,8 +20,9 @@ inline double displacementDerivative(double dt, double beta, double gamma)
   return gamma / (beta * dt);
 }
 
-// Only for an independently audited observable plane-stress rate space.
-// This eliminates rate_zz, never the original static thickness unknown.
+// Elastic damping projection. Equivalence to a total plane-stress rate requires
+// a separate audit; CDP surrogate P does NOT assert that equivalence.
+// This eliminates a damping rate_zz, never the static thickness unknown.
 template <typename Fourth, typename Second>
 Second closePlaneStressRate(const Fourth & elasticity, Second rate)
 {

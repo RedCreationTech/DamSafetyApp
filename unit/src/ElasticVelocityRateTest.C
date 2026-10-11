@@ -78,3 +78,28 @@ TEST(ElasticVelocityRate, ObservableClosureAndSchurDerivativeAgree)
   }
   EXPECT_THROW(ElasticVelocityRate::planeStressRateTangent(RankFourTensor()),std::invalid_argument);
 }
+
+TEST(ElasticVelocityRate, PlasticThicknessIsDistinctFromDampingProjection)
+{
+  const double E = 3.04e10, nu = .2;
+  const double mu = E / (2*(1+nu)), lambda = E*nu / ((1+nu)*(1-2*nu));
+  RankFourTensor C;
+  for (unsigned int i=0;i<3;++i)
+    for (unsigned int j=0;j<3;++j)
+      for (unsigned int k=0;k<3;++k)
+        for (unsigned int l=0;l<3;++l)
+          C(i,j,k,l) = lambda*(i==j)*(k==l)+mu*((i==k)*(j==l)+(i==l)*(j==k));
+  RankTwoTensor xy;
+  xy(0,0)=.01;xy(1,1)=-.004;xy(0,1)=xy(1,0)=.003;
+  const auto projection = ElasticVelocityRate::closePlaneStressRate(C,xy);
+  auto actual = projection;
+  actual(2,2) += .002; // Explicit synthetic plastic-thickness contribution.
+  const auto P = (C*projection)*.00113, T = (C*actual)*.00113;
+  EXPECT_NEAR(P(2,2),0,1e-8);
+  EXPECT_NEAR(T(2,2),76337.77777777778,1e-8);
+  EXPECT_NEAR(T(0,0)-P(0,0),19084.44444444444,1e-8);
+  // The operator projects only damping. It must not mutate the supplied CDP rate.
+  const auto saved = actual;
+  ElasticVelocityRate::closePlaneStressRate(C,actual);
+  EXPECT_DOUBLE_EQ(actual(2,2),saved(2,2));
+}
