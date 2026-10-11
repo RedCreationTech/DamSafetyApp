@@ -67,7 +67,6 @@
   mass_damping_coefficient = 1.95
   stiffness_damping_coefficient = 0.00113
   generate_output = 'stress_xx stress_yy stress_zz stress_xy strain_xx strain_yy strain_xy'
-  enable_cdp_velocity_damping = false
   diagnostic_2d_plane_stress_projection = true
   expected_youngs_modulus = 3.04e10
   expected_poissons_ratio = 0.2
