@@ -75,10 +75,12 @@ CDPVelocityDynamicPhysics::act()
   if (!_enabled || _current_task != "add_material")
     return;
   auto params = _factory.getValidParams("CDPVelocityRateMaterial");
-  params.applyParameters(parameters(), {"displacements", "velocities", "accelerations"});
+  params.applyParameters(parameters(), {"displacements", "velocities", "accelerations", "out_of_plane_strain"});
   params.set<std::vector<VariableName>>("displacements") = _displacements;
   params.set<std::vector<VariableName>>("velocities") = std::vector<VariableName>(_velocities.begin(), _velocities.begin() + _ndisp);
   params.set<std::vector<VariableName>>("accelerations") = std::vector<VariableName>(_accelerations.begin(), _accelerations.begin() + _ndisp);
+  if (_plane_stress_projection)
+    params.set<std::vector<VariableName>>("out_of_plane_strain") = {getParam<VariableName>("out_of_plane_strain")};
   params.set<Real>("beta") = getParam<Real>("newmark_beta");
   params.set<Real>("gamma") = getParam<Real>("newmark_gamma");
   params.set<Real>("alpha") = getParam<Real>("hht_alpha");
