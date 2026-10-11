@@ -46,7 +46,18 @@ struct DamageCombination
   double damage;
 };
 
-StressInvariants stressInvariants(const SymmetricTensor & effective_stress);
+struct PrincipalSpectrum
+{
+  std::array<double, 3> values;
+  // A projector gradient for each selected eigenvector; repeated sorted roots
+  // have no unique ordinary gradient. Physical tensor shear includes a factor 2.
+  std::array<SymmetricTensor, 3> gradients;
+};
+
+PrincipalSpectrum stablePrincipalSpectrum(const SymmetricTensor & stress);
+
+StressInvariants stressInvariants(const SymmetricTensor & effective_stress,
+                                  bool use_stable_principal_stress = false);
 
 // Both strengths below are effective cohesion magnitudes sigma/(1-d), not the
 // nominal stress ordinates in the Abaqus hardening/stiffening input tables.
@@ -59,7 +70,8 @@ double yieldFunction(const SymmetricTensor & effective_stress,
                      double compression_strength,
                      double tension_strength,
                      double biaxial_to_uniaxial_compression_ratio,
-                     double tensile_meridian_ratio);
+                     double tensile_meridian_ratio,
+                     bool use_stable_principal_stress = false);
 
 FlowPotentialResult flowPotential(const SymmetricTensor & effective_stress,
                                   double dilation_angle_degrees,

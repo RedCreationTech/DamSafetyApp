@@ -136,7 +136,7 @@ AbaqusCDPStateIntegrator::assembleResult(
   const auto viscous_effective_stress = _backbone_integrator.elasticStress(
       subtractStateTensor(total_strain, new_state.viscous_plastic_strain));
   const double tension_weight =
-      AbaqusCDPFormula::stressInvariants(viscous_effective_stress).tension_weight;
+      AbaqusCDPFormula::stressInvariants(viscous_effective_stress, _backbone_integrator.usesStablePrincipalStress()).tension_weight;
   const auto damage = AbaqusCDPFormula::combineDamage(new_state.viscous_compression_damage,
                                                       new_state.viscous_tension_damage,
                                                       _parameters.tension_recovery,
@@ -204,8 +204,8 @@ AbaqusCDPStateIntegrator::integrateLinearized(const SymmetricTensor & total_stra
     plus[column] += weight_step;
     minus[column] -= weight_step;
     tension_weight_gradient[column] =
-        (AbaqusCDPFormula::stressInvariants(plus).tension_weight -
-         AbaqusCDPFormula::stressInvariants(minus).tension_weight) /
+        (AbaqusCDPFormula::stressInvariants(plus, _backbone_integrator.usesStablePrincipalStress()).tension_weight -
+         AbaqusCDPFormula::stressInvariants(minus, _backbone_integrator.usesStablePrincipalStress()).tension_weight) /
         (2.0 * weight_step);
   }
 

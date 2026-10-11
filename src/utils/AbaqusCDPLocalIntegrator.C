@@ -134,8 +134,24 @@ dualAbsoluteValue(const Dual9 & input)
 using DualTensor = std::array<Dual9, 6>;
 
 std::array<Dual9, 3>
-dualPrincipalStress(const DualTensor & stress)
+dualPrincipalStress(const DualTensor & stress, const bool stable = false)
 {
+  if (stable)
+  {
+    SymmetricTensor values;
+    for (std::size_t c = 0; c < 6; ++c)
+      values[c] = stress[c].value;
+    const auto spectrum = AbaqusCDPFormula::stablePrincipalSpectrum(values);
+    std::array<Dual9, 3> result;
+    for (std::size_t k = 0; k < 3; ++k)
+    {
+      result[k].value = spectrum.values[k];
+      for (std::size_t column = 0; column < ad_size; ++column)
+        for (std::size_t c = 0; c < 6; ++c)
+          result[k].derivative[column] += spectrum.gradients[k][c] * stress[c].derivative[column];
+    }
+    return result;
+  }
   constexpr double pi = 3.141592653589793238462643383279502884;
   const Dual9 & xx = stress[0];
   const Dual9 & yy = stress[1];
@@ -190,7 +206,7 @@ struct DualStressInvariants
 };
 
 DualStressInvariants
-dualStressInvariants(const DualTensor & stress)
+dualStressInvariants(const DualTensor & stress, const bool stable = false)
 {
   const Dual9 trace = stress[0] + stress[1] + stress[2];
   const Dual9 mean = trace / 3.0;
@@ -200,7 +216,7 @@ dualStressInvariants(const DualTensor & stress)
   const Dual9 j2 = 0.5 * (sxx * sxx + syy * syy + szz * szz +
                           2.0 * (stress[3] * stress[3] + stress[4] * stress[4] +
                                  stress[5] * stress[5]));
-  const auto principal = dualPrincipalStress(stress);
+  const auto principal = dualPrincipalStress(stress, stable);
   Dual9 positive_sum;
   Dual9 absolute_sum;
   for (const auto & value : principal)
@@ -245,9 +261,10 @@ dualYieldFunction(const DualTensor & stress,
                   const Dual9 & compression_strength,
                   const Dual9 & tension_strength,
                   const double biaxial_to_uniaxial_compression_ratio,
-                  const double tensile_meridian_ratio)
+                  const double tensile_meridian_ratio,
+                  const bool stable)
 {
-  const auto invariants = dualStressInvariants(stress);
+  const auto invariants = dualStressInvariants(stress, stable);
   const double alpha = (biaxial_to_uniaxial_compression_ratio - 1.0) /
                        (2.0 * biaxial_to_uniaxial_compression_ratio - 1.0);
   const Dual9 beta = compression_strength / tension_strength * (1.0 - alpha) -
@@ -458,9 +475,9 @@ AbaqusCDPLocalIntegrator::evaluate(const LocalVector & unknown,
     result.residual[i] =
         (result.stress[i] - trial_stress[i] + elastic_correction[i]) / stress_scale;
 
-  const auto stress_invariants = AbaqusCDPFormula::stressInvariants(result.stress);
+  const auto stress_invariants = AbaqusCDPFormula::stressInvariants(result.stress, _parameters.use_stable_principal_stress);
   const auto increment_principal =
-      AbaqusCDPFormula::stressInvariants(result.plastic_increment).principal_stress;
+      AbaqusCDPFormula::stressInvariants(result.plastic_increment, _parameters.use_stable_principal_stress).principal_stress;
   result.tensile_increment = stress_invariants.tension_weight *
                              std::max(0.0, increment_principal.back());
   result.compressive_increment = (1.0 - stress_invariants.tension_weight) *
@@ -475,7 +492,8 @@ AbaqusCDPLocalIntegrator::evaluate(const LocalVector & unknown,
       compression.value,
       tension.value,
       _parameters.biaxial_to_uniaxial_compression_ratio,
-      _parameters.tensile_meridian_ratio);
+      _parameters.tensile_meridian_ratio,
+      _parameters.use_stable_principal_stress);
   result.residual[6] = result.yield / stress_scale;
   result.residual[7] =
       (result.tensile_equivalent_plastic_strain -
@@ -564,8 +582,8 @@ AbaqusCDPLocalIntegrator::automaticDifferentiationJacobian(const LocalVector & u
   for (std::size_t i = 0; i < 6; ++i)
     residual[i] = (stress[i] - trial_stress[i] + elastic_correction[i]) / stress_scale;
 
-  const auto stress_invariants = dualStressInvariants(stress);
-  const auto increment_principal = dualPrincipalStress(plastic_increment);
+  const auto stress_invariants = dualStressInvariants(stress, _parameters.use_stable_principal_stress);
+  const auto increment_principal = dualPrincipalStress(plastic_increment, _parameters.use_stable_principal_stress);
   const Dual9 tensile_increment =
       stress_invariants.tension_weight * dualPositivePart(increment_principal.back());
   const Dual9 compressive_increment =
@@ -591,7 +609,8 @@ AbaqusCDPLocalIntegrator::automaticDifferentiationJacobian(const LocalVector & u
                                   compression_strength,
                                   tension_strength,
                                   _parameters.biaxial_to_uniaxial_compression_ratio,
-                                  _parameters.tensile_meridian_ratio) /
+                                  _parameters.tensile_meridian_ratio,
+                                  _parameters.use_stable_principal_stress) /
                 stress_scale;
   residual[7] = (tensile_equivalent_plastic_strain -
                  old_state.tensile_equivalent_plastic_strain - tensile_increment) /
@@ -701,7 +720,8 @@ AbaqusCDPLocalIntegrator::integrate(const SymmetricTensor & total_strain,
       old_compression.value,
       old_tension.value,
       _parameters.biaxial_to_uniaxial_compression_ratio,
-      _parameters.tensile_meridian_ratio);
+      _parameters.tensile_meridian_ratio,
+      _parameters.use_stable_principal_stress);
   if (trial_yield <= _parameters.residual_tolerance * stress_scale)
     return {trial_stress,
             old_state,
@@ -733,9 +753,9 @@ AbaqusCDPLocalIntegrator::integrate(const SymmetricTensor & total_strain,
   for (std::size_t i = 0; i < 6; ++i)
     unknown[i] = initial_stress[i] / stress_scale;
   unknown[6] = initial_multiplier / _strain_scale;
-  const auto initial_stress_invariants = AbaqusCDPFormula::stressInvariants(initial_stress);
+  const auto initial_stress_invariants = AbaqusCDPFormula::stressInvariants(initial_stress, _parameters.use_stable_principal_stress);
   const auto initial_increment_principal =
-      AbaqusCDPFormula::stressInvariants(initial_increment).principal_stress;
+      AbaqusCDPFormula::stressInvariants(initial_increment, _parameters.use_stable_principal_stress).principal_stress;
   unknown[7] = initial_stress_invariants.tension_weight *
                std::max(0.0, initial_increment_principal.back()) / _strain_scale;
   unknown[8] = (1.0 - initial_stress_invariants.tension_weight) *
@@ -996,7 +1016,8 @@ AbaqusCDPLocalIntegrator::integrateLinearized(const SymmetricTensor & total_stra
         compression_strength,
         tension_strength,
         _parameters.biaxial_to_uniaxial_compression_ratio,
-        _parameters.tensile_meridian_ratio);
+        _parameters.tensile_meridian_ratio,
+        _parameters.use_stable_principal_stress);
   };
   const double tension_step = 1.0e-7 * std::max(1.0, std::abs(tension.value));
   const double compression_step = 1.0e-7 * std::max(1.0, std::abs(compression.value));
@@ -1114,12 +1135,12 @@ AbaqusCDPLocalIntegrator::fixedStateDiagnostic(const LocalVector & unknown,
 }
 
 AbaqusCDPLocalIntegrator::PrincipalStressDiagnostic
-AbaqusCDPLocalIntegrator::principalStressDiagnostic(const SymmetricTensor & stress)
+AbaqusCDPLocalIntegrator::principalStressDiagnostic(const SymmetricTensor & stress, const bool stable)
 {
   DualTensor seeded;
   for (std::size_t i = 0; i < 6; ++i)
     seeded[i] = Dual9::variable(stress[i], i);
-  const auto principal = dualPrincipalStress(seeded);
+  const auto principal = dualPrincipalStress(seeded, stable);
   PrincipalStressDiagnostic result;
   for (std::size_t k = 0; k < 3; ++k)
   {

@@ -83,8 +83,57 @@ validateStress(const AbaqusCDPFormula::SymmetricTensor & stress)
 
 namespace AbaqusCDPFormula
 {
+PrincipalSpectrum
+stablePrincipalSpectrum(const SymmetricTensor & stress)
+{
+  validateStress(stress);
+  using Matrix = std::array<std::array<long double, 3>, 3>;
+  long double scale=0;
+  for (auto x:stress) scale=std::max(scale,std::abs(static_cast<long double>(x)));
+  if (scale==0) scale=1;
+  Matrix a={{{stress[0]/scale,stress[3]/scale,stress[5]/scale},
+             {stress[3]/scale,stress[1]/scale,stress[4]/scale},
+             {stress[5]/scale,stress[4]/scale,stress[2]/scale}}};
+  Matrix q={{{1,0,0},{0,1,0},{0,0,1}}};
+  for (unsigned iteration=0;iteration<80;++iteration)
+  {
+    unsigned p=0,r=1;
+    for (unsigned i=0;i<3;++i)
+      for (unsigned j=i+1;j<3;++j)
+        if (std::abs(a[i][j])>std::abs(a[p][r])) {p=i;r=j;}
+    if (std::abs(a[p][r])<1e-30L) break;
+    const long double tau=(a[r][r]-a[p][p])/(2*a[p][r]);
+    const long double t=std::copysign(1.L,tau)/(std::abs(tau)+std::hypot(1.L,tau));
+    const long double c=1/std::sqrt(1+t*t),s=t*c;
+    const long double off=a[p][r];
+    a[p][p]-=t*off; a[r][r]+=t*off; a[p][r]=a[r][p]=0;
+    for (unsigned k=0;k<3;++k)
+    {
+      if (k!=p && k!=r)
+      {
+        const long double ap=a[k][p],ar=a[k][r];
+        a[k][p]=a[p][k]=c*ap-s*ar; a[k][r]=a[r][k]=s*ap+c*ar;
+      }
+      const long double qp=q[k][p],qr=q[k][r];
+      q[k][p]=c*qp-s*qr; q[k][r]=s*qp+c*qr;
+    }
+  }
+  std::array<unsigned,3> order={{0,1,2}};
+  std::sort(order.begin(),order.end(),[&](unsigned i,unsigned j){return a[i][i]<a[j][j];});
+  PrincipalSpectrum result={};
+  for(unsigned k=0;k<3;++k)
+  {
+    auto n=order[k]; result.values[k]=static_cast<double>(a[n][n]*scale);
+    const long double x=q[0][n],y=q[1][n],z=q[2][n];
+    result.gradients[k]={{static_cast<double>(x*x),static_cast<double>(y*y),static_cast<double>(z*z),
+                         static_cast<double>(2*x*y),static_cast<double>(2*y*z),static_cast<double>(2*x*z)}};
+  }
+  return result;
+}
+
 StressInvariants
-stressInvariants(const SymmetricTensor & effective_stress)
+stressInvariants(const SymmetricTensor & effective_stress,
+                 const bool use_stable_principal_stress)
 {
   validateStress(effective_stress);
   const double trace = effective_stress[0] + effective_stress[1] + effective_stress[2];
@@ -96,7 +145,8 @@ stressInvariants(const SymmetricTensor & effective_stress)
                            2.0 * (effective_stress[3] * effective_stress[3] +
                                   effective_stress[4] * effective_stress[4] +
                                   effective_stress[5] * effective_stress[5]));
-  const auto principal = principalStress(effective_stress);
+  const auto principal = use_stable_principal_stress
+      ? stablePrincipalSpectrum(effective_stress).values : principalStress(effective_stress);
 
   double positive_sum = 0.0;
   double absolute_sum = 0.0;
@@ -144,9 +194,10 @@ yieldFunction(const SymmetricTensor & effective_stress,
               const double compression_strength,
               const double tension_strength,
               const double biaxial_to_uniaxial_compression_ratio,
-              const double tensile_meridian_ratio)
+              const double tensile_meridian_ratio,
+              const bool use_stable_principal_stress)
 {
-  const auto invariants = stressInvariants(effective_stress);
+  const auto invariants = stressInvariants(effective_stress, use_stable_principal_stress);
   const auto coefficients = yieldCoefficients(biaxial_to_uniaxial_compression_ratio,
                                                tensile_meridian_ratio,
                                                compression_strength,

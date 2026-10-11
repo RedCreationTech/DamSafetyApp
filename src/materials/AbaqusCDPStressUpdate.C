@@ -57,6 +57,8 @@ AbaqusCDPStressUpdate::validParams()
                                     1.0e-8,
                                     "reference_tangent_perturbation > 0",
                                     "Diagnostic reference-tangent perturbation");
+  params.addParam<bool>("use_stable_principal_stress", false,
+                        "Default-off shared symmetric spectrum/projector candidate; no tolerance change");
   params.addParam<bool>("enable_performance_diagnostics",
                         false,
                         "Measure per-material-call elapsed time and expose detailed local solver "
@@ -82,7 +84,9 @@ AbaqusCDPStressUpdate::AbaqusCDPStressUpdate(const InputParameters & parameters)
                        getParam<unsigned int>("maximum_local_iterations"),
                        getParam<Real>("local_residual_tolerance"),
                        getParam<Real>("local_finite_difference_step"),
-                       getParam<Real>("minimum_line_search")}),
+                       getParam<Real>("minimum_line_search"),
+                       true,
+                       getParam<bool>("use_stable_principal_stress")}),
     _state_integrator(_local_integrator,
                       {getParam<Real>("tension_recovery"),
                        getParam<Real>("compression_recovery"),

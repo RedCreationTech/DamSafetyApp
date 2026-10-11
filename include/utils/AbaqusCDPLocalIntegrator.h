@@ -48,6 +48,7 @@ public:
     double finite_difference_step = 1.0e-7;
     double minimum_line_search = 1.0e-6;
     bool use_automatic_differentiation_jacobian = true;
+    bool use_stable_principal_stress = false;
   };
 
   struct State
@@ -154,7 +155,9 @@ public:
   FixedStateDiagnostic fixedStateDiagnostic(const LocalVector & unknown,
                                              const SymmetricTensor & total_strain,
                                              const State & old_state) const;
-  static PrincipalStressDiagnostic principalStressDiagnostic(const SymmetricTensor & stress);
+  static PrincipalStressDiagnostic principalStressDiagnostic(const SymmetricTensor & stress,
+                                                              bool stable = false);
+  bool usesStablePrincipalStress() const { return _parameters.use_stable_principal_stress; }
 
 private:
   struct LocalFactorization

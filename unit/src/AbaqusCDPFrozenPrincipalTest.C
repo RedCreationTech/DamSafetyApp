@@ -172,3 +172,67 @@ TEST(AbaqusCDPFrozenPrincipal, ExactRepeatedRootHasDifferentOneSidedDerivatives)
     EXPECT_NEAR(static_cast<double>(block),static_cast<double>(expected),1e-12);
   }
 }
+
+TEST(AbaqusCDPFrozenPrincipal, ProductionCandidateMatchesIndependentFrozenSpectrum)
+{
+  for (const auto & f : FrozenPrincipalFixture::spectra)
+  {
+    SCOPED_TRACE(f.name);
+    const auto ordinary = AbaqusCDPFormula::stressInvariants(f.stress, true);
+    const auto dual = AbaqusCDPLocalIntegrator::principalStressDiagnostic(f.stress, true);
+    double scale = 1e-300;
+    for (const auto value : f.stress)
+      scale = std::max(scale, std::abs(value));
+    for (unsigned k = 0; k < 3; ++k)
+    {
+      EXPECT_EQ(ordinary.principal_stress[k], dual.values[k]);
+      EXPECT_LE(std::abs(dual.values[k] - f.values[k]),
+                128 * std::numeric_limits<double>::epsilon() * scale);
+      if (f.distinct)
+        for (unsigned c = 0; c < 6; ++c)
+          EXPECT_NEAR(dual.gradient[k][c], f.gradients[6 * k + c], 1e-8);
+    }
+  }
+}
+
+TEST(AbaqusCDPFrozenPrincipal, ProductionCandidateKeepsSavedHistoryAndReportsReintegration)
+{
+  const std::string dir = "test/tests/cdp_material_table/data/";
+  const CDPMaterialTable table(dir + "compression_hardening.csv", dir + "compression_damage.csv",
+                              dir + "tension_stiffening.csv", dir + "tension_damage.csv", 3.04e10);
+  AbaqusCDPLocalIntegrator::Parameters parameters =
+      {3.04e10, .2, 36.31, .1, 1.16, .667, 40, 1e-9, 1e-7, 1e-6};
+  for (bool enabled : {false, true})
+  {
+    parameters.use_stable_principal_stress = enabled;
+    const AbaqusCDPLocalIntegrator integrator(table, parameters);
+    unsigned count = 0;
+    for (const auto & f : FrozenPrincipalFixture::states)
+    {
+      const std::string name(f.name);
+      if (name.size() < 6 || name.compare(name.size() - 6, 6, "entry1") != 0)
+        continue;
+      const AbaqusCDPLocalIntegrator::State old = {f.plastic, f.kt, f.kc};
+      AbaqusCDPLocalIntegrator::NewtonTrace trace;
+      try
+      {
+        const auto result = integrator.integrateLinearized(f.target, old, &trace);
+        EXPECT_LE(result.result.residual_norm, parameters.residual_tolerance);
+        std::cout << "REINTEGRATION," << f.name << "," << enabled << ",success,"
+                  << result.result.iterations << "," << result.result.residual_norm << "\n";
+      }
+      catch (const std::runtime_error & error)
+      {
+        // A diagnostic failure stays a failure; it is not asserted away or used
+        // to relax the original local tolerance. The round review decides gain.
+        std::cout << "REINTEGRATION," << f.name << "," << enabled << ",failed,"
+                  << trace.size() << "," << error.what() << "\n";
+      }
+      EXPECT_EQ(old.plastic_strain, f.plastic);
+      EXPECT_EQ(old.tensile_equivalent_plastic_strain, f.kt);
+      EXPECT_EQ(old.compressive_equivalent_plastic_strain, f.kc);
+      ++count;
+    }
+    EXPECT_GT(count, 0u);
+  }
+}

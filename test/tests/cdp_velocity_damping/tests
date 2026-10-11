@@ -103,4 +103,17 @@
     difference_tol = 1e-5
     requirement = 'All three displacement columns include the elastic velocity-rate derivative and the existing constitutive tangent.'
   []
+  [stable_principal_off_check]
+    type = RunApp
+    input = cdp-stable-principal-off.i
+    cli_args = '--check-input'
+    requirement = 'The default-off spectrum control retains the original CDP model and tolerances.'
+  []
+  [stable_principal_on_check]
+    type = RunApp
+    input = cdp-stable-principal-on.i
+    cli_args = '--check-input'
+    requirement = 'The shared value/projector spectrum candidate is explicitly selectable without changing damping.'
+  []
+
 []
