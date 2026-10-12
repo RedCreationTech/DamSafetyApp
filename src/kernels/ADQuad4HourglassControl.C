@@ -1,5 +1,6 @@
 #include "ADQuad4HourglassControl.h"
 #include "StressHistoryInterval.h"
+#include "HourglassElasticScale.h"
 #include <iomanip>
 
 #include "libmesh/elem.h"
@@ -14,6 +15,9 @@ ADQuad4HourglassControl::validParams()
       "Adds an elastic stiffness penalty to the non-affine mode of a one-point QUAD4.");
   params.addRequiredRangeCheckedParam<Real>(
       "coefficient", "coefficient > 0", "Dimensionless hourglass stiffness coefficient");
+  params.addRangeCheckedParam<Real>(
+      "elastic_stiffness_scale", 1.0, "elastic_stiffness_scale > 0",
+      "Scales only the elastic hourglass force; additional damping retains its original stiffness");
   params.addRequiredRangeCheckedParam<Real>(
       "shear_modulus", "shear_modulus > 0", "Undamaged elastic shear modulus");
   params.addParam<MaterialPropertyName>(
@@ -29,6 +33,7 @@ ADQuad4HourglassControl::validParams()
 ADQuad4HourglassControl::ADQuad4HourglassControl(const InputParameters & parameters)
   : ADKernel(parameters),
     _coefficient(getParam<Real>("coefficient")),
+    _elastic_stiffness_scale(getParam<Real>("elastic_stiffness_scale")),
     _shear_modulus(getParam<Real>("shear_modulus")),
     _zeta(getMaterialProperty<Real>("zeta")),
     _alpha(getParam<Real>("alpha")),
@@ -76,6 +81,7 @@ ADQuad4HourglassControl::computeQpResidual()
     amplitude_older += gamma[i] * _dof_values_older[i];
   }
 
+  const ADReal unweighted_amplitude = amplitude;
   if (_dt > 0)
   {
     amplitude = amplitude * (1.0 + _alpha + (1.0 + _alpha) * _zeta[_qp] / _dt) -
@@ -86,6 +92,11 @@ ADQuad4HourglassControl::computeQpResidual()
       amplitude += StressHistoryInterval::correction(_alpha, _zeta[_qp], _dt, _dt_old, _t_step) *
                    (amplitude_older - amplitude_old);
   }
+
+  // Keep the default evaluation order and the entire historical damping term unchanged.
+  if (_elastic_stiffness_scale != 1.0)
+    amplitude += HourglassElasticScale::correction(
+        _elastic_stiffness_scale, _alpha, _dt, unweighted_amplitude, amplitude_old);
 
   const Real length_squared = Quad4Hourglass::characteristicLengthSquared(nodes);
   return _coefficient * _shear_modulus / length_squared * gamma[_i] * amplitude;

@@ -14,6 +14,7 @@ protected:
   ADReal computeQpResidual() override;
 
   const Real _coefficient;
+  const Real _elastic_stiffness_scale;
   const Real _shear_modulus;
   const MaterialProperty<Real> & _zeta;
   const Real _alpha;
