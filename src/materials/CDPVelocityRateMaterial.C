@@ -64,9 +64,10 @@ CDPVelocityRateMaterial::CDPVelocityRateMaterial(const InputParameters & paramet
   if (_plane_stress_projection)
   {
     auto * z = getVar("out_of_plane_strain", 0);
-    if (z->kind() != Moose::VAR_SOLVER || z->feType().family != LAGRANGE ||
-        z->feType().order != FIRST)
-      mooseError("CDP plane-stress projection requires original FIRST LAGRANGE nonlinear thickness");
+    if (z->kind() != Moose::VAR_SOLVER ||
+        !((z->feType().family == LAGRANGE && z->feType().order == FIRST) ||
+          (z->feType().family == MONOMIAL && z->feType().order == CONSTANT)))
+      mooseError("CDP plane-stress projection requires FIRST LAGRANGE or CONSTANT MONOMIAL nonlinear thickness");
   }
   for (unsigned int c = 0; c < _ndisp; ++c)
   {
@@ -84,9 +85,10 @@ CDPVelocityRateMaterial::initialSetup()
   if (_plane_stress_projection)
   {
     auto * z = getVar("out_of_plane_strain", 0);
-    if (z->kind() != Moose::VAR_SOLVER || z->feType().family != LAGRANGE ||
-        z->feType().order != FIRST || z->blockIDs() != getVar("displacements", 0)->blockIDs())
-      mooseError("CDP plane-stress projection requires original FIRST LAGRANGE nonlinear thickness in the displacement blocks");
+    if (z->kind() != Moose::VAR_SOLVER ||
+        !((z->feType().family == LAGRANGE && z->feType().order == FIRST) ||
+          (z->feType().family == MONOMIAL && z->feType().order == CONSTANT)) || z->blockIDs() != getVar("displacements", 0)->blockIDs())
+      mooseError("CDP plane-stress projection requires FIRST LAGRANGE or CONSTANT MONOMIAL nonlinear thickness in the displacement blocks");
   }
   for (unsigned int c = 0; c < _ndisp; ++c)
   {
