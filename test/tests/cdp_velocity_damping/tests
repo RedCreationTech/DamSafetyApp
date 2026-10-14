@@ -142,4 +142,25 @@
     requirement = 'Surrogate P retains the original FIRST LAGRANGE static CDP thickness space.'
   []
 
+  [complete_plane_2d_check]
+    type = RunApp
+    input = cdp-2d-projection.i
+    cli_args = '--check-input Physics/SolidMechanics/CDPVelocityDynamic/all/complete_plane_stress_coupling=true'
+    requirement = 'The default-off complete XY cross-block candidate accepts the original nodal thickness space without changing material or damping.'
+  []
+  [reject_complete_plane_p0]
+    type = RunException
+    input = cdp-2d-projection.i
+    cli_args = '--check-input Physics/SolidMechanics/CDPVelocityDynamic/all/complete_plane_stress_coupling=true Variables/strain_zz/family=MONOMIAL Variables/strain_zz/order=CONSTANT'
+    expect_err = 'original FIRST LAGRANGE'
+    requirement = 'The assembly candidate cannot silently stack the P0 thickness-space candidate.'
+  []
+  [reject_complete_plane_without_projection]
+    type = RunException
+    input = cdp-2d-old.i
+    cli_args = '--check-input Physics/SolidMechanics/CDPVelocityDynamic/all/complete_plane_stress_coupling=true'
+    expect_err = 'enabled XY'
+    requirement = 'The candidate requires the existing acknowledged XY damping projection.'
+  []
+
 []

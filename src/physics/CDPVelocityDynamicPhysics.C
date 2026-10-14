@@ -21,6 +21,7 @@ CDPVelocityDynamicPhysics::validParams()
   params.addParam<bool>("diagnostic_3d_model", false, "Explicit acknowledgement: 3D SMALL constant isotropic C0 and no eigenstrain");
   params.addParam<bool>("diagnostic_2d_plane_stress_projection", false,
       "Explicit surrogate P: 2D undamaged plane-stress damping projection, distinct from CDP total thickness rate");
+  params.addParam<bool>("complete_plane_stress_coupling", false, "Default-off XY shear cross-block completion; residual, material and thickness FE space unchanged");
   params.addParam<bool>("require_cdp_material", true, "False only for elastic diagnostic controls");
   params.addParam<Real>("expected_youngs_modulus", "Constant undamaged Young modulus, identical to the CDP integrator");
   params.addParam<Real>("expected_poissons_ratio", "Constant undamaged Poisson ratio, identical to the CDP integrator");
@@ -30,8 +31,11 @@ CDPVelocityDynamicPhysics::validParams()
 
 CDPVelocityDynamicPhysics::CDPVelocityDynamicPhysics(const InputParameters & parameters)
   : DynamicSolidMechanicsPhysics(parameters), _enabled(getParam<bool>("enable_cdp_velocity_damping")),
-    _plane_stress_projection(getParam<bool>("diagnostic_2d_plane_stress_projection"))
+    _plane_stress_projection(getParam<bool>("diagnostic_2d_plane_stress_projection")),
+    _complete_coupling(getParam<bool>("complete_plane_stress_coupling"))
 {
+  if (_complete_coupling && (!_enabled || !_plane_stress_projection))
+    mooseError("Complete plane-stress coupling requires the enabled XY CDP velocity projection");
   const bool supported_dimension = _plane_stress_projection ?
       (_ndisp == 2 && !getParam<bool>("diagnostic_3d_model") &&
        isParamValid("out_of_plane_strain") &&
@@ -64,6 +68,7 @@ CDPVelocityDynamicPhysics::getKernelParameters(std::string type)
     params.set<Real>("beta") = getParam<Real>("newmark_beta");
     params.set<Real>("gamma") = getParam<Real>("newmark_gamma");
     params.set<bool>("plane_stress_damping_projection") = _plane_stress_projection;
+    params.set<bool>("complete_plane_stress_coupling") = _complete_coupling;
   }
   return params;
 }
@@ -72,6 +77,13 @@ void
 CDPVelocityDynamicPhysics::act()
 {
   DynamicSolidMechanicsPhysics::act();
+  if (_complete_coupling && _current_task == "add_kernel")
+  {
+    auto params = DynamicSolidMechanicsPhysics::getKernelParameters("CDPPlaneStressShearJacobian");
+    params.set<NonlinearVariableName>("variable") = getParam<VariableName>("out_of_plane_strain");
+    params.set<bool>("complete_plane_stress_coupling") = true;
+    _problem->addKernel("CDPPlaneStressShearJacobian", "TM_WPS_SHEAR_" + name(), params);
+  }
   if (!_enabled || _current_task != "add_material")
     return;
   auto params = _factory.getValidParams("CDPVelocityRateMaterial");

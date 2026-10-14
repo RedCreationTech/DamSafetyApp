@@ -2,6 +2,7 @@
 #include "ElasticVelocityRate.h"
 #include "ElasticityTensorTools.h"
 #include "MooseMesh.h"
+#include "PlaneStressCoupling.h"
 
 registerMooseObject("DamSafetyApp", CDPVelocityStressDivergence);
 
@@ -13,6 +14,7 @@ CDPVelocityStressDivergence::validParams()
   params.addRequiredParam<Real>("beta", "Newmark beta used by inertia");
   params.addRequiredParam<Real>("gamma", "Newmark gamma used by inertia");
   params.addParam<bool>("plane_stress_damping_projection", false, "2D surrogate P, without changing static CDP thickness balance");
+  params.addParam<bool>("complete_plane_stress_coupling", false, "Complete only XY displacement/thickness shear cross-blocks");
   return params;
 }
 
@@ -20,9 +22,14 @@ CDPVelocityStressDivergence::CDPVelocityStressDivergence(const InputParameters &
   : DynamicStressDivergenceTensors(parameters),
     _beta(getParam<Real>("beta")), _gamma(getParam<Real>("gamma")),
     _plane_stress_projection(getParam<bool>("plane_stress_damping_projection")),
+    _complete_coupling(getParam<bool>("complete_plane_stress_coupling")),
     _elasticity(getMaterialPropertyByName<RankFourTensor>(_base_name + "cdp_velocity_rate_tangent")),
     _damping_stress(getMaterialPropertyByName<RankTwoTensor>(_base_name + "cdp_velocity_damping_stress"))
 {
+  if (_complete_coupling && (!_plane_stress_projection ||
+      getVar("out_of_plane_strain", 0)->feType().family != LAGRANGE ||
+      getVar("out_of_plane_strain", 0)->feType().order != FIRST))
+    mooseError("Complete plane-stress coupling requires the original FIRST LAGRANGE thickness space");
   const bool supported_dimension = _plane_stress_projection ?
       (_ndisp == 2 && _mesh.dimension() == 2 && _component < 2 &&
        _out_of_plane_strain_coupled && _out_of_plane_direction == 2) :
@@ -63,6 +70,14 @@ CDPVelocityStressDivergence::computeQpJacobian()
 Real
 CDPVelocityStressDivergence::computeQpOffDiagJacobian(unsigned int jvar)
 {
+  if (_complete_coupling && _dt > 0 && jvar == _out_of_plane_strain_var)
+  {
+    const Real original = _zeta[_qp] == 0.0 ?
+        DynamicStressDivergenceTensors::computeQpOffDiagJacobian(jvar) :
+        (1 + _alpha) * StressDivergenceTensors::computeQpOffDiagJacobian(jvar);
+    return original + PlaneStressCoupling::displacementShearColumn(
+        _Jacobian_mult[_qp], _component, _grad_test[_i][_qp], _phi[_j][_qp], _alpha);
+  }
   if (_zeta[_qp] == 0.0)
     return DynamicStressDivergenceTensors::computeQpOffDiagJacobian(jvar);
   if (_dt <= 0)

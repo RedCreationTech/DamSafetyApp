@@ -9,6 +9,9 @@
 #include <stdexcept>
 #include <vector>
 
+#include "Dam2bPlaneAssemblyCheck.h"
+#include <memory>
+
 using State = AbaqusCDPStateIntegrator::State;
 using Tensor = AbaqusCDPStateIntegrator::SymmetricTensor;
 
@@ -29,8 +32,8 @@ int main(int argc, char ** argv)
 {
   try
   {
-    if (argc != 3)
-      throw std::runtime_error("Usage: replay_dam2b_checkpoint material_directory snapshots.csv");
+    if (argc != 3 && argc != 5)
+      throw std::runtime_error("Usage: replay_dam2b_checkpoint material_directory snapshots.csv [geometry.csv assembly.csv]");
     const std::string p = std::string(argv[1]) + "/";
     constexpr double E = 3.04e10;
     CDPMaterialTable table(p + "compression_hardening.csv", p + "compression_damage.csv",
@@ -40,6 +43,8 @@ int main(int argc, char ** argv)
     std::ifstream input(argv[2]);
     if (!input)
       throw std::runtime_error("Cannot open checkpoint snapshots");
+    std::unique_ptr<Dam2bPlaneAssemblyCheck> assembly;
+    if (argc == 5) assembly = std::make_unique<Dam2bPlaneAssemblyCheck>(argv[3],argv[4]);
     std::string line;
     std::getline(input, line); // schema header is independently checked by the snapshot producer
     std::cout << std::setprecision(17)
@@ -91,6 +96,7 @@ int main(int argc, char ** argv)
       // Output replication is a prerequisite; do not certify a tangent for the wrong time layer.
       if (stress_error > 1e-4 || state_error > 1e-11 || flatten(old) != saved_old)
         throw std::runtime_error("Checkpoint replay/history identity failed; inspect output before interpreting tangent");
+      if (assembly) assembly->observe(static_cast<unsigned int>(x[0]),static_cast<unsigned int>(x[2]),steps,eold,enew,x[3],old,result);
       for (unsigned int col : {2u, 3u})
         for (double h : {1e-8, 1e-9, 1e-10, 1e-12, 1e-14, 1e-16})
         {
