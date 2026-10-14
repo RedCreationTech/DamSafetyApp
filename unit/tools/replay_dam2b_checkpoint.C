@@ -45,7 +45,8 @@ int main(int argc, char ** argv)
     std::cout << std::setprecision(17)
               << "abaqus_element,mode,dt,h,stress_replay_absmax_Pa,state_replay_absmax,"
                  "C3312_Pa,C1233_Pa,tangent_column,FD_absolute_error_Pa,FD_relative_error,"
-                 "accepted_substeps,old_state_unchanged\n";
+                 "accepted_substeps,old_state_unchanged,selected_analytic_Pa,selected_FD_center_Pa,"
+                 "selected_FD_plus_Pa,selected_FD_minus_Pa,base_S33_Pa,plus_substeps,minus_substeps\n";
     std::size_t rows = 0;
     while (std::getline(input, line))
     {
@@ -91,11 +92,21 @@ int main(int argc, char ** argv)
       if (stress_error > 1e-4 || state_error > 1e-11 || flatten(old) != saved_old)
         throw std::runtime_error("Checkpoint replay/history identity failed; inspect output before interpreting tangent");
       for (unsigned int col : {2u, 3u})
-        for (double h : {1e-8, 1e-9, 1e-10})
+        for (double h : {1e-8, 1e-9, 1e-10, 1e-12, 1e-14, 1e-16})
         {
           Tensor direction{};
           direction[col] = 1;
           const auto fd = steps.directionalDerivative(eold, enew, x[3], old, direction, h);
+          auto plus_strain = enew, minus_strain = enew;
+          plus_strain[col] += h;
+          minus_strain[col] -= h;
+          const auto plus = steps.integrate(eold, plus_strain, x[3], old);
+          const auto minus = steps.integrate(eold, minus_strain, x[3], old);
+          const unsigned int selected_row = col == 2 ? 3 : 2;
+          const double selected_factor = col == 2 ? 1. : .5;
+          const double selected_analytic = selected_factor * result.algorithmic_tangent[col][selected_row];
+          const double selected_plus = selected_factor * (plus.final_result.cauchy_stress[selected_row] - result.result.final_result.cauchy_stress[selected_row]) / h;
+          const double selected_minus = selected_factor * (result.result.final_result.cauchy_stress[selected_row] - minus.final_result.cauchy_stress[selected_row]) / h;
           double error = 0, scale = 0;
           for (unsigned int i = 0; i < 6; ++i)
           {
@@ -107,7 +118,11 @@ int main(int argc, char ** argv)
                     << .5 * result.algorithmic_tangent[3][2] << ','
                     << result.algorithmic_tangent[2][3] << ',' << col << ','
                     << error << ',' << error / std::max(scale, 1.) << ','
-                    << result.result.accepted_substeps << ',' << (flatten(old) == saved_old) << '\n';
+                    << result.result.accepted_substeps << ',' << (flatten(old) == saved_old) << ','
+                    << selected_analytic << ',' << selected_factor * fd[selected_row] << ','
+                    << selected_plus << ',' << selected_minus << ','
+                    << result.result.final_result.cauchy_stress[2] << ','
+                    << plus.accepted_substeps << ',' << minus.accepted_substeps << '\n';
         }
       ++rows;
     }
