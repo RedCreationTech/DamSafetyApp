@@ -51,6 +51,11 @@ CDPAssemblyProbe::CDPAssemblyProbe(const InputParameters & p)
   _history_scalars.push_back(&getMaterialProperty<Real>("cdp_stiffness_factor"));
   for (const auto & name : {"cdp_audit_branch", "cdp_audit_residual", "cdp_audit_plastic"})
     _history_scalars.push_back(&getMaterialProperty<Real>(name));
+  // Append fields so every existing accepted-state column retains its index.
+  _history_scalars.push_back(&getMaterialProperty<Real>("cdp_viscous_combined_damage"));
+  _history_scalars.push_back(&getMaterialPropertyOld<Real>("cdp_viscous_combined_damage"));
+  for (const auto name : {"cdp_combined_damage_target", "cdp_legacy_damage_reconstruction", "cdp_damage_tension_weight"})
+    _history_scalars.push_back(&getMaterialProperty<Real>(name));
   for (const auto id : getParam<std::vector<dof_id_type>>("probe_elements"))
     _probe_elements.insert(id);
 }
@@ -87,10 +92,10 @@ void CDPAssemblyProbe::beginCapture(const std::string & path, bool tangent, bool
     for (const auto name : {"target", "stress", "effective_stress"})
       for (unsigned int i = 0; i < 6; ++i) cdp_substep_stream << ',' << name << i;
     for (const auto age : {"old", "new"})
-      for (unsigned int i = 0; i < 16; ++i) cdp_substep_stream << ',' << age << "_state" << i;
+      for (unsigned int i = 0; i < AbaqusCDPStateIntegrator::state_size; ++i) cdp_substep_stream << ',' << age << "_state" << i;
     cdp_substep_stream << ",branch,plastic,iterations,residual_norm,trial_yield,final_yield,plastic_multiplier"
                        << ",jacobian_fallbacks,automatic_jacobian_evaluations,finite_difference_jacobian_evaluations";
-    for (unsigned int i = 0; i < 22 * 22; ++i) cdp_substep_stream << ",transition" << i;
+    for (unsigned int i = 0; i < AbaqusCDPStateIntegrator::transition_size * AbaqusCDPStateIntegrator::transition_size; ++i) cdp_substep_stream << ",transition" << i;
     for (unsigned int i = 0; i < 36; ++i) cdp_substep_stream << ",chained" << i;
     cdp_substep_stream << '\n';
   }
@@ -110,7 +115,7 @@ void CDPAssemblyProbe::beginCapture(const std::string & path, bool tangent, bool
   for (const auto & name : scalar_history_names)
     for (const auto age : {"new", "old"})
       cdp_probe_stream << ',' << name << '_' << age;
-  cdp_probe_stream << ",cdp_stiffness_factor,final_substep_active_branch,final_substep_residual_norm,final_substep_plastic\n";
+  cdp_probe_stream << ",cdp_stiffness_factor,final_substep_active_branch,final_substep_residual_norm,final_substep_plastic,cdp_viscous_combined_damage_new,cdp_viscous_combined_damage_old,cdp_combined_damage_target,cdp_legacy_damage_reconstruction,cdp_damage_tension_weight\n";
 }
 void CDPAssemblyProbe::endCapture()
 {
@@ -166,7 +171,8 @@ void CDPAssemblyProbe::recordSubsteps(dof_id_type element, unsigned int qp,
     cdp_substep_stream << ',' << s.backbone.tensile_equivalent_plastic_strain
                        << ',' << s.backbone.compressive_equivalent_plastic_strain;
     for (const auto x : s.viscous_plastic_strain) cdp_substep_stream << ',' << x;
-    cdp_substep_stream << ',' << s.viscous_tension_damage << ',' << s.viscous_compression_damage;
+    cdp_substep_stream << ',' << s.viscous_tension_damage << ',' << s.viscous_compression_damage
+                       << ',' << s.viscous_combined_damage;
   };
   for (const auto & e : trace)
   {
@@ -230,7 +236,7 @@ void CDPAssemblyProbe::recordSubsteps(dof_id_type element, unsigned int qp,
       for (const auto x : *t) { cdp_substep_stream << ','; if (e.succeeded) cdp_substep_stream << x; }
     state(e.old_state);
     if (e.succeeded) state(e.result.state);
-    else for (unsigned int i = 0; i < 16; ++i) cdp_substep_stream << ',';
+    else for (unsigned int i = 0; i < AbaqusCDPStateIntegrator::state_size; ++i) cdp_substep_stream << ',';
     if (e.succeeded)
     {
       const auto & b = e.result.backbone;

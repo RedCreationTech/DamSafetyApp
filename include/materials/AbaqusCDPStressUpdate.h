@@ -67,6 +67,11 @@ private:
   MaterialProperty<Real> & _damage_c;
   const MaterialProperty<Real> & _damage_c_old;
 
+  MaterialProperty<Real> & _viscous_combined_damage;
+  const MaterialProperty<Real> & _viscous_combined_damage_old;
+  MaterialProperty<Real> & _combined_damage_target;
+  MaterialProperty<Real> & _legacy_damage_reconstruction;
+  MaterialProperty<Real> & _damage_tension_weight;
   MaterialProperty<Real> & _combined_damage;
   MaterialProperty<Real> & _stiffness_factor;
   MaterialProperty<Real> & _local_iterations;
