@@ -85,7 +85,8 @@ AbaqusCDPStateIntegrator::integrate(const SymmetricTensor & total_strain,
     stateIntegrationError("time step must be finite and nonnegative");
   validateDamage(old_state.viscous_tension_damage, "old viscous tension damage");
   validateDamage(old_state.viscous_compression_damage, "old viscous compression damage");
-  validateDamage(old_state.viscous_combined_damage, "old viscous combined damage");
+  if (_parameters.regularize_combined_damage)
+    validateDamage(old_state.viscous_combined_damage, "old viscous combined damage");
 
   // The old state remains immutable. Any failure below leaves the caller's
   // checkpoint untouched and makes a cutback retry deterministic.
@@ -197,7 +198,8 @@ AbaqusCDPStateIntegrator::integrateLinearized(const SymmetricTensor & total_stra
     stateIntegrationError("time step must be finite and nonnegative");
   validateDamage(old_state.viscous_tension_damage, "old viscous tension damage");
   validateDamage(old_state.viscous_compression_damage, "old viscous compression damage");
-  validateDamage(old_state.viscous_combined_damage, "old viscous combined damage");
+  if (_parameters.regularize_combined_damage)
+    validateDamage(old_state.viscous_combined_damage, "old viscous combined damage");
 
   const auto backbone =
       _backbone_integrator.integrateLinearized(total_strain, old_state.backbone, trace);

@@ -93,6 +93,10 @@ TEST(CombinedDamageViscosity, DefaultLegacyIsIndependentOfAppendedHistory)
   EXPECT_DOUBLE_EQ(a.result.damage.damage, a.result.legacy_damage_reconstruction);
   EXPECT_DOUBLE_EQ(a.result.state.viscous_combined_damage, a.result.damage.damage);
   for (unsigned int i = 0; i < 6; ++i) EXPECT_EQ(a.derivative[22][i], 0.);
+  old.viscous_combined_damage = std::numeric_limits<double>::quiet_NaN();
+  const auto ignored = implicit.integrateLinearized(target, .01, old);
+  EXPECT_EQ(a.result.cauchy_stress, ignored.result.cauchy_stress);
+  EXPECT_EQ(a.derivative, ignored.derivative);
 }
 
 TEST(CombinedDamageViscosity, FixedPathLeavesBackbonePlasticAndBranchesUnchanged)
