@@ -228,12 +228,18 @@ TEST(CombinedDamageViscosity, PlasticSubstepTangentMatchesIndependentPerturbatio
   const double fc = t.responseByEquivalentPlasticStrain(CDPMaterialTable::Branch::COMPRESSION, 0.).stress.value;
   for (const double stress : {1.05 * ft, -1.05 * fc})
   {
-    const auto target = strain(stress);
+    auto target = strain(stress);
+    // Distinct transverse strains avoid the repeated plastic eigenvalues of
+    // exact uniaxial loading, where a centered derivative is not unique.
+    target[1] *= .7;
+    target[2] *= 1.3;
+    target[3] = .02 * target[0];
     const AbaqusCDPSubstepIntegrator steps(candidate, {16, std::abs(target[0]) / 3., 1e-8});
     const auto linear = steps.integrateLinearized({}, target, .001, {});
     ASSERT_EQ(linear.result.accepted_substeps, 4u);
     for (const Tensor direction : {Tensor{1., -.2, -.2, .1, 0., 0.}, Tensor{.2, .3, -.4, 0., .05, .03}})
     {
+      SCOPED_TRACE(std::to_string(stress) + ":" + std::to_string(direction[0]));
       const auto predicted = steps.applyTangent(linear.algorithmic_tangent, direction);
       const auto measured = steps.directionalDerivative({}, target, .001, {}, direction, 1e-9);
       for (unsigned int k = 0; k < 6; ++k)
