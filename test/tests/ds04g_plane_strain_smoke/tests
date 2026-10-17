@@ -1,0 +1,10 @@
+[Tests]
+  design = 'TEST-CDPC-DS04G-REPORT-001'
+  issues = '#TASK-DS04G-S2'
+  [plane_strain_dynamic_smoke]
+    type = RunApp
+    input = plane_strain_dynamic_smoke.i
+    method = 'opt'
+    requirement = 'DamSafetyApp shall run a 2D QUAD4 PLANE_STRAIN finite-strain dynamic solve with HHT/Newmark, dual Rayleigh damping (0.05/0.003604) and base PresetAcceleration to normal termination, producing CSV/Exodus outputs for the DS04G analytic consistency check.'
+  []
+[]
