@@ -25,22 +25,19 @@ def load_series(path):
     ]
 
 
-def double_integrate(times, accel):
-    n = len(times)
-    vel = [0.0] * n
-    disp = [0.0] * n
-    for i in range(1, n):
-        dt = times[i] - times[i - 1]
-        vel[i] = vel[i - 1] + 0.5 * (accel[i] + accel[i - 1]) * dt
-        disp[i] = disp[i - 1] + 0.5 * (vel[i] + vel[i - 1]) * dt
-    return disp
+def rigid_displacement(times, accel):
+    """Closed form for base a(t)=A*sin(w*t) from rest (Newmark-consistent):
+    v(t) = A/w*(1-cos(w*t)); u(t) = A/w*(t - sin(w*t)/w)."""
+    peak = max(accel)
+    w = 2.0 * math.pi * 2.0
+    return [peak / w * (t - math.sin(w * t) / w) for t in times]
 
 
 def main():
     path = sys.argv[1] if len(sys.argv) > 1 else "plane_strain_dynamic_smoke_out.csv"
     times, top, base = load_series(path)
     accel = [2.0 * math.sin(2.0 * math.pi * 2.0 * t) for t in times]
-    rigid = double_integrate(times, accel)
+    rigid = rigid_displacement(times, accel)
     residual = [t - r for t, r in zip(top, rigid)]
     base_residual = [t - b for b, t in zip(base, top)]
     scale = max(abs(v) for v in rigid) or 1.0
