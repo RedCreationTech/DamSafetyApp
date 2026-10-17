@@ -51,7 +51,6 @@
     velocity = vel_x
     acceleration = accel_x
     beta = 0.25
-    gamma = 0.5
   []
 []
 
