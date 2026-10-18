@@ -1,0 +1,43 @@
+[Tests]
+  design = 'DES-DAM2B-A-HG-ENERGY-002'
+  issues = '#TASK-DAM2B-A-HG-ENERGY-002'
+  [static_candidate_jacobian]
+    type = PetscJacobianTester
+    input = ../quad4_hourglass/zero_energy_mode.i
+    cli_args = 'Kernels/hourglass/elastic_operator=gradient_raw_conjugate'
+    run_sim = true
+    ratio_tol = 1e-7
+    difference_tol = 1e-6
+    requirement = 'The fixed energy-normalized elastic hourglass mode has the assembled AD static tangent.'
+  []
+  [transient_candidate_jacobian]
+    type = PetscJacobianTester
+    input = mode-transient.i
+    cli_args = 'Kernels/hourglass/elastic_operator=gradient_raw_conjugate'
+    run_sim = true
+    ratio_tol = 1e-7
+    difference_tol = 1e-6
+    requirement = 'The new elastic mode retains the legacy additional damping tangent under HHT.'
+  []
+  [candidate_rejected_trial]
+    type = RunApp
+    input = mode-transient.i
+    cli_args = 'Kernels/hourglass/elastic_operator=gradient_raw_conjugate Executioner/TimeStepper/reject_time=0.02'
+    expect_out = GROUND_MOTION_REJECT
+    requirement = 'The opt-in elastic mode permits the existing validation timestepper to reject a converged trial.'
+  []
+  [reject_displaced_geometry]
+    type = RunException
+    input = mode-transient.i
+    cli_args = 'Kernels/hourglass/elastic_operator=gradient_raw_conjugate Kernels/hourglass/use_displaced_mesh=true'
+    expect_err = 'requires reference geometry'
+    requirement = 'The fixed reference-geometry candidate rejects displaced-mesh evaluation.'
+  []
+  [reject_multiple_points]
+    type = RunException
+    input = ../quad4_hourglass/zero_energy_mode.i
+    cli_args = 'Kernels/hourglass/elastic_operator=gradient_raw_conjugate Executioner/Quadrature/order=THIRD'
+    expect_err = 'requires one-point quadrature'
+    requirement = 'The energy-normalized QUAD4 candidate does not change its one-point integration scope.'
+  []
+[]

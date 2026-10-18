@@ -17,6 +17,7 @@ protected:
   const Real _shear_modulus;
   const MaterialProperty<Real> & _zeta;
   const Real _alpha;
+  const bool _gradient_raw_conjugate;
   const bool _previous_accepted_interval;
   const bool _history_diagnostics;
   const MooseArray<ADReal> & _dof_values;

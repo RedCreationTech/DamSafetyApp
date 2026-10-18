@@ -19,6 +19,9 @@ ADQuad4HourglassControl::validParams()
   params.addParam<MaterialPropertyName>(
       "zeta", 0.0, "Stiffness-proportional Rayleigh damping coefficient");
   params.addParam<Real>("alpha", 0.0, "HHT time integration parameter");
+  params.addParam<MooseEnum>(
+      "elastic_operator", MooseEnum("legacy gradient_raw_conjugate", "legacy"),
+      "Opt-in energy-checked elastic geometry/amplitude; retains the original damping operator");
   params.addParam<bool>("use_previous_accepted_interval", false,
                        "Use the previous accepted timestep for the previous hourglass rate; opt-in diagnostic, default retains original behavior");
   params.addParam<bool>("history_diagnostics", false,
@@ -32,12 +35,15 @@ ADQuad4HourglassControl::ADQuad4HourglassControl(const InputParameters & paramet
     _shear_modulus(getParam<Real>("shear_modulus")),
     _zeta(getMaterialProperty<Real>("zeta")),
     _alpha(getParam<Real>("alpha")),
+    _gradient_raw_conjugate(getParam<MooseEnum>("elastic_operator") == "gradient_raw_conjugate"),
     _previous_accepted_interval(getParam<bool>("use_previous_accepted_interval")),
     _history_diagnostics(getParam<bool>("history_diagnostics")),
     _dof_values(_var.adDofValues()),
     _dof_values_old(_var.dofValuesOld()),
     _dof_values_older(_var.dofValuesOlder())
 {
+  if (_gradient_raw_conjugate && getParam<bool>("use_displaced_mesh"))
+    paramError("use_displaced_mesh", "gradient_raw_conjugate requires reference geometry");
 }
 
 void
@@ -74,6 +80,16 @@ ADQuad4HourglassControl::computeQpResidual()
     amplitude += gamma[i] * _dof_values[i];
     amplitude_old += gamma[i] * _dof_values_old[i];
     amplitude_older += gamma[i] * _dof_values_older[i];
+  }
+  if (_gradient_raw_conjugate)
+  {
+    const Real history_correction = _dt > 0 && _previous_accepted_interval
+        ? StressHistoryInterval::correction(_alpha, _zeta[_qp], _dt, _dt_old, _t_step)
+        : 0.0;
+    return _coefficient * _shear_modulus * gamma[_i] *
+           Quad4Hourglass::gradientRawResidualPerShear(
+               nodes, _alpha, _dt, _zeta[_qp], history_correction,
+               amplitude, amplitude_old, amplitude_older);
   }
 
   if (_dt > 0)

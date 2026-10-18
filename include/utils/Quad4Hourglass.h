@@ -95,6 +95,60 @@ public:
     return value;
   }
 
+  // Per-unit-area coefficient for the energy-checked amplitude h^T u / 4.
+  static double gradientRawStiffnessPerShear(const Nodes & nodes)
+  {
+    constexpr std::array<std::array<double, 2>, 4> dn =
+        {{{{-0.25, -0.25}}, {{0.25, -0.25}}, {{0.25, 0.25}}, {{-0.25, 0.25}}}};
+    constexpr Mode seed = {{1.0, -1.0, 1.0, -1.0}};
+    double jac[2][2] = {};
+    std::array<double, 2> seed_moment = {};
+    for (unsigned int i = 0; i < 4; ++i)
+      for (unsigned int a = 0; a < 2; ++a)
+      {
+        const double x = nodes[i][a] - nodes[0][a];
+        seed_moment[a] += x * seed[i];
+        for (unsigned int b = 0; b < 2; ++b)
+          jac[a][b] += x * dn[i][b];
+      }
+    const double det = jac[0][0] * jac[1][1] - jac[0][1] * jac[1][0];
+    if (!std::isfinite(det) || det <= 1e-14)
+      throw std::runtime_error("degenerate or inverted QUAD4 center Jacobian");
+    double metric = 0.0, norm_squared = 0.0;
+    for (unsigned int i = 0; i < 4; ++i)
+    {
+      const double bx = (dn[i][0] * jac[1][1] - dn[i][1] * jac[1][0]) / det;
+      const double by = (-dn[i][0] * jac[0][1] + dn[i][1] * jac[0][0]) / det;
+      const double h = seed[i] - bx * seed_moment[0] - by * seed_moment[1];
+      metric += bx * bx + by * by;
+      norm_squared += h * h;
+    }
+    return (0.005 / 16.0) * norm_squared * metric;
+  }
+
+  template <typename Scalar>
+  static Scalar gradientRawResidualPerShear(const Nodes & nodes,
+                                           double alpha,
+                                           double dt,
+                                           double zeta,
+                                           double history_correction,
+                                           const Scalar & current,
+                                           double old,
+                                           double older)
+  {
+    Scalar elastic = current, damping = 0.0;
+    if (dt > 0)
+    {
+      elastic = (1.0 + alpha) * current - alpha * old;
+      damping = current * ((1.0 + alpha) * zeta / dt) -
+                old * ((1.0 + 2.0 * alpha) * zeta / dt) + older * (alpha * zeta / dt) +
+                history_correction * (older - old);
+    }
+    // Direct Kref+Clegacy avoids subtracting nearly equal elastic terms (~400:1).
+    return gradientRawStiffnessPerShear(nodes) * elastic +
+           damping / characteristicLengthSquared(nodes);
+  }
+
   static Matrix consistentMassCorrection(const Nodes & nodes)
   {
     Matrix correction = {};
