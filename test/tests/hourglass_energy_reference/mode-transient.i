@@ -35,6 +35,8 @@
 
 [Variables/u]
 []
+[AuxVariables/dummy_y]
+[]
 
 [Kernels/hourglass]
   type = ADQuad4HourglassControl
@@ -74,9 +76,9 @@
 []
 
 [Postprocessors/node_2_u]
-  type = NodalVariableValue
+  type = PointValue
   variable = u
-  nodeid = 3
+  point = '1 1 0'
 []
 
 [Preconditioning/smp]

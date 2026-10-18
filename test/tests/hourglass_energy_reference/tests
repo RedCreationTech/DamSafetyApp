@@ -29,7 +29,7 @@
   [reject_displaced_geometry]
     type = RunException
     input = mode-transient.i
-    cli_args = 'Kernels/hourglass/elastic_operator=gradient_raw_conjugate Kernels/hourglass/use_displaced_mesh=true'
+    cli_args = "Kernels/hourglass/elastic_operator=gradient_raw_conjugate Kernels/hourglass/use_displaced_mesh=true Mesh/displacements='u dummy_y'"
     expect_err = 'requires reference geometry'
     requirement = 'The fixed reference-geometry candidate rejects displaced-mesh evaluation.'
   []
