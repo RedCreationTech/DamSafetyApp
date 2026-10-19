@@ -149,6 +149,27 @@ public:
            damping / characteristicLengthSquared(nodes);
   }
 
+  template <typename Scalar>
+  static Scalar newmarkWeightedRate(const Scalar & current,
+                                    double old,
+                                    double old_velocity,
+                                    double old_acceleration,
+                                    double dt,
+                                    double beta,
+                                    double gamma,
+                                    double alpha)
+  {
+    if (beta <= 0.0 || gamma <= 0.0)
+      throw std::invalid_argument("Newmark beta and gamma must be positive");
+    if (dt <= 0.0)
+      return Scalar(0.0);
+    const Scalar acceleration = ((current - old) / (dt * dt) - old_velocity / dt -
+                                 (0.5 - beta) * old_acceleration) / beta;
+    const Scalar velocity = old_velocity + dt * (1.0 - gamma) * old_acceleration +
+                            gamma * dt * acceleration;
+    return (1.0 + alpha) * velocity - alpha * old_velocity;
+  }
+
   static Matrix consistentMassCorrection(const Nodes & nodes)
   {
     Matrix correction = {};

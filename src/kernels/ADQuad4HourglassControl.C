@@ -26,6 +26,12 @@ ADQuad4HourglassControl::validParams()
                        "Use the previous accepted timestep for the previous hourglass rate; opt-in diagnostic, default retains original behavior");
   params.addParam<bool>("history_diagnostics", false,
                        "Log trial time/dt/previous accepted dt for small-model validation only");
+  params.addParam<MooseEnum>("damping_rate", MooseEnum("legacy_secant newmark_velocity", "legacy_secant"),
+      "Opt-in Newmark velocity rate for the separate hourglass damping; no spatial coefficient change");
+  params.addCoupledVar("velocity", "Nodal Newmark velocity; required only by newmark_velocity");
+  params.addCoupledVar("acceleration", "Nodal Newmark acceleration; required only by newmark_velocity");
+  params.addRangeCheckedParam<Real>("newmark_beta", 0.25, "newmark_beta > 0", "Newmark beta");
+  params.addRangeCheckedParam<Real>("newmark_gamma", 0.5, "newmark_gamma > 0", "Newmark gamma");
   return params;
 }
 
@@ -38,12 +44,23 @@ ADQuad4HourglassControl::ADQuad4HourglassControl(const InputParameters & paramet
     _gradient_raw_conjugate(getParam<MooseEnum>("elastic_operator") == "gradient_raw_conjugate"),
     _previous_accepted_interval(getParam<bool>("use_previous_accepted_interval")),
     _history_diagnostics(getParam<bool>("history_diagnostics")),
+    _newmark_velocity_rate(getParam<MooseEnum>("damping_rate") == "newmark_velocity"),
+    _newmark_beta(getParam<Real>("newmark_beta")),
+    _newmark_gamma(getParam<Real>("newmark_gamma")),
+    _velocity_old(_newmark_velocity_rate && isCoupled("velocity")
+                      ? &coupledDofValuesOld("velocity") : nullptr),
+    _acceleration_old(_newmark_velocity_rate && isCoupled("acceleration")
+                      ? &coupledDofValuesOld("acceleration") : nullptr),
     _dof_values(_var.adDofValues()),
     _dof_values_old(_var.dofValuesOld()),
     _dof_values_older(_var.dofValuesOlder())
 {
   if (_gradient_raw_conjugate && getParam<bool>("use_displaced_mesh"))
     paramError("use_displaced_mesh", "gradient_raw_conjugate requires reference geometry");
+  if (_newmark_velocity_rate && (!_velocity_old || !_acceleration_old))
+    paramError("damping_rate", "newmark_velocity requires coupled velocity and acceleration");
+  if (_newmark_velocity_rate && getParam<bool>("use_displaced_mesh"))
+    paramError("use_displaced_mesh", "newmark_velocity requires reference geometry");
 }
 
 void
@@ -80,6 +97,28 @@ ADQuad4HourglassControl::computeQpResidual()
     amplitude += gamma[i] * _dof_values[i];
     amplitude_old += gamma[i] * _dof_values_old[i];
     amplitude_older += gamma[i] * _dof_values_older[i];
+  }
+  if (_newmark_velocity_rate)
+  {
+    ADReal rate = 0.0;
+    if (_dt > 0)
+    {
+      if (_velocity_old->size() != 4 || _acceleration_old->size() != 4)
+        mooseError(name(), " requires first-order nodal velocity and acceleration");
+      for (unsigned int j = 0; j < 4; ++j)
+        rate += gamma[j] * Quad4Hourglass::newmarkWeightedRate(
+            _dof_values[j], _dof_values_old[j], (*_velocity_old)[j],
+            (*_acceleration_old)[j], _dt, _newmark_beta, _newmark_gamma, _alpha);
+    }
+    const ADReal elastic = _dt > 0
+        ? (1.0 + _alpha) * amplitude - _alpha * amplitude_old : amplitude;
+    const Real elastic_stiffness = _gradient_raw_conjugate
+        ? Quad4Hourglass::gradientRawStiffnessPerShear(nodes)
+        : 1.0 / Quad4Hourglass::characteristicLengthSquared(nodes);
+    // Keep the legacy spatial damping coefficient even when the elastic K is opt-in.
+    return _coefficient * _shear_modulus * gamma[_i] *
+           (elastic_stiffness * elastic + _zeta[_qp] * rate /
+                Quad4Hourglass::characteristicLengthSquared(nodes));
   }
   if (_gradient_raw_conjugate)
   {

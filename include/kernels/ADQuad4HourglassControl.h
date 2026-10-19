@@ -20,6 +20,11 @@ protected:
   const bool _gradient_raw_conjugate;
   const bool _previous_accepted_interval;
   const bool _history_diagnostics;
+  const bool _newmark_velocity_rate;
+  const Real _newmark_beta;
+  const Real _newmark_gamma;
+  const VariableValue * const _velocity_old;
+  const VariableValue * const _acceleration_old;
   const MooseArray<ADReal> & _dof_values;
   const VariableValue & _dof_values_old;
   const VariableValue & _dof_values_older;

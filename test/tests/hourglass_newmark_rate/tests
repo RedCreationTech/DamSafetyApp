@@ -1,0 +1,42 @@
+[Tests]
+ design = 'DES-DAM2B-A-HG-NEWMARK-RATE-001'
+ issues = '#TASK-DAM2B-A-HG-NEWMARK-RATE'
+ [newmark_actual_AD]
+  type = PetscJacobianTester
+  input = rate-transient.i
+  cli_args = 'Kernels/hourglass/damping_rate=newmark_velocity'
+  run_sim = true
+  ratio_tol = 1e-7
+  difference_tol = 1e-6
+  requirement = 'The opt-in HG Newmark time rate has its assembled AD tangent.'
+ []
+ [legacy_actual_AD]
+  type = PetscJacobianTester
+  input = rate-transient.i
+  run_sim = true
+  ratio_tol = 1e-7
+  difference_tol = 1e-6
+  requirement = 'The default legacy rate retains the assembled tangent.'
+ []
+ [newmark_reject]
+  type = RunApp
+  input = rate-transient.i
+  cli_args = 'Kernels/hourglass/damping_rate=newmark_velocity Executioner/TimeStepper/reject_time=0.02'
+  expect_out = GROUND_MOTION_REJECT
+  requirement = 'The opt-in time rate supports an explicitly rejected converged trial.'
+ []
+ [missing_history]
+  type = RunException
+  input = ../hourglass_energy_reference/mode-transient.i
+  cli_args = 'Kernels/hourglass/damping_rate=newmark_velocity'
+  expect_err = 'requires coupled velocity and acceleration'
+  requirement = 'Newmark HG rejects absent history couplings instead of silently using zero.'
+ []
+ [invalid_beta]
+  type = RunException
+  input = rate-transient.i
+  cli_args = 'Kernels/hourglass/damping_rate=newmark_velocity Kernels/hourglass/newmark_beta=0'
+  expect_err = 'newmark_beta > 0'
+  requirement = 'The Newmark time-rate division requires a positive beta.'
+ []
+[]
