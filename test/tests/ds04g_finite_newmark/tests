@@ -24,7 +24,7 @@
     type = RunException
     input = finite_newmark_check.i
     cli_args = '--check-input Physics/SolidMechanics/FiniteNewmark/all/planar_formulation=WEAK_PLANE_STRESS'
-    expect_err = 'Finite Newmark candidate requires FINITE PLANE_STRAIN'
+    expect_err = 'out_of_plane_strain must be specified'
     requirement = 'The plane-strain candidate shall not silently use a plane-stress closure.'
   []
 []
