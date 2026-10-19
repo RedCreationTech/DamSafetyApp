@@ -1,0 +1,30 @@
+[Tests]
+  design = 'DES-DS04G-NEWMARK-001'
+  issues = '#TASK-DS04G-REUSE-20261020'
+  [syntax_on]
+    type = RunApp
+    input = finite_newmark_check.i
+    cli_args = '--check-input'
+    requirement = 'The opt-in finite plane-strain Newmark damping candidate shall construct with valid C0 and HHT inputs without advancing time.'
+  []
+  [syntax_off]
+    type = RunApp
+    input = finite_newmark_check.i
+    cli_args = '--check-input Physics/SolidMechanics/FiniteNewmark/all/enable_finite_newmark_damping=false'
+    requirement = 'The default-off candidate shall retain the upstream dynamic input path.'
+  []
+  [reject_small]
+    type = RunException
+    input = finite_newmark_check.i
+    cli_args = '--check-input Physics/SolidMechanics/FiniteNewmark/all/strain=SMALL'
+    expect_err = 'Finite Newmark candidate requires FINITE PLANE_STRAIN'
+    requirement = 'The finite candidate shall reject an unverified small-strain configuration.'
+  []
+  [reject_plane_stress]
+    type = RunException
+    input = finite_newmark_check.i
+    cli_args = '--check-input Physics/SolidMechanics/FiniteNewmark/all/planar_formulation=WEAK_PLANE_STRESS'
+    expect_err = 'Finite Newmark candidate requires FINITE PLANE_STRAIN'
+    requirement = 'The plane-strain candidate shall not silently use a plane-stress closure.'
+  []
+[]
