@@ -2,6 +2,7 @@
 #include "gtest/gtest.h"
 #include "ADUtils.h"
 #include <algorithm>
+#include <iostream>
 
 namespace
 {
@@ -145,4 +146,117 @@ TEST(FinitePlaneStrainVelocityRate, RejectsInvertedCurrentAndOldConfigurations)
   EXPECT_THROW(FinitePlaneStrainVelocityRate::nominalStress(
                    good, bad, good, good, kDt, kBeta, kGamma, kAlpha, kZeta, kYoungs, kNu),
                std::invalid_argument);
+}
+
+namespace
+{
+using Nodes = std::array<std::array<Real, 2>, 4>;
+template <typename T>
+std::array<T, 8>
+assembledForce(const Nodes & nodes,
+               const std::array<T, 8> & u,
+               const std::array<Real, 8> & old,
+               const std::array<Real, 8> & v,
+               const std::array<Real, 8> & a,
+               Real h)
+{
+  std::array<T, 8> force{};
+  const Real g = 1 / std::sqrt(3.0);
+  const std::array<Real, 4> sx{{-1, 1, 1, -1}}, sy{{-1, -1, 1, 1}};
+  for (Real xi : {-g, g})
+    for (Real eta : {-g, g})
+    {
+      RankTwoTensor map;
+      map(2, 2) = 1;
+      std::array<std::array<Real, 2>, 4> b;
+      for (unsigned int n = 0; n < 4; ++n)
+      {
+        b[n] = {{sx[n] * (1 + sy[n] * eta) / 4, sy[n] * (1 + sx[n] * xi) / 4}};
+        for (unsigned int i = 0; i < 2; ++i)
+          for (unsigned int j = 0; j < 2; ++j)
+            map(i, j) += nodes[n][i] * b[n][j];
+      }
+      const auto inverse = map.inverse();
+      for (auto & row : b)
+      {
+        const auto original = row;
+        for (unsigned int j = 0; j < 2; ++j)
+          row[j] = original[0] * inverse(0, j) + original[1] * inverse(1, j);
+      }
+      RankTwoTensorTempl<T> gradient;
+      RankTwoTensor old_gradient, velocity, acceleration;
+      for (unsigned int n = 0; n < 4; ++n)
+        for (unsigned int i = 0; i < 2; ++i)
+          for (unsigned int j = 0; j < 2; ++j)
+          {
+            gradient(i, j) += u[2 * n + i] * b[n][j];
+            old_gradient(i, j) += old[2 * n + i] * b[n][j];
+            velocity(i, j) += v[2 * n + i] * b[n][j];
+            acceleration(i, j) += a[2 * n + i] * b[n][j];
+          }
+      const auto p = FinitePlaneStrainVelocityRate::nominalStress(gradient,
+                                                                  old_gradient,
+                                                                  velocity,
+                                                                  acceleration,
+                                                                  h,
+                                                                  kBeta,
+                                                                  kGamma,
+                                                                  kAlpha,
+                                                                  kZeta,
+                                                                  kYoungs,
+                                                                  kNu);
+      for (unsigned int n = 0; n < 4; ++n)
+        for (unsigned int i = 0; i < 2; ++i)
+          for (unsigned int j = 0; j < 2; ++j)
+            force[2 * n + i] += p(i, j) * b[n][j] * map.det();
+    }
+  return force;
+}
+}
+
+TEST(FinitePlaneStrainVelocityRate, FourGaussEightDofAssemblyMatchesFiniteDifference)
+{
+  const std::array<Nodes, 3> geometries{
+      {{{{{0, 0}}, {{2, 0}}, {{2, 1}}, {{0, 1}}}},
+       {{{{.1, -.2}}, {{2.2, .1}}, {{1.8, 1.7}}, {{-.3, 1.2}}}},
+       // Original DS04G CPE4R 1777 corner coordinates, mm converted to m.
+       {{{{10, 80}}, {{9, 80}}, {{9.29290527, 78.6176484}}, {{10.5266855, 79.1573047}}}}}};
+  Real maximum = 0;
+  for (const auto & nodes : geometries)
+    for (Real step : {.002, .0013})
+      for (Real stretch : {0., .01, .08, .18})
+      {
+        std::array<Real, 8> u, old, v, a;
+        std::array<ADReal, 8> ad_u;
+        for (unsigned int k = 0; k < 8; ++k)
+        {
+          old[k] = stretch * nodes[k / 2][k % 2] + .0003 * (k % 3);
+          v[k] = .004 * (static_cast<int>(k) % 3 - 1);
+          a[k] = .02 * (static_cast<int>(k) % 4 - 2);
+          u[k] = old[k] + step * v[k] + .5 * step * step * a[k] + .00001 * (k % 2);
+          ad_u[k] = u[k];
+          Moose::derivInsert(ad_u[k].derivatives(), k, 1.);
+        }
+        const auto ad = assembledForce(nodes, ad_u, old, v, a, step);
+        Real scale = 1, error = 0;
+        for (unsigned int k = 0; k < 8; ++k)
+        {
+          auto plus = u, minus = u;
+          const Real perturbation = 2e-6 * std::max(1., std::abs(u[k]));
+          plus[k] += perturbation;
+          minus[k] -= perturbation;
+          const auto fp = assembledForce(nodes, plus, old, v, a, step);
+          const auto fm = assembledForce(nodes, minus, old, v, a, step);
+          for (unsigned int i = 0; i < 8; ++i)
+          {
+            const Real tangent = ad[i].derivatives()[k];
+            const Real fd = (fp[i] - fm[i]) / (2 * perturbation);
+            scale = std::max(scale, std::abs(tangent));
+            error = std::max(error, std::abs(tangent - fd));
+          }
+        }
+        maximum = std::max(maximum, error / scale);
+        EXPECT_LT(error / scale, 1e-7);
+      }
+  std::cout << "24 four-Gauss 8DOF formula assemblies max relative AD/FD error=" << maximum << '\n';
 }

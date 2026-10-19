@@ -87,7 +87,7 @@ ADFinitePlaneStrainNewmarkDamping::initialSetup()
 ADReal
 ADFinitePlaneStrainNewmarkDamping::computeQpResidual()
 {
-  if (!std::isfinite(_zeta[_qp]) ||
+  if (!std::isfinite(_zeta[_qp]) || _zeta[_qp] < 0 ||
       std::abs(_zeta[_qp] - _expected_zeta) > 1e-12 * std::max(1.0, _expected_zeta))
     mooseError("Finite Newmark damping requires the declared constant stiffness damping");
   const Real mu = _youngs / (2 * (1 + _poisson));

@@ -33,7 +33,7 @@ FinitePlaneStrainNewmarkPhysics::FinitePlaneStrainNewmarkPhysics(const InputPara
     _enabled(getParam<bool>("enable_finite_newmark_damping"))
 {
   if (_enabled &&
-      (_ndisp != 2 || getParam<MooseEnum>("strain") != "FINITE" ||
+      (_ndisp != 2 || !_use_displaced_mesh || getParam<MooseEnum>("strain") != "FINITE" ||
        getParam<MooseEnum>("planar_formulation") != "PLANE_STRAIN" ||
        isParamValid("out_of_plane_strain") || _use_ad || _lagrangian_kernels ||
        getParam<bool>("volumetric_locking_correction") || getParam<bool>("static_initialization") ||

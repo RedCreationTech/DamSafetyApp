@@ -13,7 +13,8 @@ deformation(const RankTwoTensorTempl<T> & gradient)
 {
   auto f = gradient;
   f.addIa(1.0);
-  if (!(MetaPhysicL::raw_value(f.det()) > 0.0))
+  const auto determinant = MetaPhysicL::raw_value(f.det());
+  if (!std::isfinite(determinant) || !(determinant > 0.0))
     throw std::invalid_argument("Finite Newmark damping requires positive det(F)");
   return f;
 }
