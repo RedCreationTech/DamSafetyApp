@@ -108,6 +108,8 @@ public:
   static std::string branchName(ActiveBranch branch);
 
 private:
+  // Test-only access to recorded trial unknowns; no new production evaluation path.
+  friend class AbaqusCDPRealStateTestAccess;
   struct LocalFactorization
   {
     LocalMatrix factors;

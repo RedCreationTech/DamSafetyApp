@@ -1,0 +1,195 @@
+{
+  "parent_job_id": "job_20261020_223540_ds33p4",
+  "source_solver_sha": "8a0114cff87eac51b5db1a796434906301388d0e",
+  "selected_sha256": "9e03ea4949fb992be1cbc355886f38d0ef6c5c8189b7ec8c3719883c988df65c",
+  "files": {
+    "F1.txt": "17ee09bb06eccb3cf0cc2c8438419ffd6c6e819feb93b0f4f682d7df59ecdf6a",
+    "F2.txt": "57d67ba5ee4d6aaa8ad50d4a19a17320577f808bc8ca0f89266a1b583fd0fc98",
+    "F3.txt": "f23dfa140f4e6a02f3f451cfa57ed3fe9d15dd276d459d5c699d90aebac98ebd",
+    "F4.txt": "244bcedd897780b6a4325e4b33b92832b51d9d06e5b69fece855ce1250670144",
+    "L1.txt": "1a91483be70bc69f21c1502fde022719bc7687f14ee05a1d318528a59cd96598",
+    "L2.txt": "b995e82a98ca02f5fad83e70e76507d5b19f967b9776aa6e10dfda0021bc4aeb",
+    "L3.txt": "b82569302f6d37dd2140a458e7461e076be1ae66643340c220cf022e4b1cfd07",
+    "compression_damage.csv": "0c3ebf82ad07bcc58aadab62935d52c802d0d545d41c9793c4e6ff382db3d2db",
+    "compression_hardening.csv": "66ccbd5a6dbbfb64468c353e8f4cfb3eb38dc42a1e4d6b1b3c217c188376aabf",
+    "tension_damage.csv": "fa9e314c57ecf460bb7385fa242ac6fb7e28de89e713148d4057eb3c25b5f724",
+    "tension_stiffening.csv": "2dcd2936911d0e2ed9f7254c73b5d0476ba11cbf2ea74ee565c641c231c1733f"
+  },
+  "points": [
+    {
+      "id": "F1",
+      "identity": [
+        876,
+        8138,
+        2616,
+        1881,
+        3
+      ],
+      "summary": {
+        "id": "F1",
+        "attempt": 876,
+        "evaluation": 8138,
+        "call": 2616,
+        "source_element": 1881,
+        "qp": 3,
+        "eq_time_s": "1.7080000000000002",
+        "dt_s": "0.001000000000000334",
+        "final_N": 1,
+        "final_branches": "{\"tension\": 1}",
+        "local_solve": null,
+        "local_iteration": null,
+        "accepted_anchor": true
+      }
+    },
+    {
+      "id": "F2",
+      "identity": [
+        877,
+        8151,
+        2736,
+        1881,
+        3
+      ],
+      "summary": {
+        "id": "F2",
+        "attempt": 877,
+        "evaluation": 8151,
+        "call": 2736,
+        "source_element": 1881,
+        "qp": 3,
+        "eq_time_s": "1.71",
+        "dt_s": "0.0019999999999997797",
+        "final_N": 8,
+        "final_branches": "{\"tension\": 8}",
+        "local_solve": null,
+        "local_iteration": null,
+        "accepted_anchor": true
+      }
+    },
+    {
+      "id": "F3",
+      "identity": [
+        878,
+        8164,
+        2849,
+        767,
+        0
+      ],
+      "summary": {
+        "id": "F3",
+        "attempt": 878,
+        "evaluation": 8164,
+        "call": 2849,
+        "source_element": 767,
+        "qp": 0,
+        "eq_time_s": "1.7120000000000002",
+        "dt_s": "0.0020000000000002238",
+        "final_N": 1,
+        "final_branches": "{\"elastic\": 1}",
+        "local_solve": null,
+        "local_iteration": null,
+        "accepted_anchor": true
+      }
+    },
+    {
+      "id": "F4",
+      "identity": [
+        880,
+        8352,
+        4369,
+        767,
+        0
+      ],
+      "summary": {
+        "id": "F4",
+        "attempt": 880,
+        "evaluation": 8352,
+        "call": 4369,
+        "source_element": 767,
+        "qp": 0,
+        "eq_time_s": "1.7130000000000001",
+        "dt_s": "0.00099999999999988987",
+        "final_N": 4,
+        "final_branches": "{\"tension\": 4}",
+        "local_solve": null,
+        "local_iteration": null,
+        "accepted_anchor": true
+      }
+    },
+    {
+      "id": "L1",
+      "identity": [
+        872,
+        7865,
+        365,
+        1881,
+        0
+      ],
+      "summary": {
+        "id": "L1",
+        "attempt": 872,
+        "evaluation": 7865,
+        "call": 365,
+        "source_element": 1881,
+        "qp": 0,
+        "eq_time_s": "1.7040000000000002",
+        "dt_s": "0.0020000000000002238",
+        "final_N": 2,
+        "final_branches": "{\"tension\": 2}",
+        "local_solve": 365,
+        "local_iteration": 8,
+        "accepted_anchor": false
+      }
+    },
+    {
+      "id": "L2",
+      "identity": [
+        874,
+        7904,
+        712,
+        1881,
+        3
+      ],
+      "summary": {
+        "id": "L2",
+        "attempt": 874,
+        "evaluation": 7904,
+        "call": 712,
+        "source_element": 1881,
+        "qp": 3,
+        "eq_time_s": "1.7080000000000002",
+        "dt_s": "0.0020000000000002238",
+        "final_N": 2,
+        "final_branches": "{\"tension\": 2}",
+        "local_solve": 816,
+        "local_iteration": 8,
+        "accepted_anchor": false
+      }
+    },
+    {
+      "id": "L3",
+      "identity": [
+        879,
+        8171,
+        2908,
+        767,
+        3
+      ],
+      "summary": {
+        "id": "L3",
+        "attempt": 879,
+        "evaluation": 8171,
+        "call": 2908,
+        "source_element": 767,
+        "qp": 3,
+        "eq_time_s": "1.714",
+        "dt_s": "0.0019999999999997797",
+        "final_N": 8,
+        "final_branches": "{\"elastic\": 1, \"tension\": 7}",
+        "local_solve": 6176,
+        "local_iteration": 12,
+        "accepted_anchor": false
+      }
+    }
+  ]
+}
