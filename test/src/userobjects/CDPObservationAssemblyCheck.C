@@ -18,7 +18,9 @@ void CDPObservationAssemblyCheck::execute()
   if(!problem) mooseError("Development assembly check requires observation problem");
   auto & nl=_fe_problem.getNonlinearSystem(0);
   auto & system=dynamic_cast<libMesh::NonlinearImplicitSystem &>(nl.system());
-  auto matrix=system.get_system_matrix().zero_clone();
+  auto matrix=libMesh::SparseMatrix<Number>::build(comm());
+  matrix->attach_dof_map(system.get_dof_map());
+  matrix->init();
   problem->attemptEvent("development_jacobian_before");
   _fe_problem.computeJacobian(*nl.currentSolution(),*matrix,0);
   problem->attemptEvent("development_jacobian_after");
