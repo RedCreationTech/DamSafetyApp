@@ -395,7 +395,7 @@ TEST_P(AbaqusCDPRealState, FrozenInputReplayAndIndependentDifferences)
       for (const double h : {1e-6, 1e-7, 1e-8, 1e-9, 1e-10})
         for (const auto & mode : {std::string("fixed"), std::string("adaptive")})
         {
-          unsigned int positive_n = 0, negative_n = 0;
+          unsigned int positive_n = 0, negative_n = 0, wide_positive_n = 0, wide_negative_n = 0;
           for (const int side : {1, -1, 2, -2})
           {
             auto target = f.target;
@@ -407,15 +407,22 @@ TEST_P(AbaqusCDPRealState, FrozenInputReplayAndIndependentDifferences)
               out.row("sample", mode, d, h, side, r.n, r.signature, resultValues(r.result));
               if (mode == "adaptive" && side == 1) positive_n = r.n;
               if (mode == "adaptive" && side == -1) negative_n = r.n;
+              if (mode == "adaptive" && side == 2) wide_positive_n = r.n;
+              if (mode == "adaptive" && side == -2) wide_negative_n = r.n;
             }
             catch (const std::exception & e)
             { out.row("sample", mode, d, h, side, 0, "", {}, e.what(), "failed"); }
           }
-          if (!bracket && positive_n && negative_n && positive_n != negative_n)
+          int left_side = -1, right_side = 1;
+          if (wide_negative_n && wide_negative_n != positive_n) left_side = -2;
+          else if (wide_positive_n && wide_positive_n != negative_n) right_side = 2;
+          const auto left_n = left_side == -2 ? wide_negative_n : negative_n;
+          const auto right_n = right_side == 2 ? wide_positive_n : positive_n;
+          if (!bracket && left_n && right_n && left_n != right_n)
           {
             auto plus = f.target, minus = f.target;
             for (unsigned int j = 0; j < 6; ++j)
-            { plus[j] += h*direction[j]; minus[j] -= h*direction[j]; }
+            { plus[j] += right_side*h*direction[j]; minus[j] += left_side*h*direction[j]; }
             bracket = std::make_pair(minus, plus);
           }
         }
@@ -430,6 +437,10 @@ TEST_P(AbaqusCDPRealState, FrozenInputReplayAndIndependentDifferences)
         Tensor mid;
         for (unsigned int j = 0; j < 6; ++j) mid[j] = .5*(left[j]+right[j]);
         const auto m = adaptive(sub, core, table, f, mid, nullptr, -2, 0, 0);
+        auto values = vec(mid);
+        const auto ending = resultValues(m.result);
+        values.insert(values.end(), ending.begin(), ending.end());
+        out.row("selector-bisection", "trial", i, 0, 0, m.n, m.signature, values);
         if (m.n == l.n) { left = mid; l = m; }
         else { right = mid; r = m; }
       }
