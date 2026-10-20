@@ -29,6 +29,20 @@ public:
                                         const Local::State & old, double scale)
   { return core.numericalJacobian(z, strain, old, scale); }
   static double strainScale(const Local & core) { return core._strain_scale; }
+  static std::vector<double> diagnostics(const Local & core, const Local::LocalVector & z,
+                                        const Local::SymmetricTensor & strain,
+                                        const Local::State & old, double scale)
+  {
+    const auto e = core.evaluate(z, strain, old, scale);
+    const auto stress = AbaqusCDPFormula::stressInvariants(e.stress);
+    const auto plastic = AbaqusCDPFormula::stressInvariants(e.plastic_increment);
+    std::vector<double> values{e.tensile_equivalent_plastic_strain, e.compressive_equivalent_plastic_strain,
+                               e.plastic_multiplier, e.tensile_increment, e.compressive_increment};
+    values.insert(values.end(), stress.principal_stress.begin(), stress.principal_stress.end());
+    values.insert(values.end(), plastic.principal_stress.begin(), plastic.principal_stress.end());
+    values.push_back(stress.tension_weight);
+    return values;
+  }
 };
 
 namespace
@@ -206,7 +220,10 @@ Map fixed(const StateCore & core, const CDPMaterialTable & table, const Fixture 
     Tensor strain;
     for (unsigned int j = 0; j < 6; ++j)
       strain[j] = f.old_strain[j] + (double(i) / n) * (target[j] - f.old_strain[j]);
-    auto r = core.integrate(strain, f.dt / n, working);
+    StateCore::Result r;
+    try { r = core.integrate(strain, f.dt / n, working); }
+    catch (const std::exception & e)
+    { throw std::runtime_error("fixed_N=" + std::to_string(n) + ";failed_substep=" + std::to_string(i) + ";" + e.what()); }
     const auto step_sig = signature(table, r, working);
     sig += (i == 1 ? "" : "|") + step_sig;
     if (out) out->row("substate", mode, direction, h, side, n, step_sig, resultValues(r), std::to_string(i));
@@ -219,6 +236,20 @@ Map adaptive(const Sub & sub, const StateCore & core, const CDPMaterialTable & t
              const Fixture & f, const Tensor & target, Output * out, int direction, double h, int side)
 {
   const auto r = sub.integrate(f.old_strain, target, f.dt, f.old);
+  unsigned int starting_n = 1;
+  double increment = 0;
+  for (unsigned int j = 0; j < 6; ++j) increment = std::max(increment, std::abs(target[j] - f.old_strain[j]));
+  while (increment / starting_n > 2.5e-5) starting_n *= 2;
+  for (unsigned int n = starting_n; n < r.accepted_substeps; n *= 2)
+  {
+    try
+    {
+      fixed(core, table, f, target, n);
+      ADD_FAILURE() << "primal adaptive selector skipped a successful fixed partition";
+    }
+    catch (const std::exception & e)
+    { if (out) out->row("replayed-failed-partition", "adaptive", direction, h, side, n, "", {}, e.what(), "failed"); }
+  }
   const auto replay = fixed(core, table, f, target, r.accepted_substeps, out, "adaptive", direction, h, side);
   EXPECT_EQ(resultValues(r.final_result), resultValues(replay.result));
   if (out) out->row("path", "adaptive", direction, h, side, r.accepted_substeps, replay.signature,
@@ -227,7 +258,7 @@ Map adaptive(const Sub & sub, const StateCore & core, const CDPMaterialTable & t
   return {r.final_result, r.accepted_substeps, replay.signature};
 }
 
-void localCheck(const Local & core, const Fixture & f, Output & out)
+void localCheck(const Local & core, const CDPMaterialTable & table, const Fixture & f, Output & out)
 {
   const auto r = AbaqusCDPRealStateTestAccess::residual(core, f.z, f.local_target, f.local_old, f.stress_scale);
   const auto ad = AbaqusCDPRealStateTestAccess::ad(core, f.z, f.local_target, f.local_old, f.stress_scale);
@@ -248,6 +279,15 @@ void localCheck(const Local & core, const Fixture & f, Output & out)
   const auto evaluate = [&](const Local::LocalVector & z) {
     return AbaqusCDPRealStateTestAccess::residual(core, z, f.local_target, f.local_old, f.stress_scale);
   };
+  const auto local_signature = [&](const Local::LocalVector & z, int column, double h, int side) {
+    const auto d = AbaqusCDPRealStateTestAccess::diagnostics(core, z, f.local_target, f.local_old, f.stress_scale);
+    std::string s = tableSegment(table, CDPMaterialTable::Branch::TENSION, d[0]) + ":" +
+                    tableSegment(table, CDPMaterialTable::Branch::COMPRESSION, d[1]);
+    for (unsigned int i = 2; i < 11; ++i) s += ":" + std::to_string(sign(d[i]));
+    out.row("local-diagnostics", "raw", column, h, side, 0, s, d);
+    return s;
+  };
+  const auto center_signature = local_signature(f.z, -1, 0, 0);
   for (unsigned int j = 0; j < 9; ++j)
     for (const auto factor : {1.0, .3, .1, .03, .01})
       for (int restricted = 0; restricted < 2; ++restricted)
@@ -259,6 +299,9 @@ void localCheck(const Local & core, const Fixture & f, Output & out)
         auto plus = f.z, minus = f.z, twice = f.z;
         plus[j] += h; minus[j] -= h; twice[j] += 2*h;
         const auto a = evaluate(plus), b = evaluate(minus), c = evaluate(twice);
+        const auto sa = local_signature(plus, j, h, 1);
+        const auto sb = local_signature(minus, j, h, -1);
+        const auto sc = local_signature(twice, j, h, 2);
         Local::LocalVector central, forward;
         for (unsigned int i = 0; i < 9; ++i)
         {
@@ -266,8 +309,8 @@ void localCheck(const Local & core, const Fixture & f, Output & out)
           forward[i] = (-3*r[i] + 4*a[i] - c[i]) / (2*h);
         }
         const std::string mode = restricted ? "same-side" : "original-scale";
-        out.row("local-fd-central", mode, j, h, 0, 0, "", vec(central));
-        out.row("local-fd-forward", mode, j, h, 1, 0, "", vec(forward));
+        out.row("local-fd-central", mode, j, h, 0, 0, center_signature+"|"+sa+"|"+sb, vec(central));
+        out.row("local-fd-forward", mode, j, h, 1, 0, center_signature+"|"+sa+"|"+sc, vec(forward));
         out.row("local-sample", mode, j, h, 1, 0, "", vec(a));
         out.row("local-sample", mode, j, h, -1, 0, "", vec(b));
       }
@@ -287,7 +330,7 @@ TEST_P(AbaqusCDPRealState, FrozenInputReplayAndIndependentDifferences)
   if (f.has_local)
   {
     EXPECT_EQ(AbaqusCDPRealStateTestAccess::strainScale(local), f.strain_scale);
-    localCheck(local, f, out);
+    localCheck(local, table, f, out);
   }
   Trace trace(out);
   auto * previous = CDPObservation::configured;
