@@ -1,3 +1,4 @@
+#include "CDPObservation.h"
 #include "AbaqusCDPStateIntegrator.h"
 
 #include <algorithm>
@@ -12,6 +13,7 @@ using SymmetricTensor = AbaqusCDPStateIntegrator::SymmetricTensor;
 [[noreturn]] void
 stateIntegrationError(const std::string & message)
 {
+  CDPObservation::values("substep-events", "state_exception", "reason", {}, message);
   throw std::runtime_error("AbaqusCDPStateIntegrator: " + message);
 }
 
@@ -150,6 +152,12 @@ AbaqusCDPStateIntegrator::assembleResult(
   const double dt_over_relaxation_time =
       rate_independent ? 0.0 : time_step / _parameters.relaxation_time;
 
+  CDPObservation::array("substep-events", "state_return", "backbone_plastic", new_state.backbone.plastic_strain);
+  CDPObservation::array("substep-events", "state_return", "viscous_plastic", new_state.viscous_plastic_strain);
+  CDPObservation::array("substep-events", "state_return", "effective_stress", backbone.effective_stress);
+  CDPObservation::array("substep-events", "state_return", "viscous_effective_stress", viscous_effective_stress);
+  CDPObservation::array("substep-events", "state_return", "cauchy_stress", cauchy_stress);
+  CDPObservation::values("substep-events", "state_return", "kappa_DT_DC_backboneDT_backboneDC_dt_mu_stiffness", {new_state.backbone.tensile_equivalent_plastic_strain, new_state.backbone.compressive_equivalent_plastic_strain, new_state.viscous_tension_damage, new_state.viscous_compression_damage, backbone.backbone_tension_damage, backbone.backbone_compression_damage, time_step, _parameters.relaxation_time, damage.stiffness_factor});
   return {backbone,
           viscous_effective_stress,
           cauchy_stress,
@@ -190,6 +198,8 @@ AbaqusCDPStateIntegrator::integrateLinearized(const SymmetricTensor & total_stra
   const auto compression = _backbone_integrator.materialResponse(
       CDPMaterialTable::Branch::COMPRESSION,
       linearized.result.state.backbone.compressive_equivalent_plastic_strain);
+  CDPObservation::values("substep-events", "table_derivatives", "tension_stress_left_right_damage_left_right", {tension.stress.value, tension.stress.left_derivative, tension.stress.right_derivative, tension.damage.value, tension.damage.left_derivative, tension.damage.right_derivative});
+  CDPObservation::values("substep-events", "table_derivatives", "compression_stress_left_right_damage_left_right", {compression.stress.value, compression.stress.left_derivative, compression.stress.right_derivative, compression.damage.value, compression.damage.left_derivative, compression.damage.right_derivative});
 
   SymmetricTensor tension_weight_gradient;
   double stress_scale = 1.0;

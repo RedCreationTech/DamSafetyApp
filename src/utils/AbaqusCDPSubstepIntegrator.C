@@ -1,3 +1,4 @@
+#include "CDPObservation.h"
 #include "AbaqusCDPSubstepIntegrator.h"
 
 #include <algorithm>
@@ -15,6 +16,7 @@ using SymmetricTensor = AbaqusCDPSubstepIntegrator::SymmetricTensor;
 [[noreturn]] void
 substepError(const std::string & message)
 {
+  CDPObservation::values("substep-events", "exception", "reason", {}, message);
   throw std::runtime_error("AbaqusCDPSubstepIntegrator: " + message);
 }
 
@@ -206,6 +208,16 @@ AbaqusCDPSubstepIntegrator::integrateLinearized(const SymmetricTensor & old_tota
   while (substeps <= _parameters.maximum_substeps)
   {
     ++attempted_partitions;
+    if (CDPObservation::active())
+    {
+      CDPObservation::context.partition = attempted_partitions;
+      CDPObservation::context.subdivisions = substeps;
+      CDPObservation::context.substep = 0;
+      CDPObservation::values("substep-events", "partition_enter", "N_dt_proactive", {static_cast<double>(substeps), time_step, proactively_partitioned ? 1.0 : 0.0});
+      CDPObservation::array("substep-events", "partition_enter", "old_backbone_plastic", old_state.backbone.plastic_strain);
+      CDPObservation::array("substep-events", "partition_enter", "old_viscous_plastic", old_state.viscous_plastic_strain);
+      CDPObservation::values("substep-events", "partition_enter", "old_kappa_DT_DC", {old_state.backbone.tensile_equivalent_plastic_strain, old_state.backbone.compressive_equivalent_plastic_strain, old_state.viscous_tension_damage, old_state.viscous_compression_damage});
+    }
     State working_state = old_state;
     std::optional<AbaqusCDPStateIntegrator::LinearizedResult> final_result;
     std::array<std::array<double, AbaqusCDPStateIntegrator::state_size>, 6>
@@ -223,6 +235,9 @@ AbaqusCDPSubstepIntegrator::integrateLinearized(const SymmetricTensor & old_tota
     {
       const double fraction = static_cast<double>(i) / substeps;
       const auto target = substepInterpolate(old_total_strain, total_increment, fraction);
+      if (CDPObservation::active()) CDPObservation::context.substep = i;
+      CDPObservation::array("substep-events", "substep_enter", "target_strain", target);
+      CDPObservation::values("substep-events", "substep_enter", "dt", {time_step / static_cast<double>(substeps)});
       try
       {
         auto step_result = _state_integrator.integrateLinearized(
@@ -272,6 +287,7 @@ AbaqusCDPSubstepIntegrator::integrateLinearized(const SymmetricTensor & old_tota
       {
         partition_succeeded = false;
         last_error = error.what();
+        CDPObservation::values("substep-events", "partition_failed", "reason", {}, error.what());
         last_failed_substep = i;
         last_partition = substeps;
         break;
@@ -280,6 +296,8 @@ AbaqusCDPSubstepIntegrator::integrateLinearized(const SymmetricTensor & old_tota
 
     if (partition_succeeded && final_result)
     {
+      CDPObservation::matrix("algorithmic-tangent", "material_return", "column_major_6x6", tangent);
+      CDPObservation::values("substep-events", "partition_accepted", "N_cutbacks", {static_cast<double>(substeps), static_cast<double>(cutback_count)});
       Result result{std::move(final_result->result),
                     substeps,
                     cutback_count,

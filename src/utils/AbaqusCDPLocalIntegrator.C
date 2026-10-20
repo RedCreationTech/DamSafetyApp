@@ -1,3 +1,4 @@
+#include "CDPObservation.h"
 #include "AbaqusCDPLocalIntegrator.h"
 
 #include <algorithm>
@@ -264,6 +265,7 @@ dualYieldFunction(const DualTensor & stress,
 [[noreturn]] void
 integrationError(const std::string & message)
 {
+  CDPObservation::values("local-newton", "exception", "reason", {}, message);
   throw std::runtime_error("AbaqusCDPLocalIntegrator: " + message);
 }
 
@@ -688,6 +690,14 @@ AbaqusCDPLocalIntegrator::integrate(const SymmetricTensor & total_strain,
       old_state.compressive_equivalent_plastic_strain < 0.0)
     integrationError("old equivalent plastic strains must be nonnegative");
 
+  if (CDPObservation::active())
+  {
+    CDPObservation::context.local_solve = ++CDPObservation::sequence;
+    CDPObservation::context.iteration = 0;
+    CDPObservation::array("local-newton", "enter", "total_strain", total_strain);
+    CDPObservation::array("local-newton", "enter", "old_plastic", old_state.plastic_strain);
+    CDPObservation::values("local-newton", "enter", "old_kappa", {old_state.tensile_equivalent_plastic_strain, old_state.compressive_equivalent_plastic_strain});
+  }
   const auto trial_stress = elasticStress(subtract(total_strain, old_state.plastic_strain));
   const auto old_tension = _table.effectiveStrengthByEquivalentPlasticStrain(
       CDPMaterialTable::Branch::TENSION, old_state.tensile_equivalent_plastic_strain);
@@ -701,6 +711,7 @@ AbaqusCDPLocalIntegrator::integrate(const SymmetricTensor & total_strain,
       old_tension.value,
       _parameters.biaxial_to_uniaxial_compression_ratio,
       _parameters.tensile_meridian_ratio);
+  CDPObservation::values("local-newton", "trial", "scales_yield_elastic", {stress_scale, _strain_scale, trial_yield, trial_yield <= _parameters.residual_tolerance * stress_scale ? 1.0 : 0.0});
   if (trial_yield <= _parameters.residual_tolerance * stress_scale)
     return {trial_stress,
             old_state,
@@ -742,6 +753,8 @@ AbaqusCDPLocalIntegrator::integrate(const SymmetricTensor & total_strain,
 
   Evaluation current = evaluate(unknown, total_strain, old_state, stress_scale);
   double residual_norm = infinityNorm(current.residual);
+  CDPObservation::array("local-newton", "initial", "unknown", unknown);
+  CDPObservation::array("local-newton", "initial", "residual", current.residual);
   const auto currentBranch = [&](const Evaluation & evaluation) {
     const double tolerance = 10.0 * std::numeric_limits<double>::epsilon() * _strain_scale;
     if (evaluation.tensile_increment <= tolerance)
@@ -760,6 +773,9 @@ AbaqusCDPLocalIntegrator::integrate(const SymmetricTensor & total_strain,
          residual_norm > _parameters.residual_tolerance;
        ++iterations)
   {
+    if (CDPObservation::active()) CDPObservation::context.iteration = iterations + 1;
+    CDPObservation::array("local-newton", "iterate", "unknown", unknown);
+    CDPObservation::array("local-newton", "iterate", "residual", current.residual);
     LocalVector right_hand_side;
     for (std::size_t i = 0; i < local_size; ++i)
       right_hand_side[i] = -current.residual[i];
@@ -772,10 +788,17 @@ AbaqusCDPLocalIntegrator::integrate(const SymmetricTensor & total_strain,
           candidate_unknown[i] += line_search * increment[i];
         if (candidate_unknown[6] < 0.0 || candidate_unknown[7] < 0.0 ||
             candidate_unknown[8] < 0.0)
+        {
+          CDPObservation::array("local-newton", "skip_negative", "unknown", candidate_unknown);
+          CDPObservation::values("local-newton", "skip_negative", "line_search", {line_search});
           continue;
+        }
 
         auto candidate = evaluate(candidate_unknown, total_strain, old_state, stress_scale);
         const double candidate_norm = infinityNorm(candidate.residual);
+        CDPObservation::array("local-newton", "candidate", "unknown", candidate_unknown);
+        CDPObservation::array("local-newton", "candidate", "residual", candidate.residual);
+        CDPObservation::values("local-newton", "candidate", "line_search_norm_accept", {line_search, candidate_norm, std::isfinite(candidate_norm) && candidate_norm < residual_norm ? 1.0 : 0.0});
         if (std::isfinite(candidate_norm) && candidate_norm < residual_norm)
         {
           unknown = candidate_unknown;
@@ -795,20 +818,24 @@ AbaqusCDPLocalIntegrator::integrate(const SymmetricTensor & total_strain,
         const auto automatic = automaticDifferentiationJacobian(
             unknown, total_strain, old_state, stress_scale);
         ++automatic_jacobian_evaluations;
+        CDPObservation::matrix("local-jacobian", "AD_Newton", "row_major_9x9", automatic);
         const auto factorization = factorLinearSystem(automatic);
         ++local_factorizations;
         accepted = try_increment(solveLinearSystem(factorization, right_hand_side));
         ++local_backsolves;
       }
-      catch (const std::runtime_error &)
+      catch (const std::runtime_error & error)
       {
+        CDPObservation::values("local-newton", "AD_exception", "reason", {}, error.what());
         accepted = false;
       }
       if (!accepted)
       {
         ++jacobian_fallbacks;
+        CDPObservation::values("local-newton", "AD_to_FD", "fallback", {static_cast<double>(jacobian_fallbacks)});
         const auto reference = numericalJacobian(unknown, total_strain, old_state, stress_scale);
         ++finite_difference_jacobian_evaluations;
+        CDPObservation::matrix("local-jacobian", "FD_fallback_Newton", "row_major_9x9", reference);
         const auto factorization = factorLinearSystem(reference);
         ++local_factorizations;
         accepted = try_increment(solveLinearSystem(factorization, right_hand_side));
@@ -819,6 +846,7 @@ AbaqusCDPLocalIntegrator::integrate(const SymmetricTensor & total_strain,
     {
       const auto reference = numericalJacobian(unknown, total_strain, old_state, stress_scale);
       ++finite_difference_jacobian_evaluations;
+      CDPObservation::matrix("local-jacobian", "FD_Newton", "row_major_9x9", reference);
       const auto factorization = factorLinearSystem(reference);
       ++local_factorizations;
       accepted = try_increment(solveLinearSystem(factorization, right_hand_side));
@@ -837,6 +865,9 @@ AbaqusCDPLocalIntegrator::integrate(const SymmetricTensor & total_strain,
     }
   }
 
+  CDPObservation::array("local-newton", "terminal", "unknown", unknown);
+  CDPObservation::array("local-newton", "terminal", "residual", current.residual);
+  CDPObservation::values("local-newton", "terminal", "norm_yield_multiplier", {residual_norm, current.yield, current.plastic_multiplier});
   if (residual_norm > _parameters.residual_tolerance)
   {
     std::ostringstream message;
@@ -919,6 +950,8 @@ AbaqusCDPLocalIntegrator::integrateLinearized(const SymmetricTensor & total_stra
                 old_state.compressive_equivalent_plastic_strain) /
                _strain_scale;
   const auto jacobian = localJacobian(unknown, total_strain, old_state, stress_scale);
+  CDPObservation::array("local-jacobian", "root_linearization", "unknown", unknown);
+  CDPObservation::matrix("local-jacobian", _parameters.use_automatic_differentiation_jacobian ? "AD_root_linearization" : "FD_root_linearization", "row_major_9x9", jacobian);
   if (_parameters.use_automatic_differentiation_jacobian)
     ++linearized.result.automatic_jacobian_evaluations;
   else

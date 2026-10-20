@@ -1,3 +1,5 @@
+#include "CDPObservation.h"
+#include "libmesh/elem.h"
 #include "AbaqusCDPStressUpdate.h"
 
 #include "MooseException.h"
@@ -267,7 +269,7 @@ AbaqusCDPStressUpdate::storeState(const AbaqusCDPSubstepIntegrator::LinearizedRe
 void
 AbaqusCDPStressUpdate::updateState(RankTwoTensor & strain_increment,
                                    RankTwoTensor & inelastic_strain_increment,
-                                   const RankTwoTensor & /*rotation_increment*/,
+                                   const RankTwoTensor & rotation_increment,
                                    RankTwoTensor & stress_new,
                                    const RankTwoTensor & /*stress_old*/,
                                    const RankFourTensor & /*elasticity_tensor*/,
@@ -275,7 +277,9 @@ AbaqusCDPStressUpdate::updateState(RankTwoTensor & strain_increment,
                                    const bool compute_full_tangent_operator,
                                    RankFourTensor & tangent_operator)
 {
+  CDPObservation::PointScope observation(_current_elem->id(), _qp);
   const CoreState old_state = oldState();
+  if (CDPObservation::active()) CDPObservation::array("qp-updates", "material_enter", "rotation_increment", toArray(rotation_increment));
   const auto old_elastic_strain = toArray(elastic_strain_old);
   SymmetricTensor old_total_strain;
   SymmetricTensor new_total_strain;
@@ -286,6 +290,13 @@ AbaqusCDPStressUpdate::updateState(RankTwoTensor & strain_increment,
     new_total_strain[i] = old_total_strain[i] + increment[i];
   }
 
+  CDPObservation::array("qp-updates", "material_enter", "old_total_strain", old_total_strain);
+  CDPObservation::array("qp-updates", "material_enter", "new_total_strain", new_total_strain);
+  CDPObservation::array("qp-updates", "material_enter", "raw_increment", increment);
+  CDPObservation::array("qp-updates", "material_enter", "old_elastic_strain", old_elastic_strain);
+  CDPObservation::array("qp-updates", "material_enter", "old_backbone_plastic", old_state.backbone.plastic_strain);
+  CDPObservation::array("qp-updates", "material_enter", "old_viscous_plastic", old_state.viscous_plastic_strain);
+  CDPObservation::values("qp-updates", "material_enter", "old_kappa_DT_DC_dt_full_tangent", {old_state.backbone.tensile_equivalent_plastic_strain, old_state.backbone.compressive_equivalent_plastic_strain, old_state.viscous_tension_damage, old_state.viscous_compression_damage, _dt, compute_full_tangent_operator ? 1.0 : 0.0});
   try
   {
     const auto integration_start = std::chrono::steady_clock::now();
@@ -307,9 +318,11 @@ AbaqusCDPStressUpdate::updateState(RankTwoTensor & strain_increment,
     if (compute_full_tangent_operator)
       assignTangent(result.algorithmic_tangent, tangent_operator);
     storeState(result, integration_microseconds);
+    CDPObservation::values("qp-updates", "material_success", "DT_DC_kappaT_kappaC", {_damage_t[_qp], _damage_c[_qp], _tensile_equivalent_plastic_strain[_qp], _compressive_equivalent_plastic_strain[_qp]});
   }
   catch (const std::exception & error)
   {
+    CDPObservation::values("qp-updates", "material_exception", "reason", {}, error.what());
     throw MooseException(error.what());
   }
 }
