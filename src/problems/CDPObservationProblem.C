@@ -13,6 +13,7 @@
 #include <iomanip>
 #include <sstream>
 #include <set>
+#include <limits>
 registerMooseObject("DamSafetyApp", CDPObservationProblem);
 namespace
 {
@@ -174,6 +175,10 @@ void CDPObservationProblem::history(const char * event)
   {
     const auto & sys=system->system();
     const auto * u=system->currentSolution();
+    // Mutable solutionOld/Older accessors can allocate collective vectors.
+    const SystemBase & stored=*system;
+    const auto * old=stored.hasSolutionState(1) ? &stored.solutionState(1) : nullptr;
+    const auto * older=stored.hasSolutionState(2) ? &stored.solutionState(2) : nullptr;
     for(const auto * node:mesh().getMesh().local_node_ptr_range())
     {
       bool selected=false;
@@ -188,7 +193,7 @@ void CDPObservationProblem::history(const char * event)
         if(!node->n_dofs(sys.number(),var)) continue;
         const auto dof=node->dof_number(sys.number(),var,0);
         if(dof<u->first_local_index() || dof>=u->last_local_index()) continue;
-        write("history-events",event,name.c_str(),{static_cast<double>(node->id()),static_cast<double>(dof),(*u)(dof),system->solutionOld()(dof),system->solutionOlder()(dof)},"node_dof_current_old_older");
+        write("history-events",event,name.c_str(),{static_cast<double>(node->id()),static_cast<double>(dof),(*u)(dof),old ? (*old)(dof) : std::numeric_limits<double>::quiet_NaN(),older ? (*older)(dof) : std::numeric_limits<double>::quiet_NaN()},std::string("node_dof_current_old_older; ")+(old ? "old_allocated; " : "old_unallocated; ")+(older ? "older_allocated" : "older_unallocated"));
       }
     }
   }
