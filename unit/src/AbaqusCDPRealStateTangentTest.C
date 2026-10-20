@@ -452,6 +452,18 @@ TEST_P(AbaqusCDPRealState, FrozenInputReplayAndIndependentDifferences)
         const auto ending = resultValues(map.result);
         values.insert(values.end(), ending.begin(), ending.end());
         out.row("selector-bracket", "12-bisections", -2, 0, side, map.n, map.signature, values);
+        for (const auto n : {l.n, r.n})
+          try
+          {
+            const auto alternate = fixed(core, table, f, target, n);
+            auto paired = vec(target);
+            const auto updated = resultValues(alternate.result);
+            paired.insert(paired.end(), updated.begin(), updated.end());
+            out.row("selector-fixed-counterfactual", "same-input", -2, 0, side,
+                    n, alternate.signature, paired);
+          }
+          catch (const std::exception & e)
+          { out.row("selector-fixed-counterfactual", "same-input", -2, 0, side, n, "", {}, e.what(), "failed"); }
       }
     }
     auto plus = f.target, minus = f.target;
