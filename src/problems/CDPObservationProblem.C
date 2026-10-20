@@ -7,6 +7,7 @@
 #include "libmesh/elem.h"
 #include "libmesh/numeric_vector.h"
 #include "libmesh/petsc_nonlinear_solver.h"
+#include "libmesh/petsc_vector.h"
 #include <cmath>
 #include <chrono>
 #include <iomanip>
@@ -85,6 +86,7 @@ void CDPObservationProblem::initialSetup()
       write("probe-map", "vertex", "node_id_x_y_z", {static_cast<double>(e->node_id(i)),e->point(i)(0),e->point(i)(1),e->point(i)(2)}, {});
   }
   _element=0;
+  attemptEvent("initial_state");
   status();
 }
 bool CDPObservationProblem::window() const { return _enabled && time()>=_start-1e-9 && time()<=_end+1e-9; }
@@ -113,14 +115,14 @@ void CDPObservationProblem::write(const char * stream, const char * event, const
     if (!f.is_open())
     {
       f.open(_prefix+"-"+stream+"-rank"+std::to_string(processor_id())+".csv",std::ios::out);
-      f << "record,time,eq_time,dt,dt_old,step,attempt,evaluation,kind,element,source_element,qp,call,partition,N,substep,local_solve,local_iteration,event,field,values,note\n";
+      f << "record,time,eq_time,dt,dt_old,step,attempt,evaluation,global_iteration,kind,element,source_element,qp,call,partition,N,substep,local_solve,local_iteration,event,field,values,note\n";
     }
     std::ostringstream a;
     a << std::setprecision(17);
     for (unsigned int i=0;i<v.size();++i) { if(i) a << ' '; a << v[i]; }
     const auto & c=CDPObservation::context;
     std::ostringstream row;
-    row << std::setprecision(17) << ++_record << ',' << time() << ',' << time()-_offset << ',' << dt() << ',' << dtOld() << ',' << timeStep() << ',' << _attempt << ',' << _evaluation << ',' << _kind << ',' << _element << ',' << (_targets.count(_element)?_targets.at(_element):0) << ',' << _qp << ',' << _call << ',' << c.partition << ',' << c.subdivisions << ',' << c.substep << ',' << c.local_solve << ',' << c.iteration << ',' << event << ',' << name << ',' << quoted(a.str()) << ',' << quoted(note) << '\n';
+    row << std::setprecision(17) << ++_record << ',' << time() << ',' << time()-_offset << ',' << dt() << ',' << dtOld() << ',' << timeStep() << ',' << _attempt << ',' << _evaluation << ',' << _global_iteration << ',' << _kind << ',' << _element << ',' << (_targets.count(_element)?_targets.at(_element):0) << ',' << _qp << ',' << _call << ',' << c.partition << ',' << c.subdivisions << ',' << c.substep << ',' << c.local_solve << ',' << c.iteration << ',' << event << ',' << name << ',' << quoted(a.str()) << ',' << quoted(note) << '\n';
     const auto text=row.str(); f << text; _bytes+=text.size(); ++_counts[stream];
     if (!f) _io_failed=true;
     if (std::string(event).find("exception")!=std::string::npos) f.flush();
@@ -163,10 +165,11 @@ void CDPObservationProblem::history(const char * event)
             if(scalar) values.push_back((*scalar)[qp]);
             else for(unsigned int c=0;c<9;++c) values.push_back((*tensor)[qp](c/3,c%3));
             const auto field="state"+std::to_string(state)+"_side"+std::to_string(side.first)+"_"+*name;
-            write("history-events",event,field.c_str(),values,{});
+            write("history-events",event,field.c_str(),values,state==0 ? "stored_current_unverified" : "stored_accepted_history");
           }
         }
     }
+  _element=0; _qp=0;
   for (auto * system : {static_cast<SystemBase *>(&getNonlinearSystem(0)),static_cast<SystemBase *>(&getAuxiliarySystem())})
   {
     const auto & sys=system->system();
@@ -194,7 +197,7 @@ void CDPObservationProblem::history(const char * event)
 void CDPObservationProblem::attemptEvent(const char * event)
 {
   if(!_enabled) return;
-  if(std::string(event)=="attempt_enter") ++_attempt;
+  if(std::string(event)=="attempt_enter") { ++_attempt; _global_iteration=-1; }
   _kind="event"; _element=0; _qp=0; CDPObservation::context={};
   write("attempt-events",event,"time",{time()},{});
   if(window() || std::abs(time()-(_offset+1.680))<1e-9 || std::abs(time()-_offset)<1e-9) history(event);
@@ -221,6 +224,12 @@ void CDPObservationProblem::computeResidual(const NumericVector<Number> & x, Num
   {
     auto * solver=dynamic_cast<libMesh::PetscNonlinearSolver<Number> *>(getNonlinearSystem(n).nonlinearSolver());
     if(!solver || SNESMonitorSet(solver->snes(),monitor,this,nullptr)) mooseError("Cannot attach observation SNES monitor");
+    PetscInt iteration; Vec accepted;
+    if (SNESGetIterationNumber(solver->snes(),&iteration) || SNESGetSolution(solver->snes(),&accepted)) mooseError("Cannot read observation solver context");
+    _global_iteration=iteration;
+    const auto * vector=dynamic_cast<const libMesh::PetscVector<Number> *>(&x);
+    _kind=vector && vector->vec()==accepted ? "residual_solution_vector" : "residual_trial_vector";
+    trialVector(x);
   }
   FEProblem::computeResidual(x,r,n);
   if(window()) { _element=0; write("attempt-events","residual_complete","l2_norm",{r.l2_norm()},{}); }
@@ -236,7 +245,29 @@ PetscErrorCode CDPObservationProblem::monitor(SNES snes,PetscInt iteration,Petsc
   auto & p=*static_cast<CDPObservationProblem *>(context);
   if(!p.window()) return PETSC_SUCCESS;
   SNESConvergedReason reason; PetscCall(SNESGetConvergedReason(snes,&reason));
+  p._global_iteration=iteration;
   p._element=0;
   p.write("attempt-events","SNES_accepted_iterate","iteration_norm_reason",{static_cast<double>(iteration),norm,static_cast<double>(reason)},{});
   return PETSC_SUCCESS;
+}
+
+void CDPObservationProblem::trialVector(const NumericVector<Number> & x)
+{
+  const auto & sys=getNonlinearSystem(0).system();
+  const auto & xy=getParam<std::vector<Real>>("observation_vertices");
+  _element=0; _qp=0;
+  for (const auto * node:mesh().getMesh().local_node_ptr_range())
+  {
+    bool selected=false;
+    for(unsigned int j=0;j<xy.size();j+=2)
+      if(std::abs((*node)(0)-xy[j])<1e-7 && std::abs((*node)(1)-xy[j+1])<1e-7) selected=true;
+    if(!selected) continue;
+    for(unsigned int var=0;var<sys.n_vars();++var)
+    {
+      if(!node->n_dofs(sys.number(),var)) continue;
+      const auto dof=node->dof_number(sys.number(),var,0);
+      if(dof>=x.first_local_index() && dof<x.last_local_index())
+        write("attempt-events","residual_input",sys.variable_name(var).c_str(),{static_cast<double>(node->id()),static_cast<double>(dof),x(dof)},"node_dof_trial_value; vector identity is not alone proof of line-search acceptance");
+    }
+  }
 }

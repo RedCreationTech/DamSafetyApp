@@ -868,6 +868,7 @@ AbaqusCDPLocalIntegrator::integrate(const SymmetricTensor & total_strain,
   CDPObservation::array("local-newton", "terminal", "unknown", unknown);
   CDPObservation::array("local-newton", "terminal", "residual", current.residual);
   CDPObservation::values("local-newton", "terminal", "norm_yield_multiplier", {residual_norm, current.yield, current.plastic_multiplier});
+  if (CDPObservation::active()) CDPObservation::values("local-newton", "terminal", "branch_tensile_compressive_increments", {static_cast<double>(currentBranch(current)),current.tensile_increment,current.compressive_increment});
   if (residual_norm > _parameters.residual_tolerance)
   {
     std::ostringstream message;

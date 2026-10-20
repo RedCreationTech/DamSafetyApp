@@ -23,6 +23,7 @@ public:
 private:
   bool window() const;
   void history(const char *);
+  void trialVector(const NumericVector<Number> &);
   void status() noexcept;
   const bool _enabled;
   const Real _start, _end, _offset;
@@ -38,5 +39,6 @@ private:
   std::uint64_t _element = 0;
   unsigned int _qp = 0;
   std::string _kind = "event";
+  int _global_iteration = -1;
   bool _truncated = false, _io_failed = false, _history_incomplete = false;
 };
