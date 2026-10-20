@@ -680,6 +680,14 @@ AbaqusCDPLocalIntegrator::Result
 AbaqusCDPLocalIntegrator::integrate(const SymmetricTensor & total_strain,
                                     const State & old_state) const
 {
+  if (CDPObservation::active())
+  {
+    CDPObservation::context.local_solve = ++CDPObservation::sequence;
+    CDPObservation::context.iteration = 0;
+    CDPObservation::array("local-newton", "enter", "total_strain", total_strain);
+    CDPObservation::array("local-newton", "enter", "old_plastic", old_state.plastic_strain);
+    CDPObservation::values("local-newton", "enter", "old_kappa", {old_state.tensile_equivalent_plastic_strain, old_state.compressive_equivalent_plastic_strain});
+  }
   if (!finiteTensor(total_strain) || !finiteTensor(old_state.plastic_strain))
     integrationError("total or plastic strain contains a non-finite component");
   requireIntegratorFinite(old_state.tensile_equivalent_plastic_strain,
@@ -690,14 +698,6 @@ AbaqusCDPLocalIntegrator::integrate(const SymmetricTensor & total_strain,
       old_state.compressive_equivalent_plastic_strain < 0.0)
     integrationError("old equivalent plastic strains must be nonnegative");
 
-  if (CDPObservation::active())
-  {
-    CDPObservation::context.local_solve = ++CDPObservation::sequence;
-    CDPObservation::context.iteration = 0;
-    CDPObservation::array("local-newton", "enter", "total_strain", total_strain);
-    CDPObservation::array("local-newton", "enter", "old_plastic", old_state.plastic_strain);
-    CDPObservation::values("local-newton", "enter", "old_kappa", {old_state.tensile_equivalent_plastic_strain, old_state.compressive_equivalent_plastic_strain});
-  }
   const auto trial_stress = elasticStress(subtract(total_strain, old_state.plastic_strain));
   const auto old_tension = _table.effectiveStrengthByEquivalentPlasticStrain(
       CDPMaterialTable::Branch::TENSION, old_state.tensile_equivalent_plastic_strain);

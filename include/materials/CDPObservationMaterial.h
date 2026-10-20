@@ -11,5 +11,5 @@ public:
 protected:
   void computeQpProperties() override;
   const MaterialProperty<RankFourTensor> & _tangent;
-  const MaterialProperty<RankTwoTensor> & _stress, & _strain;
+  const MaterialProperty<RankTwoTensor> & _stress, & _strain, & _F;
 };

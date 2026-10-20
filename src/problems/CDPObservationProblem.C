@@ -8,8 +8,10 @@
 #include "libmesh/numeric_vector.h"
 #include "libmesh/petsc_nonlinear_solver.h"
 #include <cmath>
+#include <chrono>
 #include <iomanip>
 #include <sstream>
+#include <set>
 registerMooseObject("DamSafetyApp", CDPObservationProblem);
 namespace
 {
@@ -49,11 +51,13 @@ CDPObservationProblem::~CDPObservationProblem()
 }
 void CDPObservationProblem::initialSetup()
 {
-  FEProblem::initialSetup();
-  if (!_enabled) return;
+  if (!_enabled) { FEProblem::initialSetup(); return; }
   const auto & labels = getParam<std::vector<unsigned int>>("observation_labels");
   const auto & xy = getParam<std::vector<Real>>("observation_vertices");
   if (labels.empty() || xy.size() != labels.size()*8) paramError("observation_vertices", "Expected eight coordinates per label");
+  if (std::set<unsigned int>(labels.begin(),labels.end()).size()!=labels.size()) paramError("observation_labels","Labels must be unique");
+  for (const auto v:xy) if (!std::isfinite(v)) paramError("observation_vertices","Coordinates must be finite");
+  // The ODB geometry export differs from original INP rounding by < 5e-8 m.
   for (unsigned int k=0; k<labels.size(); ++k)
   {
     unsigned int matches=0;
@@ -63,8 +67,8 @@ void CDPObservationProblem::initialSetup()
       unsigned int hit=0;
       for (unsigned int i=0;i<4;++i)
         for (unsigned int j=0;j<4;++j)
-          if (std::abs(e->point(i)(0)-xy[k*8+j*2])<1e-8 &&
-              std::abs(e->point(i)(1)-xy[k*8+j*2+1])<1e-8) ++hit;
+          if (std::abs(e->point(i)(0)-xy[k*8+j*2])<1e-7 &&
+              std::abs(e->point(i)(1)-xy[k*8+j*2+1])<1e-7) ++hit;
       if (hit==4) { ++matches; _targets.emplace(e->id(),labels[k]); }
     }
     comm().sum(matches);
@@ -72,6 +76,7 @@ void CDPObservationProblem::initialSetup()
   }
   if (CDPObservation::configured) mooseError("Only one observation problem per process is supported");
   CDPObservation::configured = this;
+  FEProblem::initialSetup();
   for (const auto & target : _targets)
   {
     _element=target.first;
@@ -101,6 +106,7 @@ void CDPObservationProblem::write(const char * stream, const char * event, const
   try
   {
     if (!_enabled || _io_failed) return;
+    const auto write_start=std::chrono::steady_clock::now();
     const bool light=std::string(stream)=="attempt-events";
     if (!light && (_truncated || _bytes>=_limit)) { _truncated=true; return; }
     auto & f=_streams[stream];
@@ -115,9 +121,10 @@ void CDPObservationProblem::write(const char * stream, const char * event, const
     const auto & c=CDPObservation::context;
     std::ostringstream row;
     row << std::setprecision(17) << ++_record << ',' << time() << ',' << time()-_offset << ',' << dt() << ',' << dtOld() << ',' << timeStep() << ',' << _attempt << ',' << _evaluation << ',' << _kind << ',' << _element << ',' << (_targets.count(_element)?_targets.at(_element):0) << ',' << _qp << ',' << _call << ',' << c.partition << ',' << c.subdivisions << ',' << c.substep << ',' << c.local_solve << ',' << c.iteration << ',' << event << ',' << name << ',' << quoted(a.str()) << ',' << quoted(note) << '\n';
-    const auto text=row.str(); f << text; _bytes+=text.size();
+    const auto text=row.str(); f << text; _bytes+=text.size(); ++_counts[stream];
     if (!f) _io_failed=true;
     if (std::string(event).find("exception")!=std::string::npos) f.flush();
+    _write_microseconds+=std::chrono::duration<double,std::micro>(std::chrono::steady_clock::now()-write_start).count();
   }
   catch (...) { _io_failed=true; }
 }
@@ -127,7 +134,10 @@ void CDPObservationProblem::status() noexcept
   {
     for(auto & f:_streams) f.second.flush();
     std::ofstream f(_prefix+"-status-rank"+std::to_string(processor_id())+".json");
-    f << "{\"schema\":\"ds04g-observation-v1\",\"rank\":" << processor_id() << ",\"records\":" << _record << ",\"bytes\":" << _bytes << ",\"capture_truncated\":" << (_truncated?"true":"false") << ",\"io_failed\":" << (_io_failed?"true":"false") << ",\"history_incomplete\":" << (_history_incomplete?"true":"false") << ",\"target_elements_on_rank\":" << _targets.size() << "}\n";
+    f << "{\"schema\":\"ds04g-observation-v1\",\"rank\":" << processor_id() << ",\"records\":" << _record << ",\"bytes\":" << _bytes << ",\"capture_truncated\":" << (_truncated?"true":"false") << ",\"io_failed\":" << (_io_failed?"true":"false") << ",\"history_incomplete\":" << (_history_incomplete?"true":"false") << ",\"target_elements_on_rank\":" << _targets.size() << ",\"write_microseconds\":" << _write_microseconds << ",\"streams\":{";
+    bool comma=false;
+    for(const auto & item:_counts) { if(comma) f << ','; comma=true; f << quoted(item.first) << ':' << item.second; }
+    f << "}}\n";
   } catch (...) { _io_failed=true; }
 }
 void CDPObservationProblem::history(const char * event)
@@ -166,7 +176,7 @@ void CDPObservationProblem::history(const char * event)
       bool selected=false;
       const auto & xy=getParam<std::vector<Real>>("observation_vertices");
       for(unsigned int j=0;j<xy.size();j+=2)
-        if(std::abs((*node)(0)-xy[j])<1e-8 && std::abs((*node)(1)-xy[j+1])<1e-8) selected=true;
+        if(std::abs((*node)(0)-xy[j])<1e-7 && std::abs((*node)(1)-xy[j+1])<1e-7) selected=true;
       if(!selected) continue;
       for(unsigned int var=0;var<sys.n_vars();++var)
       {

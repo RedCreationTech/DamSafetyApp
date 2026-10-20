@@ -30,6 +30,8 @@ private:
   const std::uint64_t _limit;
   std::map<std::uint64_t, unsigned int> _targets;
   std::map<std::string, std::ofstream> _streams;
+  std::map<std::string, std::uint64_t> _counts;
+  double _write_microseconds = 0.;
   std::map<std::pair<std::uint64_t, unsigned int>, std::pair<std::uint64_t, std::uint64_t>> _last_call;
   std::uint64_t _next_call = 0;
   std::uint64_t _attempt = 0, _evaluation = 0, _call = 0, _record = 0, _bytes = 0;
