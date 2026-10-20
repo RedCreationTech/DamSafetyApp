@@ -375,6 +375,7 @@ TEST_P(AbaqusCDPRealState, FrozenInputReplayAndIndependentDifferences)
   // Only the four accepted points are full-map derivative targets.
   if (!f.has_local)
   {
+    std::optional<std::pair<Tensor, Tensor>> bracket;
     for (const unsigned int n : {1u, 8u})
       if (f.id == "F1" || f.id == "F2")
         try
@@ -393,6 +394,8 @@ TEST_P(AbaqusCDPRealState, FrozenInputReplayAndIndependentDifferences)
       out.row("direction", "unit", d, 0, 0, f.N, "", vec(direction));
       for (const double h : {1e-6, 1e-7, 1e-8, 1e-9, 1e-10})
         for (const auto & mode : {std::string("fixed"), std::string("adaptive")})
+        {
+          unsigned int positive_n = 0, negative_n = 0;
           for (const int side : {1, -1, 2, -2})
           {
             auto target = f.target;
@@ -402,10 +405,43 @@ TEST_P(AbaqusCDPRealState, FrozenInputReplayAndIndependentDifferences)
               const auto r = mode == "fixed" ? fixed(core, table, f, target, f.N, &out, mode, d, h, side)
                                              : adaptive(sub, core, table, f, target, &out, d, h, side);
               out.row("sample", mode, d, h, side, r.n, r.signature, resultValues(r.result));
+              if (mode == "adaptive" && side == 1) positive_n = r.n;
+              if (mode == "adaptive" && side == -1) negative_n = r.n;
             }
             catch (const std::exception & e)
             { out.row("sample", mode, d, h, side, 0, "", {}, e.what(), "failed"); }
           }
+          if (!bracket && positive_n && negative_n && positive_n != negative_n)
+          {
+            auto plus = f.target, minus = f.target;
+            for (unsigned int j = 0; j < 6; ++j)
+            { plus[j] += h*direction[j]; minus[j] -= h*direction[j]; }
+            bracket = std::make_pair(minus, plus);
+          }
+        }
+    }
+    if (bracket)
+    {
+      auto left = bracket->first, right = bracket->second;
+      auto l = adaptive(sub, core, table, f, left, nullptr, -2, 0, 0);
+      auto r = adaptive(sub, core, table, f, right, nullptr, -2, 0, 0);
+      for (unsigned int i = 0; i < 12; ++i)
+      {
+        Tensor mid;
+        for (unsigned int j = 0; j < 6; ++j) mid[j] = .5*(left[j]+right[j]);
+        const auto m = adaptive(sub, core, table, f, mid, nullptr, -2, 0, 0);
+        if (m.n == l.n) { left = mid; l = m; }
+        else { right = mid; r = m; }
+      }
+      for (const int side : {-1, 1})
+      {
+        const auto & target = side == -1 ? left : right;
+        const auto & map = side == -1 ? l : r;
+        auto values = vec(target);
+        const auto ending = resultValues(map.result);
+        values.insert(values.end(), ending.begin(), ending.end());
+        out.row("selector-bracket", "12-bisections", -2, 0, side, map.n, map.signature, values);
+      }
     }
     auto plus = f.target, minus = f.target;
     plus[0] += 1e-8; minus[0] -= 1e-8;
