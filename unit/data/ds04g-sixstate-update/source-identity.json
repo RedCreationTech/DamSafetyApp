@@ -1,0 +1,20 @@
+{
+  "source_job_id": "job_20261021_203401_5ygerd",
+  "source_plan": "docs/plans/2026-10-21-DS04G\u516d\u771f\u5b9e\u8f93\u5165N1\u590d\u73b0\u4e0e\u56fa\u5b9aN1-N2\u5b8c\u6574\u66f4\u65b0\u6700\u5c0f\u6838\u9a8c\u65b9\u6848.md",
+  "six_real_states_sha256": "51c34f056b9e036e02d298afbd33eb02fb4d7f8a2f1425ecf2738b75a8810fff",
+  "packed_order": "backbone_plastic6,kappa_t,kappa_c,viscous_plastic6,viscous_DT,viscous_DC",
+  "tensor_order": "xx,yy,zz,xy,yz,xz; tensor shear",
+  "runtime_source": "8a0114cff87eac51b5db1a796434906301388d0e",
+  "files": {
+    "P01.txt": "ce9039fb157600818d61243cb2b2ac435479829596b6a6b1b5ea255ca06ec610",
+    "P02.txt": "f4cbde8dc495a91aaecd9c4af329a62bf693a03d4fc2d3f2fef3673738b5f1df",
+    "P03.txt": "b01a36d60b532ab1614598e61dea61ba2d89966234b379bbdb9e86502c2ab96e",
+    "P04.txt": "9f250fba7f3290d73d1d51ab23e3efd2daab98e05398ff5a60e45185f6cceeb3",
+    "P05.txt": "a5cee29c97ed3fb31420f3e34baecfdb0dd1e5180191f949e1f567261f7342ed",
+    "P06.txt": "8a21d318747a1a654c0cb92bbb2bb4d6240c8df3b0816533ab111c33efd89c5f",
+    "compression_damage.csv": "0c3ebf82ad07bcc58aadab62935d52c802d0d545d41c9793c4e6ff382db3d2db",
+    "compression_hardening.csv": "66ccbd5a6dbbfb64468c353e8f4cfb3eb38dc42a1e4d6b1b3c217c188376aabf",
+    "tension_damage.csv": "fa9e314c57ecf460bb7385fa242ac6fb7e28de89e713148d4057eb3c25b5f724",
+    "tension_stiffening.csv": "2dcd2936911d0e2ed9f7254c73b5d0476ba11cbf2ea74ee565c641c231c1733f"
+  }
+}
