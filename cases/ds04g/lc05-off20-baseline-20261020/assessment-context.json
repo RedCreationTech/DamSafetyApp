@@ -1,0 +1,53 @@
+{
+  "contract_id": "CONTRACT-DS04G-LC05-001",
+  "contract_version": "0.1.0",
+  "template_id": "ds04g-lc05-off20-v1",
+  "data_category": "public-validation",
+  "provenance": "expert-supplied Abaqus simulation reference; no public sharing permission implied",
+  "mock": false,
+  "condition_code": "LC05",
+  "scenario_code": "DEMO_DRY_EQ_04G",
+  "source_instance": "Dam-1",
+  "moose_mesh_tag": "Dam_1",
+  "structure": {
+    "type": "concrete_gravity_dam",
+    "height_m": 90.0,
+    "width_m": 60.0,
+    "nodes": 4203,
+    "elements": 4059,
+    "formulation": "PLANE_STRAIN",
+    "strain": "FINITE",
+    "quadrature": "2x2",
+    "element_width_convention": "per metre out of plane"
+  },
+  "loading": {
+    "gravity_m_s2": 9.8,
+    "earthquake_peak_m_s2": 3.92,
+    "earthquake_duration_s": 20.0,
+    "static_duration_s": 1.0,
+    "hydrostatic": false,
+    "uplift": false,
+    "hydrodynamic": false,
+    "temperature": false,
+    "foundation_flexibility": false
+  },
+  "solver": {
+    "source_sha": "897671fa429da508a19eb02addd3f09d5b77e26f",
+    "binary_sha256": "7ca58aee62871bca1297420c1bbae860ec8e9cd7fa1746bcf2efe6ec102038e3",
+    "solver_id": "dam-safety-app-ds04g-newmark-897671f-mpi4",
+    "damping_mode": "OFF",
+    "nominal_dynamic_dt_s": 0.002
+  },
+  "criteria_status": "pending_project_calibration",
+  "safety_grade": null,
+  "damage_grade": null,
+  "engineering_status": "preassessment_only",
+  "model_validation_status": "short_window_verified; full20_result_pending",
+  "life_prediction_status": "not_evaluated; any LIMS Mock must be separately labelled",
+  "limits": {
+    "tension_Pa": null,
+    "compression_Pa": null,
+    "displacement_m": null
+  },
+  "standard_result_extractor_status": "not_implemented_by_this_template"
+}

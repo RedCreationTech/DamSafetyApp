@@ -1,0 +1,25 @@
+{
+  "solver_sha": "897671fa429da508a19eb02addd3f09d5b77e26f",
+  "binary_sha256": "7ca58aee62871bca1297420c1bbae860ec8e9cd7fa1746bcf2efe6ec102038e3",
+  "solver_id": "dam-safety-app-ds04g-newmark-897671f-mpi4",
+  "build": "/home/kevin/DamSafetyApp/.build/ds04g-newmark-2fd71fc",
+  "configured_node": "http://192.168.0.138:8357",
+  "expected_mpi": 4,
+  "expected_threads": 1,
+  "mode": "OFF",
+  "enable_finite_newmark_damping": false,
+  "baseline_job": "job_20261020_090921_8hpgcd",
+  "time_s": [
+    0,
+    21
+  ],
+  "eq_time_s": [
+    0,
+    20
+  ],
+  "dynamic_nominal_dt_s": 0.002,
+  "static_steps": 20,
+  "dynamic_nominal_steps": 10000,
+  "monitoring": "one handoff/first-step/startup verification then STOP queries until user completion notice",
+  "intended_use": "full reproduction/development baseline; not accepted or promoted"
+}
