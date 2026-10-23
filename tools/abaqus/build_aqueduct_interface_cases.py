@@ -31,7 +31,12 @@ def contact_case():
     mesh=''
     for name,z0,z1,id in (('bottom',0,.1,1),('top',.16,.26,2)):
         mesh+=block(name,f'type = GeneratedMeshGenerator\ndim = 3\nnx = 2\nny = 2\nnz = 1\nxmax = .2\nymax = .2\nzmin = {z0}\nzmax = {z1}\nelem_type = HEX8')
-        mesh+=block(name+'_names',f'type = RenameBoundaryGenerator\ninput = {name}\nold_boundary = \'0 1 2 3 4 5\'\nnew_boundary = \'{name}_bottom {name}_back {name}_right {name}_front {name}_left {name}_top\'')
+        previous=name
+        ids='0 1 2 3 4 5'
+        if name=='top':
+            mesh+=block('top_boundary_ids',"type = RenameBoundaryGenerator\ninput = top\nold_boundary = '0 1 2 3 4 5'\nnew_boundary = '10 11 12 13 14 15'")
+            previous='top_boundary_ids';ids='10 11 12 13 14 15'
+        mesh+=block(name+'_names',f'type = RenameBoundaryGenerator\ninput = {previous}\nold_boundary = \'{ids}\'\nnew_boundary = \'{name}_bottom {name}_back {name}_right {name}_front {name}_left {name}_top\'')
         mesh+=block(name+'_id',f'type = SubdomainIDGenerator\ninput = {name}_names\nsubdomain_id = {id}')
     mesh+=block('combine','type = MeshCollectionGenerator\ninputs = \'bottom_id top_id\'')
     text=block('Mesh',mesh+'patch_update_strategy = iteration\n')

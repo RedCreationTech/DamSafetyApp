@@ -25,6 +25,7 @@ class InterfaceCasesTest(unittest.TestCase):
         self.assertIn('zmax = 0.1',text)
         self.assertIn('friction_coefficient = .55',text)
         self.assertIn('formulation = mortar',text)
+        self.assertIn("new_boundary = '10 11 12 13 14 15'",text)
         self.assertNotIn('glued',text)
         self.assertNotIn('tangential_tolerance',text)
 
