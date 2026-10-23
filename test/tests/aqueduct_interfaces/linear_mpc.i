@@ -31,6 +31,11 @@
   []
 []
 [Kernels]
+  [multiplier]
+    type = NullKernel
+    variable = lambda
+    block = constraint_anchors
+  []
   [bar]
     type = MatDiffusion
     variable = u
