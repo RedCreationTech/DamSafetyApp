@@ -22,7 +22,7 @@ class PriorityFixtureTest(unittest.TestCase):
                 for j in (2,3,4):
                     conn=nc[f'connect{j}'][0]-1;vectors.append(xyz[conn[1]]-xyz[conn[0]])
                 np.testing.assert_allclose(vectors,np.eye(3)*.5)
-            rows=list(csv.DictReader((out/'embedded-map.csv').open()))
+            with (out/'embedded-map.csv').open() as stream:rows=list(csv.DictReader(stream))
             self.assertEqual(len({r['secondary_node'] for r in rows}),6)
             self.assertEqual({r['primary_element'] for r in rows},{'0'})
             text=(out/'embedded_three_axis.i').read_text()
@@ -39,6 +39,7 @@ class PriorityFixtureTest(unittest.TestCase):
                 self.assertAlmostEqual(residual,0,places=12)
             text=(out/'shell_solid_transfer.i').read_text()
             self.assertEqual(text.count("displacements = ''"),6)
+            self.assertEqual(text.count("jacobian_fill = 0"),6)
             for v in fixtures.FIELDS:self.assertIn('functor = load_'+v,text)
 
     def test_plastic_oracle_keeps_cumulative_hardening_after_reverse_unloading(self):

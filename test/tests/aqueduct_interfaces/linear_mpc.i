@@ -33,6 +33,7 @@
 [Kernels]
   [multiplier]
     type = NullKernel
+    jacobian_fill = 0
     variable = lambda
     block = constraint_anchors
   []
