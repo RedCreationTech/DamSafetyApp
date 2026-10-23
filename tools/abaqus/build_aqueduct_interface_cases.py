@@ -43,7 +43,7 @@ def contact_case():
     text+=block('GlobalParams',"displacements = 'ux uy uz'")
     text+=block('Physics/SolidMechanics/QuasiStatic',block('all',"add_variables = true\nstrain = SMALL\nblock = '1 2'\nsave_in = 'force_x force_y force_z'"))
     text+=block('AuxVariables',''.join(block(v,'') for v in ('force_x','force_y','force_z')))
-    text+=block('Materials',block('elastic','type = ComputeIsotropicElasticityTensor\nyoungs_modulus = 1e6\npoissons_ratio = 0')+block('stress','type = ComputeLinearElasticStress'))
+    text+=block('Materials',block('elastic',"type = ComputeIsotropicElasticityTensor\nblock = '1 2'\nyoungs_modulus = 1e6\npoissons_ratio = 0")+block('stress',"type = ComputeLinearElasticStress\nblock = '1 2'"))
     contact="primary = bottom_top\nsecondary = top_bottom\nmodel = coulomb\nformulation = mortar\nfriction_coefficient = .55\nc_normal = 100\nc_tangential = 100\nnormalize_c = true\nuse_dual = true\ncorrect_edge_dropping = true"
     text+=block('Contact',block('pair',contact))
     bcs=''
