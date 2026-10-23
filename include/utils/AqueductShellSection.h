@@ -1,6 +1,7 @@
 #pragma once
 
 #include "metaphysicl/raw_type.h"
+#include <algorithm>
 #include <array>
 #include <cmath>
 #include <stdexcept>
@@ -116,4 +117,65 @@ inline std::array<double, 3> layerPositions(double thickness, double offset)
 }
 
 constexpr std::array<double, 3> layerWeights = {1. / 6, 4. / 6, 1. / 6};
+
+using Vec = std::array<double, 3>;
+using Quad = std::array<Vec, 4>;
+using BMatrix = std::array<std::array<double, 24>, 9>;
+inline double dot(const Vec & a, const Vec & b)
+{ return a[0]*b[0]+a[1]*b[1]+a[2]*b[2]; }
+inline Vec cross(const Vec & a, const Vec & b)
+{ return {a[1]*b[2]-a[2]*b[1],a[2]*b[0]-a[0]*b[2],a[0]*b[1]-a[1]*b[0]}; }
+inline Vec subtract(const Vec & a,const Vec & b)
+{ return {a[0]-b[0],a[1]-b[1],a[2]-b[2]}; }
+
+struct Frame
+{
+  Vec x,y,n;
+  double lx,ly;
+};
+inline Frame frame(const Quad & q)
+{
+  Vec x=subtract(q[1],q[0]), y=subtract(q[3],q[0]);
+  double lx=std::sqrt(dot(x,x)),ly=std::sqrt(dot(y,y));
+  if (!(lx>0 && ly>0)) throw std::invalid_argument("collapsed aqueduct shell");
+  for(unsigned j=0;j<3;++j){x[j]/=lx;y[j]/=ly;}
+  if(std::abs(dot(x,y))>1e-10)
+    throw std::invalid_argument("aqueduct shell requires a rectangular planar QUAD4");
+  const Vec diagonal=subtract(subtract(q[2],q[1]),subtract(q[3],q[0]));
+  if(std::sqrt(dot(diagonal,diagonal))>1e-10*std::max(lx,ly))
+    throw std::invalid_argument("aqueduct shell requires a rectangular planar QUAD4");
+  return {x,y,cross(x,y),lx,ly};
+}
+
+// Rows: membrane engineering strain (3), curvature (3), MITC shear (2), drill.
+// Columns: node-major global ux,uy,uz,rx,ry,rz. Geometry is the reference surface.
+inline BMatrix bMatrix(const Quad & q,const Vec & point)
+{
+  auto f=frame(q);auto r=subtract(point,q[0]);
+  double xi=2*dot(r,f.x)/f.lx-1,eta=2*dot(r,f.y)/f.ly-1;
+  const std::array<double,4> sx={-1,1,1,-1},sy={-1,-1,1,1};
+  const double a=(1-eta)/2,c=(1+eta)/2,d=(1-xi)/2,b=(1+xi)/2;
+  const std::array<double,4> wx={-a/f.lx,a/f.lx,c/f.lx,-c/f.lx};
+  const std::array<double,4> wy={-d/f.ly,-b/f.ly,b/f.ly,d/f.ly};
+  const std::array<double,4> rx={-.5*d,-.5*b,-.5*b,-.5*d};
+  const std::array<double,4> ry={.5*a,.5*a,.5*c,.5*c};
+  BMatrix B{};
+  for(unsigned i=0;i<4;++i)
+  {
+    double N=(1+sx[i]*xi)*(1+sy[i]*eta)/4;
+    double dx=sx[i]*(1+sy[i]*eta)/(2*f.lx),dy=sy[i]*(1+sx[i]*xi)/(2*f.ly);
+    for(unsigned j=0;j<3;++j)
+    {
+      unsigned u=6*i+j,t=u+3;
+      B[0][u]=dx*f.x[j]; B[1][u]=dy*f.y[j];
+      B[2][u]=dy*f.x[j]+dx*f.y[j];
+      B[3][t]=dx*f.y[j];B[4][t]=-dy*f.x[j];
+      B[5][t]=dy*f.y[j]-dx*f.x[j];
+      B[6][u]=wx[i]*f.n[j];B[6][t]=ry[i]*f.y[j];
+      B[7][u]=wy[i]*f.n[j];B[7][t]=rx[i]*f.x[j];
+      B[8][u]=.5*(dy*f.x[j]-dx*f.y[j]);B[8][t]=N*f.n[j];
+    }
+  }
+  return B;
+}
 }

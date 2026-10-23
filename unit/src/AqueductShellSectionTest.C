@@ -98,3 +98,54 @@ TEST(AqueductShellSection, InvalidMaterialIsRejected)
 {
   EXPECT_THROW(AqueductShell::planeStress(std::array<double,3>{},V{},0.,E,.5,fy,fu,epmax),std::invalid_argument);
 }
+
+TEST(AqueductShellSection, SixRigidBodyModesHaveZeroStrain)
+{
+  const AqueductShell::Quad q={{{1,2,3},{3,2,3},{3,5,3},{1,5,3}}};
+  const AqueductShell::Vec rotation={.2,-.3,.4};
+  auto B=AqueductShell::bMatrix(q,{1.4,3.1,3});
+  std::array<double,24> dofs{};
+  for(unsigned i=0;i<4;++i)
+  {
+    auto u=AqueductShell::cross(rotation,q[i]);
+    for(unsigned j=0;j<3;++j){dofs[6*i+j]=u[j]+j+1;dofs[6*i+3+j]=rotation[j];}
+  }
+  for(const auto & row:B)
+  {
+    double strain=0;
+    for(unsigned j=0;j<24;++j) strain+=row[j]*dofs[j];
+    EXPECT_NEAR(strain,0,1e-14);
+  }
+}
+
+TEST(AqueductShellSection, MITCTyingPassesConstantCurvatureWithoutShearLocking)
+{
+  const AqueductShell::Quad q={{{0,0,0},{2,0,0},{2,3,0},{0,3,0}}};
+  std::array<double,24> dofs{};
+  const double curvature=.001;
+  for(unsigned i=0;i<4;++i)
+  {
+    dofs[6*i+2]=-.5*curvature*q[i][0]*q[i][0];
+    dofs[6*i+4]=curvature*q[i][0];
+  }
+  for(double x:{.2,1.7})for(double y:{.3,2.8})
+  {
+    auto B=AqueductShell::bMatrix(q,{x,y,0});
+    for(unsigned i=0;i<9;++i)
+    {
+      double strain=0;
+      for(unsigned j=0;j<24;++j) strain+=B[i][j]*dofs[j];
+      EXPECT_NEAR(strain,i==3?curvature:0,1e-14);
+    }
+  }
+}
+
+TEST(AqueductShellSection, DrillingModeAndGeometryRestrictionsAreExplicit)
+{
+  AqueductShell::Quad q={{{0,0,0},{2,0,0},{2,3,0},{0,3,0}}};
+  auto B=AqueductShell::bMatrix(q,{.6,1.1,0});
+  double drill=0;for(unsigned i=0;i<4;++i) drill+=B[8][6*i+5];
+  EXPECT_NEAR(drill,1,1e-14);
+  q[2][2]=.1;
+  EXPECT_THROW(AqueductShell::frame(q),std::invalid_argument);
+}
