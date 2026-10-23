@@ -114,10 +114,10 @@
 []
 [NodalKernels]
   [moment]
-    type = UserForcingFunctionNodalKernel
+    type = UserForcingFunctorNodalKernel
     variable = ry
     boundary = right
-    function = 500
+    functor = 500
   []
 []
 [Postprocessors]

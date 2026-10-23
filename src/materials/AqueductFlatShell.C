@@ -37,7 +37,7 @@ InputParameters AqueductFlatShellStress::validParams()
   p.addRequiredRangeCheckedParam<Real>("youngs_modulus","youngs_modulus>0","Young modulus");
   p.addRequiredRangeCheckedParam<Real>("poissons_ratio","poissons_ratio>-1 & poissons_ratio<0.5","Poisson ratio");
   p.addRequiredRangeCheckedParam<Real>("yield_stress","yield_stress>0","Initial yield stress");
-  p.addRequiredRangeCheckedParam<Real>("ultimate_stress","ultimate_stress>=yield_stress","Last table stress");
+  p.addRequiredRangeCheckedParam<Real>("ultimate_stress","ultimate_stress>0","Last table stress");
   p.addRequiredRangeCheckedParam<Real>("plastic_strain_at_ultimate","plastic_strain_at_ultimate>0","Last table abscissa");
   p.addRequiredRangeCheckedParam<Real>("shear_correction","shear_correction>0 & shear_correction<=1","Explicit transverse shear correction");
   p.addRequiredRangeCheckedParam<Real>("drilling_factor","drilling_factor>0","Drilling stiffness / (G thickness); validate sensitivity separately");
@@ -60,6 +60,7 @@ AqueductFlatShellStress::AqueductFlatShellStress(const InputParameters & p)
 {
   if(coupledComponents("displacements")!=3 || coupledComponents("rotations")!=3)
     paramError("rotations","AqueductFlatShell needs three displacements and three rotations");
+  if(_fu<_fy) paramError("ultimate_stress","Last table stress must not be less than initial yield");
   if(getParam<bool>("use_displaced_mesh")) paramError("use_displaced_mesh","SMALL strain requires the reference mesh");
   for(unsigned j=0;j<3;++j)
   {
