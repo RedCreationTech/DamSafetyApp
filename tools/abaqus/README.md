@@ -1,5 +1,30 @@
 # Abaqus 转换工具
 
+## AQ1023 完整渡槽准备
+
+`prepare_aqueduct_case.py`读取已获确认的GBK原件，复用坐标变换和Exodus写出，
+保留不同实例的独立节点及全部表面、嵌入、Tie、壳实体和连接器/接触原文语义。
+S4R只输出SHELL4几何，壳厚/偏置和钢材塑性另存合同；连接器是显式接口记录，
+不伪装成普通桁架。`ready_for_solve=false`表示它不是完整求解`.i`或可提交任务。
+
+```bash
+python tools/abaqus/prepare_aqueduct_case.py --inp /path/400elc-nw.inp \
+  --confirmation /path/expert-confirmation-20261023.json --output /path/new-preparation
+python tools/abaqus/audit_aqueduct_geometry.py --preparation /path/new-preparation \
+  --output /path/new-geometry-audit
+python test/tools/test_prepare_aqueduct_case.py
+python test/tools/test_audit_aqueduct_geometry.py
+```
+
+准备入口拒绝未知关键字、坏数值/重复身份、缺失截面或接口引用，严格核源SHA与确认。
+不会调用原型默认的Tie/钢筋缝合，不启用最近节点回退；各组钢筋只在源host集合中反解。
+审计包含真实旋转/斜切宿主的Jacobian方向核查、仿射插值及全网格几何检查。
+依赖NumPy、SciPy、netCDF4；输出目录必须不存在，避免覆盖。
+
+通用转换器`build_global_mesh`新增显式独立节点/单元拓扑表参数，原CLI默认仍不变。
+HEX8反求自然坐标已纠正Jacobian转置，该修复影响使用此反解的嵌入路径；旧已生成
+网格/冻结算例不改写，后续正式候选按系统回归规则检查。
+
 ## Concrete Damaged Plasticity 表格提取（prototype）
 
 `abaqus_cdp.py` 从 Abaqus `.inp` 直接提取并检查 CDP 材料输入，不读取 ODB 或结果

@@ -713,8 +713,9 @@ def sanitize(name):
 class GlobalMesh:
     """全局合并网格"""
 
-    def __init__(self, tol):
+    def __init__(self, tol, merge_nodes=True):
         self.tol = tol
+        self.merge_nodes = merge_nodes
         self.coords = []          # global_id-1 -> (x,y,z)
         self._hash = {}
         self.node_map = {}        # (instance, local_id) -> global_id
@@ -722,6 +723,13 @@ class GlobalMesh:
         self.merged_count = 0
 
     def add(self, key, xyz):
+        if not self.merge_nodes:
+            if key in self.node_map:
+                raise ValueError(f'重复节点身份: {key}')
+            gid = len(self.coords) + 1
+            self.coords.append(xyz)
+            self.node_map[key] = gid
+            return gid
         h = (round(xyz[0] / self.tol), round(xyz[1] / self.tol),
              round(xyz[2] / self.tol))
         # 允许邻近 8 格碰撞检查
@@ -744,8 +752,9 @@ class GlobalMesh:
         return gid
 
 
-def build_global_mesh(model, tol):
-    gm = GlobalMesh(tol)
+def build_global_mesh(model, tol, *, merge_nodes=True, element_type_map=None):
+    gm = GlobalMesh(tol, merge_nodes=merge_nodes)
+    type_map = ELEMENT_TYPE_MAP if element_type_map is None else element_type_map
     gm.elem_origin = {}          # 全局单元 id -> (instance, part 单元 id)
     gm.elem_block = {}           # 全局单元 id -> block 名
     gm.block_beam = {}           # block -> {material, section, dims, n1}
@@ -787,11 +796,11 @@ def build_global_mesh(model, tol):
             mat, area = el2mat.get(eid, ('UNASSIGNED', None))
             beam_meta = None
             abaqus_type = part.elem_types.get(eid, part.etype)
-            if abaqus_type not in ELEMENT_TYPE_MAP:
+            if abaqus_type not in type_map:
                 raise ValueError(
                     f'不支持的 Abaqus 单元类型 {abaqus_type}: '
                     f'{inst.name}/{eid}')
-            exo_type, expected_nodes = ELEMENT_TYPE_MAP[abaqus_type]
+            exo_type, expected_nodes = type_map[abaqus_type]
             if len(conn) != expected_nodes:
                 raise ValueError(
                     f'{inst.name}/{eid} ({abaqus_type}) 需要 '
@@ -1257,9 +1266,11 @@ def _hex_map(conn_pts, xi, eta, zeta):
     dN = [0.125 * a * (1 + b * eta) * (1 + c * zeta) for a, b, c in _HEX_NODE_SIGNS]
     eN = [0.125 * (1 + a * xi) * b * (1 + c * zeta) for a, b, c in _HEX_NODE_SIGNS]
     zN = [0.125 * (1 + a * xi) * (1 + b * eta) * c for a, b, c in _HEX_NODE_SIGNS]
-    J = [[sum(dN[i] * conn_pts[i][d] for i in range(8)) for d in range(3)],
-         [sum(eN[i] * conn_pts[i][d] for i in range(8)) for d in range(3)],
-         [sum(zN[i] * conn_pts[i][d] for i in range(8)) for d in range(3)]]
+    # Newton solves J * delta_natural = residual_physical. A transposed J
+    # happens to work for axis-aligned cubes but fails for rotated/skew hosts.
+    derivatives = (dN, eN, zN)
+    J = [[sum(derivatives[j][i] * conn_pts[i][d] for i in range(8))
+          for j in range(3)] for d in range(3)]
     return p, J
 
 
