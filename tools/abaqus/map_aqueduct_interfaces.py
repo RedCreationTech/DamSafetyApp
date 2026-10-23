@@ -79,6 +79,51 @@ def read_geometry(root):
     return coords,connectivity,blocks,types,origins
 
 
+def build_embedded_precheck(preparation,audit,output):
+    """Validate original-geometry host identities without choosing any Tie policy."""
+    root=Path(preparation);audit=Path(audit);out=Path(output)
+    if out.exists():raise ValueError('output already exists')
+    contract=json.loads((root/'assembly-contract.json').read_text())
+    for name,digest in contract['artifacts'].items():
+        if sha(root/name)!=digest:raise ValueError('source preparation hash mismatch: '+name)
+    summary=json.loads((audit/'geometry-audit.json').read_text())
+    if summary['contract_sha256']!=sha(root/'assembly-contract.json'):raise ValueError('audit identity differs')
+    coords,connectivity,blocks,types,origins=read_geometry(root);rows=[];groups=[]
+    for j,g in enumerate(contract['interfaces']['embedded'],1):
+        detail=audit/f'embedded-{j:02d}.json'
+        if sha(detail)!=summary['embedded'][j-1]['sha256']:raise ValueError('source host audit hash mismatch')
+        owner={}
+        for origin in g['embedded']:
+            eid=origins[tuple(origin)]
+            if types[eid]!='TRUSS':raise ValueError('non-truss embedded child')
+            for n in connectivity[eid]:owner[int(n)]=min(owner.get(int(n),blocks[eid]),blocks[eid])
+        d=json.loads(detail.read_text())
+        if d['unresolved'] or {r['node'] for r in d['found']}!=set(owner):raise ValueError('incomplete audited node coverage')
+        for r in d['found']:
+            n=r['node'];eid=origins[tuple(r['host'])]
+            rows.append([n-1,eid-1,owner[n],*coords[n-1],*[int(v)-1 for v in connectivity[eid]]])
+        groups.append(dict(primary_blocks=sorted({blocks[origins[tuple(x)]] for x in g['host']}),owning_secondary_blocks=sorted(set(owner.values()))))
+    if len({r[0] for r in rows})!=len(rows):raise ValueError('duplicate embedded node owner')
+    out.mkdir(parents=True);shutil.copyfile(root/'assembly-geometry.e',out/'assembly-geometry.e')
+    with (out/'embedded-runtime-map.csv').open('w',newline='') as f:
+        w=csv.writer(f);w.writerow(['secondary_node','primary_element','secondary_block','x_m','y_m','z_m']+[f'host_node_{j}' for j in range(8)]);w.writerows(rows)
+    text=block('Mesh','type = FileMesh\nfile = assembly-geometry.e\nallow_renumbering = false')
+    text+=block('Variables',''.join(block(v,'') for v in ('ux','uy','uz')))
+    text+=block('Kernels',''.join(block(v,f'type = NullKernel\nvariable = {v}') for v in ('ux','uy','uz')))
+    constraints=''
+    for j,g in enumerate(groups):
+        for owner in g['owning_secondary_blocks']:
+            for v in ('ux','uy','uz'):
+                constraints+=block(f'embedded_{j}_{owner}_{v}',f'type = AqueductEmbeddedConstraint\nvariable = {v}\nprimary_variable = {v}\nprimary = {g["primary_blocks"][0]}\nsecondary = {owner}\nallowed_primary_block_ids = \'{" ".join(map(str,g["primary_blocks"]))}\'\nsource_map = embedded-runtime-map.csv\nformulation = kinematic\npenalty = 1e10')
+    text+=block('Constraints',constraints)
+    text+=block('UserObjects',block('no_solve',"type = Terminator\nexpression = '1'\nexecute_on = INITIAL\nfail_mode = HARD\nerror_level = ERROR\nmessage = 'Original geometry host audit only. No physical solve defined. Use --check-input.'"))
+    text+=block('Executioner','type = Steady')
+    (out/'embedding_check_only.i').write_text(text)
+    record=dict(status='original-geometry-host-precheck-only',embedded_nodes=len(rows),Tie_policy_applied=False,physical_solve=False,source_contract_sha256=sha(root/'assembly-contract.json'),artifacts={p.name:sha(p) for p in out.iterdir()})
+    (out/'precheck-identity.json').write_text(json.dumps(record,indent=2)+'\n')
+    return record
+
+
 def build(preparation,audit,output):
     root=Path(preparation);audit=Path(audit);out=Path(output)
     if out.exists():raise ValueError('output already exists')
@@ -172,7 +217,7 @@ def build(preparation,audit,output):
     for j,g in enumerate(embedded_groups):
         for owner in g['owning_secondary_blocks']:
             for v in ('ux','uy','uz'):
-                constraints+=block(f'embedded_{j}_{owner}_{v}',f'type = AqueductEmbeddedConstraint\nvariable = {v}\nprimary = {g["primary_blocks"][0]}\nsecondary = {owner}\nallowed_primary_block_ids = \'{" ".join(map(str,g["primary_blocks"]))}\'\nsource_map = embedded-runtime-map.csv\nformulation = kinematic\npenalty = 1e10')
+                constraints+=block(f'embedded_{j}_{owner}_{v}',f'type = AqueductEmbeddedConstraint\nvariable = {v}\nprimary_variable = {v}\nprimary = {g["primary_blocks"][0]}\nsecondary = {owner}\nallowed_primary_block_ids = \'{" ".join(map(str,g["primary_blocks"]))}\'\nsource_map = embedded-runtime-map.csv\nformulation = kinematic\npenalty = 1e10')
     check+=block('Constraints',constraints)
     check+=block('UserObjects',block('audit_only',"type = Terminator\nexpression = '1'\nexecute_on = INITIAL\nfail_mode = HARD\nerror_level = ERROR\nmessage = 'Geometry audit only: use --check-input; no physical solve is defined.'"))
     check+=block('Executioner','type = Steady')
@@ -187,4 +232,4 @@ def build(preparation,audit,output):
     return summary
 
 if __name__=='__main__':
-    p=argparse.ArgumentParser(description=__doc__);p.add_argument('--preparation',required=True);p.add_argument('--audit',required=True);p.add_argument('--output',required=True);a=p.parse_args();print(json.dumps(build(a.preparation,a.audit,a.output),indent=2))
+    p=argparse.ArgumentParser(description=__doc__);p.add_argument('--preparation',required=True);p.add_argument('--audit',required=True);p.add_argument('--output',required=True);p.add_argument('--embedded-precheck-only',action='store_true');a=p.parse_args();print(json.dumps((build_embedded_precheck if a.embedded_precheck_only else build)(a.preparation,a.audit,a.output),indent=2))
