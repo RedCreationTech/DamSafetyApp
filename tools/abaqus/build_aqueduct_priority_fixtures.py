@@ -115,7 +115,7 @@ def shell_solid(out):
     text+=block('GlobalParams',"displacements = 'ux uy uz'\nrotations = 'rx ry rz'")
     text+=block('Variables',''.join(block(v,"block = 'host shell'" if j<3 else 'block = shell') for j,v in enumerate(FIELDS))+''.join(block('lm'+str(j),'block = anchors') for j in range(6)))
     text+=block('Physics/SolidMechanics/QuasiStatic',block('host','block = host\nstrain = SMALL'))
-    text+=block('Kernels',''.join(block(v,f'type = AqueductFlatShell\nvariable = {v}\ncomponent = {j}\nblock = shell') for j,v in enumerate(FIELDS))+''.join(block('lm'+str(j),f'type = NullKernel\nvariable = lm{j}\nblock = anchors') for j in range(6)))
+    text+=block('Kernels',''.join(block(v,f'type = AqueductFlatShell\nvariable = {v}\ncomponent = {j}\nblock = shell') for j,v in enumerate(FIELDS))+''.join(block('lm'+str(j),f"type = NullKernel\nvariable = lm{j}\nblock = anchors\ndisplacements = ''") for j in range(6)))
     text+=block('Materials',block('host_elastic','type = ComputeIsotropicElasticityTensor\nblock = host\nyoungs_modulus = 200e9\npoissons_ratio = 0')+block('host_stress','type = ComputeLinearElasticStress\nblock = host')+
                 block('shell','type = AqueductFlatShellStress\nblock = shell\nyoungs_modulus = 200e9\npoissons_ratio = 0\nyield_stress = 400e6\nultimate_stress = 696e6\nplastic_strain_at_ultimate = .1\nthickness = .1\noffset = .5\nshear_correction = .8333333333333333\ndrilling_factor = .001'))
     text+=block('Constraints',''.join(block(f'c_{r["anchor"]}_{r["component"]}',f'type = AqueductLinearMPC\nvariable = ux\nanchor_node = {r["anchor"]}\nterm_nodes = \'{" ".join(str(t["node"]) for t in r["terms"])}\'\nterms = \'{" ".join(t["variable"] for t in r["terms"])}\'\ncoefficients = \'{" ".join(str(t["coefficient"]) for t in r["terms"])}\'\nmultiplier = lm{r["component"]}') for r in rows))
@@ -123,6 +123,7 @@ def shell_solid(out):
     text+=block('Functions',''.join(block(v,f'type = PiecewiseLinear\nx = \'0 1 2\'\ny = \'0 {500 if v=="ry" else 0} {load}\'') for v,load in zip(FIELDS,[5000,1000,250,5,500,2.5])))
     text+=block('NodalKernels',''.join(block(v,f'type = UserForcingFunctorNodalKernel\nvariable = {v}\nboundary = shell_right\nfunctor = {v}') for v in FIELDS))
     post=''.join(block(f'lm_{r["anchor"]}_{r["component"]}',f'type = NodalVariableValue\nvariable = lm{r["component"]}\nnodeid = {r["anchor"]}') for r in rows)
+    post+=''.join(block(f'anchor_{n}_{v}',f'type = NodalVariableValue\nvariable = {v}\nnodeid = {n}') for n in (8,11) for v in FIELDS)
     post+=''.join(block(name,f'type = PointValue\nvariable = {v}\npoint = ".4 .1 0"') for name,v in [('tip_ux','ux'),('tip_uz','uz'),('tip_ry','ry')])
     text+=block('Postprocessors',post)+execution(2,.1)
     (out/'shell_solid_transfer.i').write_text(text)
