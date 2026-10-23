@@ -1,4 +1,9 @@
 [Tests]
+  [linear_mpc]
+    type = RunApp
+    input = linear_mpc.i
+    requirement = 'AQ1023 linear constraints shall transfer weighted forces with their exact conjugate multiplier.'
+  []
   [shell_bending]
     type = RunApp
     input = shell_bending.i
