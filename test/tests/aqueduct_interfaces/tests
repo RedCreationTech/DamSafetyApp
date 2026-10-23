@@ -1,0 +1,7 @@
+[Tests]
+  [shell_bending]
+    type = RunApp
+    input = shell_bending.i
+    requirement = 'AQ1023 six-DOF shell shall assemble SPOS membrane-bending coupling without shear locking.'
+  []
+[]
