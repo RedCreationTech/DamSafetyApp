@@ -75,7 +75,8 @@ def contact(out):
         for name,typ,lm,uo,extra in [('normal','NormalMortarMechanicalContact','normal_lm','weighted_gap_uo',''),('t1','TangentialMortarMechanicalContact','tangent_1','weighted_velocities_uo',''),('t2','TangentialMortarMechanicalContact','tangent_2','weighted_velocities_uo','\ndirection = direction_2')]:
             constraint+=block(name+'_'+v,common+f'\ntype = {typ}\nvariable = {lm}\nsecondary_variable = {v}\ncomponent = {"xyz"[j]}\ncompute_lm_residuals = false\n{uo} = elastic_slip'+extra)
     text+=block('Constraints',constraint)
-    text+=block('AuxKernels',''.join(block(v,common+f'\ntype = MortarFrictionalPressureVectorAux\nvariable = {v}\ntangent_one = tangent_1\ntangent_two = tangent_2\ncomponent = {j}\nboundary = top_bottom') for j,v in enumerate(('tx','ty','tz'))))
+    aux_common = 'primary_boundary = bottom_top\nsecondary_boundary = top_bottom\nuse_displaced_mesh = true'
+    text+=block('AuxKernels',''.join(block(v,aux_common+f'\ntype = MortarFrictionalPressureVectorAux\nvariable = {v}\ntangent_one = tangent_1\ntangent_two = tangent_2\ncomponent = {j}\nboundary = top_bottom') for j,v in enumerate(('tx','ty','tz'))))
     ts='0 1 2 3 4 5 6 7 8 9 10';hist={'ux':[0,0,.0002,.0002,.0012,.0008,0,0,.0006,.0006,.0007],'uy':[0,0,.00015,.00015,.0009,.0006,0,0,.0008,.0008,.0009],'uz':[0,-.06001,-.06001,-.06002,-.06002,-.06002,-.06002,0,0,-.06001,-.06001]}
     text+=block('Functions',''.join(block('load_'+v,"type = PiecewiseLinear\nx = '"+ts+"'\ny = '"+' '.join(map(str,values))+"'") for v,values in hist.items()))
     bcs=''
@@ -116,7 +117,8 @@ def motion(out,motion_directory):
     functions=block('dynamic_on',"type = ParsedFunction\nexpression = 't>1'")+block('dt_clock',"type = ParsedFunction\nexpression = 'if(t<1,1,.0025)'")
     for axis in 'xyz':
         for component in ('acceleration','velocity','displacement'):
-            functions+=block('motion_'+component[0]+axis,f'type = IntegratedAcceleration\ndata_file = motion-{axis}.csv\ncomponent = {component}\nstart_time = 1')
+            prefix = {'acceleration': 'a', 'velocity': 'v', 'displacement': 'u'}[component]
+            functions+=block('motion_'+prefix+axis,f'type = IntegratedAcceleration\ndata_file = motion-{axis}.csv\ncomponent = {component}\nstart_time = 1')
     text+=block('Functions',functions)
     text+=block('Kernels',''.join(block('inertia_'+v,f'type = InertialForce\nvariable = {v}\nblock = solid\nbeta = .25\ngamma = .5\nvelocity = v{axis}\nacceleration = a{axis}\nuse_displaced_mesh = false\nsave_in = f{axis}') for v,axis in zip(FIELDS,'xyz')))
     aux=''
