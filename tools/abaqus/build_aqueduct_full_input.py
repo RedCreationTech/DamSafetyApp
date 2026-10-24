@@ -18,7 +18,7 @@ ALPHA=-.41421;BETA=(1-ALPHA)**2/4;GAMMA=.5-ALPHA
 
 def quoted(values):return "'"+' '.join(map(str,values))+"'"
 
-def build(preparation,motion,output,end_time=1.01,mumps_memory_retry=False,diagnostics=False,ignore_zero_entries=False):
+def build(preparation,motion,output,end_time=1.01,mumps_memory_retry=False,diagnostics=False,ignore_zero_entries=False,hash_assembly=False):
     root=Path(preparation);out=Path(output);motion=Path(motion)
     if out.exists():raise ValueError('output exists')
     c=json.loads((root/'assembly-contract.json').read_text());implementation=json.loads((root/'interface-implementation.json').read_text())
@@ -50,7 +50,7 @@ def build(preparation,motion,output,end_time=1.01,mumps_memory_retry=False,diagn
         for k,role in enumerate(('secondary','primary')):
             name=f'contact_{j}_{role}';meshblocks+=block(name,f'type = LowerDBlockFromSidesetGenerator\ninput = {previous}\nsidesets = aq_contact_{j:02d}_{role}\nnew_block_id = {300+2*j+k}\nnew_block_name = {name}');previous=name
     text='# Full AQ1023 assembly; first short candidate, engineering surrogates recorded.\n'+block('Mesh',meshblocks+'allow_renumbering = false\nparallel_type = replicated\npatch_update_strategy = iteration')
-    text+=block('Problem','material_coverage_check = false'+('\nignore_zeros_in_jacobian = true' if ignore_zero_entries else ''))
+    text+=block('Problem','material_coverage_check = false'+('\nignore_zeros_in_jacobian = true' if ignore_zero_entries else '')+('\nuse_hash_table_matrix_assembly = true' if hash_assembly else ''))
     text+=block('GlobalParams',"displacements = 'ux uy uz'")
     variables=''.join(block(v,'block = '+quoted(sorted(group)) if j<3 else 'block = '+quoted(shell)) for j,v in enumerate(FIELDS))
     variables+=''.join(block(f'lm{j}',f'block = {200+j}') for j in sorted(support))
@@ -178,8 +178,9 @@ def build(preparation,motion,output,end_time=1.01,mumps_memory_retry=False,diagn
                   deviations=['HEX8 full integration Bbar and six-DOF MITC4/SPOS shell accepted engineering replacements.', 'Custom consistent primal mortar Tie; actual slave membership preserved, coefficients differ from Abaqus; only fully bound secondary facets integrated.', 'Candidate normal-plane Tie adjustment, max .198 micrometre; exact ODB adjustment pending.', 'Explicit HHT alpha=-.41421 inferred from 2025 contact default; exact Abaqus2022 parameters unverified.', 'Base DOFs4-6 are absent on solid base nodes, so source zero rotation BCs have no active DOF; no physical rotary restraint is removed.', 'Unforced static stage one step instead of Abaqus automatic increments; source stabilization .0002 not implemented; zero displacement gives zero stabilization work.', 'Short first full-assembly candidate, not complete27.5s; no matching Abaqus output or engineering threshold.', 'Consistent truss line mass rho*A; original Abaqus reduced-integration/hourglass and source truss mass equivalence pending.'])
     identity['solver_memory_policy']=dict(workspace_estimate_increase_percent=100,max_working_memory_MB_per_rank=2048,MPI_ranks=4,diagnostic_print_level=2,error_on_linear_failure=True,physics_and_tolerances_unchanged=True) if mumps_memory_retry else None
     identity['ignore_zero_jacobian_entries']=ignore_zero_entries
+    identity['hash_table_matrix_assembly']=hash_assembly
     identity['native_diagnostics']=dict(enabled=diagnostics,bar_fields=5,shell_inplane_qps=4,shell_layers=3,shell_state_components=['local_sxx','local_syy','local_szz','local_sxy','peq'],residual_tags=['TIME','NONTIME'],meaning='Unmodified complete tagged residuals; reconstruct normalized HHT before nodal BCs; not direct Abaqus RF') if diagnostics else None
     identity['artifacts']={p.name:sha(p) for p in out.iterdir()};(out/'full-input-identity.json').write_text(json.dumps(identity,indent=2)+'\n');return identity
 
 if __name__=='__main__':
-    p=argparse.ArgumentParser(description=__doc__);p.add_argument('--preparation',required=True);p.add_argument('--motion',required=True);p.add_argument('--output',required=True);p.add_argument('--end-time',type=float,default=1.01);p.add_argument('--mumps-memory-retry',action='store_true');p.add_argument('--diagnostics',action='store_true');p.add_argument('--ignore-zero-entries',action='store_true');a=p.parse_args();print(json.dumps(build(a.preparation,a.motion,a.output,a.end_time,a.mumps_memory_retry,a.diagnostics,a.ignore_zero_entries),indent=2))
+    p=argparse.ArgumentParser(description=__doc__);p.add_argument('--preparation',required=True);p.add_argument('--motion',required=True);p.add_argument('--output',required=True);p.add_argument('--end-time',type=float,default=1.01);p.add_argument('--mumps-memory-retry',action='store_true');p.add_argument('--diagnostics',action='store_true');p.add_argument('--ignore-zero-entries',action='store_true');p.add_argument('--hash-assembly',action='store_true');a=p.parse_args();print(json.dumps(build(a.preparation,a.motion,a.output,a.end_time,a.mumps_memory_retry,a.diagnostics,a.ignore_zero_entries,a.hash_assembly),indent=2))
