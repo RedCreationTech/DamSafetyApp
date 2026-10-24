@@ -14,12 +14,13 @@ registerMooseObject("DamSafetyApp", AqueductConstraintNodesGenerator);
 InputParameters AqueductLinearMPC::validParams()
 {
   auto p=NodalConstraint::validParams();
-  p.addClassDescription("Conservative linear multivariable nodal constraint with a Lagrange multiplier");
+  p.addClassDescription("Conservative linear multivariable mixed row with optional physical compliance");
   p.addRequiredParam<dof_id_type>("anchor_node","Node carrying this row's multiplier");
   p.addRequiredParam<std::vector<dof_id_type>>("term_nodes","Node for every linear term");
   p.addRequiredCoupledVar("terms","Variable for every term, in the same order as term_nodes");
   p.addRequiredParam<std::vector<Real>>("coefficients","Coefficients in C*u=0");
   p.addRequiredCoupledVar("multiplier","One multiplier variable active at anchor_node");
+  p.addRangeCheckedParam<Real>("multiplier_compliance",0.,"multiplier_compliance>=0","Physical compliance in C*u-compliance*lambda=0; zero is a kinematic row");
   p.suppressParameter<MooseEnum>("formulation");
   p.suppressParameter<NonlinearVariableName>("variable_secondary");
   p.set<bool>("use_displaced_mesh")=false;
@@ -28,12 +29,13 @@ InputParameters AqueductLinearMPC::validParams()
 AqueductLinearMPC::AqueductLinearMPC(const InputParameters & p)
  :NodalConstraint(p),_anchor(getParam<dof_id_type>("anchor_node")),
  _nodes(getParam<std::vector<dof_id_type>>("term_nodes")),
- _coefficients(getParam<std::vector<Real>>("coefficients")),_multiplier(getVar("multiplier",0))
+ _coefficients(getParam<std::vector<Real>>("coefficients")),_multiplier(getVar("multiplier",0)),_compliance(getParam<Real>("multiplier_compliance"))
 {
   if(_nodes.size()<2 || _nodes.size()!=_coefficients.size() || _nodes.size()!=coupledComponents("terms"))
     paramError("term_nodes","At least two matching nodes, variables and coefficients are required");
   if(coupledComponents("multiplier")!=1) paramError("multiplier","Exactly one multiplier is required");
   if(getParam<bool>("use_displaced_mesh")) paramError("use_displaced_mesh","Linear MPC uses reference coordinates");
+  if(!std::isfinite(_compliance))paramError("multiplier_compliance","Finite physical compliance required");
   std::set<dof_id_type> primary;
   for(unsigned j=0;j<_nodes.size();++j)
   {
@@ -81,7 +83,7 @@ void AqueductLinearMPC::computeResidual(const NumericVector<Number> &)
     r(j)=_coefficients[j]*solution(ids.back())*_variables[j]->scalingFactor();
     gap+=_coefficients[j]*solution(ids[j]);
   }
-  r(ids.size()-1)=gap*_multiplier->scalingFactor();
+  r(ids.size()-1)=(gap-_compliance*solution(ids.back()))*_multiplier->scalingFactor();
   addResiduals(_assembly,r,ids,1.);
 }
 void AqueductLinearMPC::computeJacobian(const SparseMatrix<Number> &)
@@ -92,6 +94,7 @@ void AqueductLinearMPC::computeJacobian(const SparseMatrix<Number> &)
     K(j,ids.size()-1)=_coefficients[j]*_variables[j]->scalingFactor();
     K(ids.size()-1,j)=_coefficients[j]*_multiplier->scalingFactor();
   }
+  K(ids.size()-1,ids.size()-1)=-_compliance*_multiplier->scalingFactor();
   addJacobian(_assembly,K,ids,ids,1.);
 }
 Real AqueductLinearMPC::computeQpResidual(Moose::ConstraintType)

@@ -10,7 +10,7 @@ from collections import defaultdict
 import numpy as np
 import netCDF4
 import abaqus2exodus as mesh
-from map_aqueduct_interfaces import read_geometry,sha
+from map_aqueduct_interfaces import read_geometry,sha,cartesian_connector_terms
 from build_aqueduct_interface_cases import block
 
 FIELDS=('ux','uy','uz','rx','ry','rz')
@@ -18,7 +18,7 @@ ALPHA=-.41421;BETA=(1-ALPHA)**2/4;GAMMA=.5-ALPHA
 
 def quoted(values):return "'"+' '.join(map(str,values))+"'"
 
-def build(preparation,motion,output,end_time=1.01,mumps_memory_retry=False,diagnostics=False,ignore_zero_entries=False,hash_assembly=False,field_interval=0.):
+def build(preparation,motion,output,end_time=1.01,mumps_memory_retry=False,diagnostics=False,ignore_zero_entries=False,hash_assembly=False,field_interval=0.,cartesian_arm=False):
     root=Path(preparation);out=Path(output);motion=Path(motion)
     if out.exists():raise ValueError('output exists')
     c=json.loads((root/'assembly-contract.json').read_text());implementation=json.loads((root/'interface-implementation.json').read_text())
@@ -46,6 +46,10 @@ def build(preparation,motion,output,end_time=1.01,mumps_memory_retry=False,diagn
     with (root/'embedded-runtime-map.csv').open() as f:embedded_nodes=[int(r['secondary_node']) for r in csv.DictReader(f)]
     meshblocks+=block('embedded_support',f'type = AqueductConstraintNodesGenerator\ninput = {previous}\nnodes = {quoted(embedded_nodes)}\nblock_id = 220\nblock_name = embedded_support');previous='embedded_support'
     lmnames+=['embedded_lm_x','embedded_lm_y','embedded_lm_z']
+    if cartesian_arm:
+        anchors=[r['endpoints'][0]['node']-1 for r in c['interfaces']['connectors']]
+        meshblocks+=block('connector_support',f'type = AqueductConstraintNodesGenerator\ninput = {previous}\nnodes = {quoted(anchors)}\nblock_id = 221\nblock_name = connector_support');previous='connector_support'
+        lmnames += ['connector_lm_'+a for a in 'xyz']
     for j in range(1,5):
         for k,role in enumerate(('secondary','primary')):
             name=f'contact_{j}_{role}';meshblocks+=block(name,f'type = LowerDBlockFromSidesetGenerator\ninput = {previous}\nsidesets = aq_contact_{j:02d}_{role}\nnew_block_id = {300+2*j+k}\nnew_block_name = {name}');previous=name
@@ -56,6 +60,7 @@ def build(preparation,motion,output,end_time=1.01,mumps_memory_retry=False,diagn
     variables+=''.join(block(f'lm{j}',f'block = {200+j}') for j in sorted(support))
     for j in range(1,5):variables+=''.join(block(v+str(j),f'block = contact_{j}_secondary\nuse_dual = true\nscaling = .01') for v in ('normal_lm','tangent_1_','tangent_2_'))
     variables+=''.join(block('embedded_lm_'+a,'block = 220') for a in 'xyz')
+    if cartesian_arm:variables+=''.join(block('connector_lm_'+a,'block = 221') for a in 'xyz')
     text+=block('Variables',variables)
     physics=''
     for name,bb in [('concrete',concrete),('steel',steel)]:physics+=block(name,'block = '+quoted(bb)+"\nstrain = SMALL\nincremental = true\nvolumetric_locking_correction = true\nsave_in = 'fx fy fz'\ngenerate_output = 'stress_xx stress_yy stress_zz stress_xy stress_xz stress_yz strain_xx strain_yy strain_zz strain_xy strain_xz strain_yz'")
@@ -99,6 +104,7 @@ def build(preparation,motion,output,end_time=1.01,mumps_memory_retry=False,diagn
     text+=block('Materials',materials)
     kernels=''.join(block(f'lm{j}',f'type = NullKernel\nvariable = lm{j}\nblock = {200+j}\ndisplacements = \'\'\njacobian_fill = 0') for j in sorted(support))
     kernels+=''.join(block('embedded_lm_'+a,f'type = NullKernel\nvariable = embedded_lm_{a}\nblock = 220\ndisplacements = \'\'\njacobian_fill = 0') for a in 'xyz')
+    if cartesian_arm:kernels+=''.join(block('connector_lm_'+a,f'type = NullKernel\nvariable = connector_lm_{a}\nblock = 221\ndisplacements = \'\'\njacobian_fill = 0') for a in 'xyz')
     for b in bars:
         for j,v in enumerate(FIELDS[:3]):kernels+=block(f'bar_{b}_{v}',f'type = StressDivergenceTensorsTruss\nvariable = {v}\nblock = {b}\ncomponent = {j}\narea = area_{b}\nuse_displaced_mesh = false')
     for j,v in enumerate(FIELDS):
@@ -132,9 +138,18 @@ def build(preparation,motion,output,end_time=1.01,mumps_memory_retry=False,diagn
     for i,r in enumerate(rows):constraints+=block(f'mpc_{i}',f'type = AqueductLinearMPC\nvariable = ux\nanchor_node = {r["anchor"]}\nterm_nodes = {quoted(t["node"] for t in r["terms"])}\nterms = {quoted(t["variable"] for t in r["terms"])}\ncoefficients = {quoted(t["coefficient"] for t in r["terms"])}\nmultiplier = lm{r["multiplier"]}')
     allowed=sorted({b for g in implementation['embedded_groups'] for b in g['primary_blocks']})
     constraints+=block('embedded_mpc',f'type = AqueductEmbeddedMPC\nvariable = ux\ndisplacements = \'ux uy uz\'\nmultipliers = \'embedded_lm_x embedded_lm_y embedded_lm_z\'\nallowed_primary_block_ids = {quoted(allowed)}\nsource_map = embedded-runtime-map.csv')
+    connector_rows=[]
     for j,r in enumerate(c['interfaces']['connectors']):
         a,b=[x['node']-1 for x in r['endpoints']]
-        for v,k in zip(FIELDS,[605000,605000,21965000]):constraints+=block(f'connector_{j}_{v}',f'type = LinearNodalConstraint\nvariable = {v}\nprimary = {a}\nsecondary_node_ids = {b}\nweights = 1\npenalty = {k}\nformulation = penalty')
+        if cartesian_arm:
+            terms=cartesian_connector_terms(a,b,xyz[b]-xyz[a])
+            for axis,k,tt in zip('xyz',[605000,605000,21965000],terms):
+                name=f'connector_{j}_{axis}'
+                constraints+=block(name,f'type = AqueductLinearMPC\nvariable = ux\nanchor_node = {a}\nterm_nodes = {quoted(t["node"] for t in tt)}\nterms = {quoted(t["variable"] for t in tt)}\ncoefficients = {quoted(t["coefficient"] for t in tt)}\nmultiplier = connector_lm_{axis}\nmultiplier_compliance = {1/k}')
+                connector_rows.append(dict(connector=j,axis=axis,anchor=a,multiplier='connector_lm_'+axis,terms=tt,compliance_m_per_N=1/k,stiffness_N_per_m=k,reference_arm_m=(xyz[b]-xyz[a]).tolist()))
+        else:
+            for v,k in zip(FIELDS,[605000,605000,21965000]):constraints+=block(f'connector_{j}_{v}',f'type = LinearNodalConstraint\nvariable = {v}\nprimary = {a}\nsecondary_node_ids = {b}\nweights = 1\npenalty = {k}\nformulation = penalty')
+    if cartesian_arm:(out/'connector-implementation.json').write_text(json.dumps(dict(formulation='Linearized corotating node-a Cartesian with exact physical compliance; Align rows unchanged',rows=connector_rows),indent=2)+'\n')
     userobjects=''
     for j in range(1,5):
         common=f'primary_boundary = aq_contact_{j:02d}_primary\nsecondary_boundary = aq_contact_{j:02d}_secondary\nprimary_subdomain = contact_{j}_primary\nsecondary_subdomain = contact_{j}_secondary\ncorrect_edge_dropping = true\nuse_displaced_mesh = true'
@@ -171,6 +186,10 @@ def build(preparation,motion,output,end_time=1.01,mumps_memory_retry=False,diagn
         for endp in r['endpoints']:
             n=endp['node']-1
             for v in FIELDS:post+=block(f'connector_{j}_n{n}_{v}',f'type = NodalVariableValue\nvariable = {v}\nnodeid = {n}')
+    if cartesian_arm:
+        for j,r in enumerate(c['interfaces']['connectors']):
+            a=r['endpoints'][0]['node']-1
+            for axis in 'xyz':post+=block(f'connector_{j}_force_{axis}',f'type = NodalVariableValue\nvariable = connector_lm_{axis}\nnodeid = {a}')
     for j in range(1,5):
         for v in (f'normal_lm{j}',f'tangent_1_{j}',f'tangent_2_{j}'):
             for extreme in ('min','max'):
@@ -204,9 +223,10 @@ def build(preparation,motion,output,end_time=1.01,mumps_memory_retry=False,diagn
     identity['ignore_zero_jacobian_entries']=ignore_zero_entries
     identity['hash_table_matrix_assembly']=hash_assembly
     identity['field_output_minimum_interval_s']=field_interval
+    identity['connector_formulation']='linearized Cartesian with node-a reference arm and conjugate moment; Align unchanged' if cartesian_arm else 'fixed-global translation springs plus Align; noncoincident arm terms missing'
     identity['history_output']='Every accepted step CSV; native previous NONTIME and rotation accelerations preserved at each sampled field frame' if field_interval>0 else 'Every accepted step CSV and full fields'
     identity['native_diagnostics']=dict(enabled=diagnostics,bar_fields=5,shell_inplane_qps=4,shell_layers=3,shell_state_components=['local_sxx','local_syy','local_szz','local_sxy','peq'],residual_tags=['TIME','NONTIME'],meaning='Unmodified complete tagged residuals; reconstruct normalized HHT before nodal BCs; not direct Abaqus RF') if diagnostics else None
     identity['artifacts']={p.name:sha(p) for p in out.iterdir()};(out/'full-input-identity.json').write_text(json.dumps(identity,indent=2)+'\n');return identity
 
 if __name__=='__main__':
-    p=argparse.ArgumentParser(description=__doc__);p.add_argument('--preparation',required=True);p.add_argument('--motion',required=True);p.add_argument('--output',required=True);p.add_argument('--end-time',type=float,default=1.01);p.add_argument('--mumps-memory-retry',action='store_true');p.add_argument('--diagnostics',action='store_true');p.add_argument('--ignore-zero-entries',action='store_true');p.add_argument('--hash-assembly',action='store_true');p.add_argument('--field-interval',type=float,default=0.);a=p.parse_args();print(json.dumps(build(a.preparation,a.motion,a.output,a.end_time,a.mumps_memory_retry,a.diagnostics,a.ignore_zero_entries,a.hash_assembly,a.field_interval),indent=2))
+    p=argparse.ArgumentParser(description=__doc__);p.add_argument('--preparation',required=True);p.add_argument('--motion',required=True);p.add_argument('--output',required=True);p.add_argument('--end-time',type=float,default=1.01);p.add_argument('--mumps-memory-retry',action='store_true');p.add_argument('--diagnostics',action='store_true');p.add_argument('--ignore-zero-entries',action='store_true');p.add_argument('--hash-assembly',action='store_true');p.add_argument('--field-interval',type=float,default=0.);p.add_argument('--cartesian-arm',action='store_true');a=p.parse_args();print(json.dumps(build(a.preparation,a.motion,a.output,a.end_time,a.mumps_memory_retry,a.diagnostics,a.ignore_zero_entries,a.hash_assembly,a.field_interval,a.cartesian_arm),indent=2))

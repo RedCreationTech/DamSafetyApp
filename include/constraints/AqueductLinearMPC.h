@@ -2,7 +2,7 @@
 #include "NodalConstraint.h"
 #include "MeshGenerator.h"
 
-// Exact linear constraint C*u=0 with its conjugate nodal multiplier: no penalty.
+// Mixed linear row C*u-compliance*lambda=0 and conjugate C^T*lambda; zero compliance is kinematic.
 class AqueductLinearMPC : public NodalConstraint
 {
 public:
@@ -19,6 +19,7 @@ protected:
   std::vector<Real> _coefficients;
   std::vector<MooseVariable *> _variables;
   MooseVariable * _multiplier;
+  const Real _compliance;
 };
 
 // Zero-dimensional support activates multiplier DOFs only at actual anchors.

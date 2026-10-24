@@ -29,6 +29,22 @@ class InterfaceMappingTest(unittest.TestCase):
         host=-np.einsum('ijk,j->ik',P,force)-np.einsum('ijk,j->ik',A,moment)
         np.testing.assert_allclose(host.sum(0)+force,0,atol=1e-12)
         np.testing.assert_allclose(np.cross(self.q,host).sum(0)+np.cross(p['point']+r,force)+moment,0,atol=1e-12)
+    def test_cartesian_arm_rigid_motion_and_conjugate_moment(self):
+        for d in ([.1,.2,.3],[0,0,.1],[0,0,0]):
+            d=np.array(d);rows=tool.cartesian_connector_terms(0,1,d);C=np.zeros((3,9))
+            for j,terms in enumerate(rows):
+                for term in terms:
+                    col=(0 if term['node']==0 else 3)+'xyz'.index(term['variable'][-1]) if term['variable'][0]=='u' else 6+'xyz'.index(term['variable'][-1])
+                    C[j,col]+=term['coefficient']
+            w=np.array([.002,-.003,.001]);translation=np.array([.1,.2,-.3]);rigid=np.r_[translation,translation+np.cross(w,d),w]
+            np.testing.assert_allclose(C@rigid,0,atol=1e-16)
+            force=np.array([12.,-7,3]);reaction=C.T@force
+            np.testing.assert_allclose(reaction[:3]+reaction[3:6],0,atol=1e-14)
+            np.testing.assert_allclose(np.cross(d,reaction[3:6])+reaction[6:],0,atol=1e-14)
+            q=np.linspace(-.003,.004,9);np.testing.assert_allclose(C@q,q[3:6]-q[:3]-np.cross(q[6:],d),atol=1e-16)
+            K=C.T@np.diag([605000,605000,21965000])@C
+            np.testing.assert_allclose(K,K.T,atol=1e-10)
+            self.assertGreaterEqual(float(q@K@q),0.)
     def test_projection_does_not_fall_back_to_unrelated_surface(self):
         facets=[dict(nodes=[1,2,3,4],instance='HOST',element_label=1,face='S2')]
         with self.assertRaises(ValueError):tool.project_surface([np.array([.5,.5,.06])],facets,self.q)

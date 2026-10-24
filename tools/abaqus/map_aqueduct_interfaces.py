@@ -58,6 +58,18 @@ def project_surface(points,facets,coords,max_distance=1e-5):
     return results
 
 
+def cartesian_connector_terms(a,b,reference_arm):
+    """First-order corotating node-a frame: s=ub-ua-theta_a cross d0."""
+    d=np.asarray(reference_arm,dtype=float)
+    if d.shape!=(3,) or not np.isfinite(d).all():raise ValueError('Finite 3D reference arm required')
+    C=cross_matrix(d);rows=[]
+    for j,axis in enumerate('xyz'):
+        terms=[dict(node=a,variable='u'+axis,coefficient=-1.),dict(node=b,variable='u'+axis,coefficient=1.)]
+        terms.extend(dict(node=a,variable='r'+rotation,coefficient=float(C[j,k])) for k,rotation in enumerate('xyz') if C[j,k]!=0.)
+        rows.append(terms)
+    return rows
+
+
 def rotation_operator(gradients,normal):
     return np.array([np.outer(np.cross(g,normal),normal)+.5*np.outer(normal,np.cross(normal,g)) for g in gradients])
 
