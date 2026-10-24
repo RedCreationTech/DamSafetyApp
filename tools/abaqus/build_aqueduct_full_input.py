@@ -18,7 +18,7 @@ ALPHA=-.41421;BETA=(1-ALPHA)**2/4;GAMMA=.5-ALPHA
 
 def quoted(values):return "'"+' '.join(map(str,values))+"'"
 
-def build(preparation,motion,output,end_time=1.01):
+def build(preparation,motion,output,end_time=1.01,mumps_memory_retry=False):
     root=Path(preparation);out=Path(output);motion=Path(motion)
     if out.exists():raise ValueError('output exists')
     c=json.loads((root/'assembly-contract.json').read_text());implementation=json.loads((root/'interface-implementation.json').read_text())
@@ -146,10 +146,16 @@ def build(preparation,motion,output,end_time=1.01):
     text+=block('Postprocessors',post)+block('Preconditioning',block('smp','type = SMP\nfull = true'))
     text+=block('Executioner',f'type = Transient\nsolve_type = NEWTON\nend_time = {end_time}\ndtmin = 1e-8\nnl_abs_tol = 1e-5\nnl_rel_tol = 1e-8\nnl_max_its = 35\nline_search = basic\npetsc_options_iname = \'-pc_type -pc_factor_mat_solver_type\'\npetsc_options_value = \'lu mumps\'\n'+block('TimeIntegrator',f'type = AqueductHHT\nbeta = {BETA}\ngamma = {GAMMA}\nhht_alpha = {ALPHA}\nhht_start_time = 1\ninactive_tsteps = 1\nalgebraic_variables = {quoted(lmnames)}')+block('TimeStepper','type = FunctionDT\nfunction = dt_clock'))
     text+=block('Outputs','csv = true\nexodus = true\nprint_linear_residuals = false')
+    if mumps_memory_retry:
+        # R02 failed FACTOR_OUTMEMORY before a usable Newton correction.
+        # Bound per-rank factor memory on the selected32GB node; keep all physics.
+        text=text.replace("petsc_options_iname = '-pc_type -pc_factor_mat_solver_type'", "petsc_options = '-ksp_error_if_not_converged -ksp_converged_reason'\npetsc_options_iname = '-pc_type -pc_factor_mat_solver_type -mat_mumps_icntl_14 -mat_mumps_icntl_4 -mat_mumps_icntl_23'")
+        text=text.replace("petsc_options_value = 'lu mumps'", "petsc_options_value = 'lu mumps 100 2 2048'")
     (out/'aqueduct_full_candidate.i').write_text(text)
     identity=dict(case_id=c['case_id'],full_assembly=True,end_time_total_s=end_time,dynamic_duration_s=end_time-1,source_inp=c['source'],source_contract_sha256=sha(root/'assembly-contract.json'),elements={k:sum(len(g['ids']) for g in group.values() if g['signature'][0]==k) for k in ('HEX8','TRUSS','SHELL4')},nodes=len(xyz),mpc_rows=len(rows),embedded_nodes=len(embedded_nodes),embedded_equations=3*len(embedded_nodes),embedded_formulation='explicit conjugate multipliers; all physical mass/force retained; current algebraic rows',connector_count=4,contact_pairs=4,probes=probes,hht=dict(alpha=ALPHA,beta=BETA,gamma=GAMMA),first_candidate_user_regression_waiver='2026-10-24; seven not run, not passed',
                   deviations=['HEX8 full integration Bbar and six-DOF MITC4/SPOS shell accepted engineering replacements.', 'Custom consistent primal mortar Tie; actual slave membership preserved, coefficients differ from Abaqus; only fully bound secondary facets integrated.', 'Candidate normal-plane Tie adjustment, max .198 micrometre; exact ODB adjustment pending.', 'Explicit HHT alpha=-.41421 inferred from 2025 contact default; exact Abaqus2022 parameters unverified.', 'Base DOFs4-6 are absent on solid base nodes, so source zero rotation BCs have no active DOF; no physical rotary restraint is removed.', 'Unforced static stage one step instead of Abaqus automatic increments; source stabilization .0002 not implemented; zero displacement gives zero stabilization work.', 'Short first full-assembly candidate, not complete27.5s; no matching Abaqus output or engineering threshold.', 'Consistent truss line mass rho*A; original Abaqus reduced-integration/hourglass and source truss mass equivalence pending.'])
+    identity['solver_memory_policy']=dict(workspace_estimate_increase_percent=100,max_working_memory_MB_per_rank=2048,MPI_ranks=4,diagnostic_print_level=2,error_on_linear_failure=True,physics_and_tolerances_unchanged=True) if mumps_memory_retry else None
     identity['artifacts']={p.name:sha(p) for p in out.iterdir()};(out/'full-input-identity.json').write_text(json.dumps(identity,indent=2)+'\n');return identity
 
 if __name__=='__main__':
-    p=argparse.ArgumentParser(description=__doc__);p.add_argument('--preparation',required=True);p.add_argument('--motion',required=True);p.add_argument('--output',required=True);p.add_argument('--end-time',type=float,default=1.01);a=p.parse_args();print(json.dumps(build(a.preparation,a.motion,a.output,a.end_time),indent=2))
+    p=argparse.ArgumentParser(description=__doc__);p.add_argument('--preparation',required=True);p.add_argument('--motion',required=True);p.add_argument('--output',required=True);p.add_argument('--end-time',type=float,default=1.01);p.add_argument('--mumps-memory-retry',action='store_true');a=p.parse_args();print(json.dumps(build(a.preparation,a.motion,a.output,a.end_time,a.mumps_memory_retry),indent=2))
