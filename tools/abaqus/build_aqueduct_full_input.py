@@ -42,6 +42,10 @@ def build(preparation,motion,output,end_time=1.01):
     meshblocks=block('source','type = FileMeshGenerator\nfile = assembly-geometry.e');previous='source';lmnames=[]
     for j,nodes in sorted(support.items()):
         name=f'lm_support_{j}';meshblocks+=block(name,f'type = AqueductConstraintNodesGenerator\ninput = {previous}\nnodes = {quoted(sorted(nodes))}\nblock_id = {200+j}\nblock_name = {name}');previous=name;lmnames.append(f'lm{j}')
+    embedded_nodes=[]
+    with (root/'embedded-runtime-map.csv').open() as f:embedded_nodes=[int(r['secondary_node']) for r in csv.DictReader(f)]
+    meshblocks+=block('embedded_support',f'type = AqueductConstraintNodesGenerator\ninput = {previous}\nnodes = {quoted(embedded_nodes)}\nblock_id = 220\nblock_name = embedded_support');previous='embedded_support'
+    lmnames+=['embedded_lm_x','embedded_lm_y','embedded_lm_z']
     for j in range(1,5):
         for k,role in enumerate(('secondary','primary')):
             name=f'contact_{j}_{role}';meshblocks+=block(name,f'type = LowerDBlockFromSidesetGenerator\ninput = {previous}\nsidesets = aq_contact_{j:02d}_{role}\nnew_block_id = {300+2*j+k}\nnew_block_name = {name}');previous=name
@@ -51,6 +55,7 @@ def build(preparation,motion,output,end_time=1.01):
     variables=''.join(block(v,'block = '+quoted(sorted(group)) if j<3 else 'block = '+quoted(shell)) for j,v in enumerate(FIELDS))
     variables+=''.join(block(f'lm{j}',f'block = {200+j}') for j in sorted(support))
     for j in range(1,5):variables+=''.join(block(v+str(j),f'block = contact_{j}_secondary\nuse_dual = true\nscaling = .01') for v in ('normal_lm','tangent_1_','tangent_2_'))
+    variables+=''.join(block('embedded_lm_'+a,'block = 220') for a in 'xyz')
     text+=block('Variables',variables)
     physics=''
     for name,bb in [('concrete',concrete),('steel',steel)]:physics+=block(name,'block = '+quoted(bb)+"\nstrain = SMALL\nincremental = true\nvolumetric_locking_correction = true\nsave_in = 'fx fy fz'\ngenerate_output = 'stress_xx stress_yy stress_zz stress_xy stress_xz stress_yz strain_xx strain_yy strain_zz strain_xy strain_xz strain_yz'")
@@ -78,6 +83,7 @@ def build(preparation,motion,output,end_time=1.01):
     for b in bars:materials+=block(f'line_mass_{b}',f'type = GenericConstantMaterial\nblock = {b}\nprop_names = density\nprop_values = {7850*group[b]["section"]["area_m2"]}')
     text+=block('Materials',materials)
     kernels=''.join(block(f'lm{j}',f'type = NullKernel\nvariable = lm{j}\nblock = {200+j}\ndisplacements = \'\'\njacobian_fill = 0') for j in sorted(support))
+    kernels+=''.join(block('embedded_lm_'+a,f'type = NullKernel\nvariable = embedded_lm_{a}\nblock = 220\ndisplacements = \'\'\njacobian_fill = 0') for a in 'xyz')
     for b in bars:
         for j,v in enumerate(FIELDS[:3]):kernels+=block(f'bar_{b}_{v}',f'type = StressDivergenceTensorsTruss\nvariable = {v}\nblock = {b}\ncomponent = {j}\narea = area_{b}\nuse_displaced_mesh = false')
     for j,v in enumerate(FIELDS):
@@ -91,9 +97,8 @@ def build(preparation,motion,output,end_time=1.01):
     text+=block('AuxKernels',auxkernels)
     constraints=''
     for i,r in enumerate(rows):constraints+=block(f'mpc_{i}',f'type = AqueductLinearMPC\nvariable = ux\nanchor_node = {r["anchor"]}\nterm_nodes = {quoted(t["node"] for t in r["terms"])}\nterms = {quoted(t["variable"] for t in r["terms"])}\ncoefficients = {quoted(t["coefficient"] for t in r["terms"])}\nmultiplier = lm{r["multiplier"]}')
-    for j,g in enumerate(implementation['embedded_groups']):
-        for owner in g['owning_secondary_blocks']:
-            for v in FIELDS[:3]:constraints+=block(f'embed_{j}_{owner}_{v}',f'type = AqueductEmbeddedConstraint\nvariable = {v}\nprimary_variable = {v}\nprimary = {g["primary_blocks"][0]}\nsecondary = {owner}\nallowed_primary_block_ids = {quoted(g["primary_blocks"])}\nsource_map = embedded-runtime-map.csv\nformulation = kinematic\npenalty = 1e10')
+    allowed=sorted({b for g in implementation['embedded_groups'] for b in g['primary_blocks']})
+    constraints+=block('embedded_mpc',f'type = AqueductEmbeddedMPC\nvariable = ux\ndisplacements = \'ux uy uz\'\nmultipliers = \'embedded_lm_x embedded_lm_y embedded_lm_z\'\nallowed_primary_block_ids = {quoted(allowed)}\nsource_map = embedded-runtime-map.csv')
     for j,r in enumerate(c['interfaces']['connectors']):
         a,b=[x['node']-1 for x in r['endpoints']]
         for v,k in zip(FIELDS,[605000,605000,21965000]):constraints+=block(f'connector_{j}_{v}',f'type = LinearNodalConstraint\nvariable = {v}\nprimary = {a}\nsecondary_node_ids = {b}\nweights = 1\npenalty = {k}\nformulation = penalty')
@@ -142,7 +147,7 @@ def build(preparation,motion,output,end_time=1.01):
     text+=block('Executioner',f'type = Transient\nsolve_type = NEWTON\nend_time = {end_time}\ndtmin = 1e-8\nnl_abs_tol = 1e-5\nnl_rel_tol = 1e-8\nnl_max_its = 35\nline_search = basic\npetsc_options_iname = \'-pc_type -pc_factor_mat_solver_type\'\npetsc_options_value = \'lu mumps\'\n'+block('TimeIntegrator',f'type = AqueductHHT\nbeta = {BETA}\ngamma = {GAMMA}\nhht_alpha = {ALPHA}\nhht_start_time = 1\ninactive_tsteps = 1\nalgebraic_variables = {quoted(lmnames)}')+block('TimeStepper','type = FunctionDT\nfunction = dt_clock'))
     text+=block('Outputs','csv = true\nexodus = true\nprint_linear_residuals = false')
     (out/'aqueduct_full_candidate.i').write_text(text)
-    identity=dict(case_id=c['case_id'],full_assembly=True,end_time_total_s=end_time,dynamic_duration_s=end_time-1,source_inp=c['source'],source_contract_sha256=sha(root/'assembly-contract.json'),elements={k:sum(len(g['ids']) for g in group.values() if g['signature'][0]==k) for k in ('HEX8','TRUSS','SHELL4')},nodes=len(xyz),mpc_rows=len(rows),embedded_nodes=13562,connector_count=4,contact_pairs=4,probes=probes,hht=dict(alpha=ALPHA,beta=BETA,gamma=GAMMA),first_candidate_user_regression_waiver='2026-10-24; seven not run, not passed',
+    identity=dict(case_id=c['case_id'],full_assembly=True,end_time_total_s=end_time,dynamic_duration_s=end_time-1,source_inp=c['source'],source_contract_sha256=sha(root/'assembly-contract.json'),elements={k:sum(len(g['ids']) for g in group.values() if g['signature'][0]==k) for k in ('HEX8','TRUSS','SHELL4')},nodes=len(xyz),mpc_rows=len(rows),embedded_nodes=len(embedded_nodes),embedded_equations=3*len(embedded_nodes),embedded_formulation='explicit conjugate multipliers; all physical mass/force retained; current algebraic rows',connector_count=4,contact_pairs=4,probes=probes,hht=dict(alpha=ALPHA,beta=BETA,gamma=GAMMA),first_candidate_user_regression_waiver='2026-10-24; seven not run, not passed',
                   deviations=['HEX8 full integration Bbar and six-DOF MITC4/SPOS shell accepted engineering replacements.', 'Custom consistent primal mortar Tie; actual slave membership preserved, coefficients differ from Abaqus; only fully bound secondary facets integrated.', 'Candidate normal-plane Tie adjustment, max .198 micrometre; exact ODB adjustment pending.', 'Explicit HHT alpha=-.41421 inferred from 2025 contact default; exact Abaqus2022 parameters unverified.', 'Base DOFs4-6 are absent on solid base nodes, so source zero rotation BCs have no active DOF; no physical rotary restraint is removed.', 'Unforced static stage one step instead of Abaqus automatic increments; source stabilization .0002 not implemented; zero displacement gives zero stabilization work.', 'Short first full-assembly candidate, not complete27.5s; no matching Abaqus output or engineering threshold.', 'Consistent truss line mass rho*A; original Abaqus reduced-integration/hourglass and source truss mass equivalence pending.'])
     identity['artifacts']={p.name:sha(p) for p in out.iterdir()};(out/'full-input-identity.json').write_text(json.dumps(identity,indent=2)+'\n');return identity
 
