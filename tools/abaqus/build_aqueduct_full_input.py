@@ -193,7 +193,8 @@ def build(preparation,motion,output,end_time=1.01,mumps_memory_retry=False,diagn
         text+=block('Outputs/profile','type = PerfGraphOutput\nlevel = 5\nheaviest_sections = 25\nheaviest_branch = true')
         text=text.replace('-mat_mumps_icntl_23\'', '-mat_mumps_icntl_23 -ksp_view_mat\'').replace('lu mumps 100 2 2048\'', 'lu mumps 100 2 2048 ::ascii_info_detail\'')
     if field_interval>0:
-        text=text.replace('exodus = true','exodus = false')
+        text=text.replace('exodus = true','exodus = false\nconsole = false')
+        text+=block('Outputs/terminal','type = Console\nmax_rows = 2')
         text+=block('Outputs/fields',f'type = Exodus\nfile_base = aqueduct_full_candidate_out\nmin_simulation_time_interval = {field_interval}\nexecute_on = \'initial timestep_end final\'')
         text=text.replace('::ascii_info_detail','::ascii_info')
     (out/'aqueduct_full_candidate.i').write_text(text)
