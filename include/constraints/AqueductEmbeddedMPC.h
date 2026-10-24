@@ -1,5 +1,6 @@
 #pragma once
 #include "NodalConstraint.h"
+#include "AqueductMPCAssemblyStorage.h"
 #include <array>
 
 /** Audited host interpolation with explicit conjugate multipliers.
@@ -20,8 +21,11 @@ protected:
     std::array<Real,9> coefficients;
   };
   std::vector<Row> _rows;
+  const bool _reuse_storage;
+  std::vector<AqueductMPCAssemblyStorage> _storage;
   std::array<MooseVariable *,3> _physical, _multipliers;
   std::vector<dof_id_type> dofs(const Row &,unsigned int) const;
+  void dofs(const Row &,unsigned int,std::vector<dof_id_type> &) const;
   Real computeQpResidual(Moose::ConstraintType) override;
   Real computeQpJacobian(Moose::ConstraintJacobianType) override;
 };

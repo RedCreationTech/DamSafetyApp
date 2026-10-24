@@ -20,13 +20,15 @@ InputParameters AqueductEmbeddedMPC::validParams()
   p.addRequiredCoupledVar("multipliers","Three explicit current-time constraint multipliers");
   p.addRequiredParam<FileName>("source_map","Audited unique embedded node/host geometry map");
   p.addRequiredParam<std::vector<SubdomainID>>("allowed_primary_block_ids","Source-approved solid host blocks");
+  p.addParam<bool>("reuse_assembly_storage",false,"Reuse constant row matrices and containers; refresh DOF values every call");
   p.suppressParameter<MooseEnum>("formulation");
   p.suppressParameter<NonlinearVariableName>("variable_secondary");
   p.set<bool>("use_displaced_mesh")=false;
   p.addClassDescription("Batched conservative host-restricted embedded MPC, including dynamic mass transfer");
   return p;
 }
-AqueductEmbeddedMPC::AqueductEmbeddedMPC(const InputParameters & p):NodalConstraint(p)
+AqueductEmbeddedMPC::AqueductEmbeddedMPC(const InputParameters & p):NodalConstraint(p),
+ _reuse_storage(getParam<bool>("reuse_assembly_storage"))
 {
   if(getParam<bool>("use_displaced_mesh"))paramError("use_displaced_mesh","Source SMALL strain uses reference coordinates");
   if(coupledComponents("displacements")!=3 || coupledComponents("multipliers")!=3)
@@ -77,6 +79,12 @@ AqueductEmbeddedMPC::AqueductEmbeddedMPC(const InputParameters & p):NodalConstra
     if(node->processor_id()==processor_id())_rows.push_back(row);
   }
   if(seen.empty())paramError("source_map","Empty source map");
+  if(_reuse_storage)
+  {
+    _storage.reserve(3*_rows.size());
+    for(const auto & row:_rows)for(unsigned j=0;j<3;++j)
+      _storage.emplace_back(std::vector<Real>(row.coefficients.begin(),row.coefficients.end()),false);
+  }
   // NodalConstraint invokes this batched assembler once. Avoid reinitializing
   // dense nodal arrays for every node in the entire reinforcement network.
   if(!_rows.empty())
@@ -88,6 +96,11 @@ AqueductEmbeddedMPC::AqueductEmbeddedMPC(const InputParameters & p):NodalConstra
 std::vector<dof_id_type> AqueductEmbeddedMPC::dofs(const Row & row,unsigned j) const
 {
   std::vector<dof_id_type> ids;
+  dofs(row,j,ids);return ids;
+}
+void AqueductEmbeddedMPC::dofs(const Row & row,unsigned j,std::vector<dof_id_type> & ids) const
+{
+  ids.clear();
   for(auto id:row.nodes)
   {
     auto node=_mesh.getMesh().query_node_ptr(id);
@@ -96,13 +109,21 @@ std::vector<dof_id_type> AqueductEmbeddedMPC::dofs(const Row & row,unsigned j) c
   }
   auto node=_mesh.getMesh().query_node_ptr(row.nodes[0]);
   if(!node->n_dofs(_sys.number(),_multipliers[j]->number()))mooseError("Embedded multiplier DOF missing");
-  ids.push_back(node->dof_number(_sys.number(),_multipliers[j]->number(),0));return ids;
+  ids.push_back(node->dof_number(_sys.number(),_multipliers[j]->number(),0));
 }
 void AqueductEmbeddedMPC::computeResidual(const NumericVector<Number> &)
 {
   const auto & solution=*_sys.currentSolution();
-  for(const auto & row:_rows)for(unsigned j=0;j<3;++j)
+  for(std::size_t i=0;i<_rows.size();++i)for(unsigned j=0;j<3;++j)
   {
+    const auto & row=_rows[i];
+    if(_reuse_storage)
+    {
+      auto & storage=_storage[3*i+j];auto & ids=storage.dofs();dofs(row,j,ids);
+      auto & r=storage.residual();Real gap=0;
+      for(unsigned k=0;k<9;++k){r(k)=row.coefficients[k]*solution(ids[9])*_physical[j]->scalingFactor();gap+=row.coefficients[k]*solution(ids[k]);}
+      r(9)=gap*_multipliers[j]->scalingFactor();addResiduals(_assembly,r,ids,1.);continue;
+    }
     const auto ids=dofs(row,j);DenseVector<Number> r(10);r.zero();Real gap=0;
     for(unsigned k=0;k<9;++k){r(k)=row.coefficients[k]*solution(ids[9])*_physical[j]->scalingFactor();gap+=row.coefficients[k]*solution(ids[k]);}
     r(9)=gap*_multipliers[j]->scalingFactor();addResiduals(_assembly,r,ids,1.);
@@ -110,8 +131,16 @@ void AqueductEmbeddedMPC::computeResidual(const NumericVector<Number> &)
 }
 void AqueductEmbeddedMPC::computeJacobian(const SparseMatrix<Number> &)
 {
-  for(const auto & row:_rows)for(unsigned j=0;j<3;++j)
+  for(std::size_t i=0;i<_rows.size();++i)for(unsigned j=0;j<3;++j)
   {
+    const auto & row=_rows[i];
+    if(_reuse_storage)
+    {
+      auto & storage=_storage[3*i+j];auto & ids=storage.dofs();dofs(row,j,ids);
+      std::array<Real,9> scales;scales.fill(_physical[j]->scalingFactor());
+      const auto & K=storage.jacobian(scales,_multipliers[j]->scalingFactor(),0.);
+      addJacobian(_assembly,K,ids,ids,1.);continue;
+    }
     const auto ids=dofs(row,j);DenseMatrix<Number> K(10,10);K.zero();
     for(unsigned k=0;k<9;++k){K(k,9)=row.coefficients[k]*_physical[j]->scalingFactor();K(9,k)=row.coefficients[k]*_multipliers[j]->scalingFactor();}
     addJacobian(_assembly,K,ids,ids,1.);

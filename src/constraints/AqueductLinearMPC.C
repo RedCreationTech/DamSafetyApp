@@ -21,6 +21,7 @@ InputParameters AqueductLinearMPC::validParams()
   p.addRequiredParam<std::vector<Real>>("coefficients","Coefficients in C*u=0");
   p.addRequiredCoupledVar("multiplier","One multiplier variable active at anchor_node");
   p.addRangeCheckedParam<Real>("multiplier_compliance",0.,"multiplier_compliance>=0","Physical compliance in C*u-compliance*lambda=0; zero is a kinematic row");
+  p.addParam<bool>("reuse_assembly_storage",false,"Reuse constant row matrices and containers; refresh DOF values every call");
   p.suppressParameter<MooseEnum>("formulation");
   p.suppressParameter<NonlinearVariableName>("variable_secondary");
   p.set<bool>("use_displaced_mesh")=false;
@@ -57,10 +58,20 @@ AqueductLinearMPC::AqueductLinearMPC(const InputParameters & p)
     if(it!=_mesh.nodeToElemMap().end())for(auto eid:it->second)_subproblem.addGhostedElem(eid);
   }
   addMooseVariableDependency(_multiplier);
+  if(getParam<bool>("reuse_assembly_storage"))
+  {
+    _storage=std::make_unique<AqueductMPCAssemblyStorage>(_coefficients);
+    _scales_scratch.resize(_coefficients.size());
+  }
 }
 std::vector<dof_id_type> AqueductLinearMPC::dofs()
 {
   std::vector<dof_id_type> result;
+  dofs(result);return result;
+}
+void AqueductLinearMPC::dofs(std::vector<dof_id_type> & result)
+{
+  result.clear();
   for(unsigned j=0;j<_nodes.size();++j)
   {
     auto node=_mesh.getMesh().query_node_ptr(_nodes[j]);
@@ -72,10 +83,21 @@ std::vector<dof_id_type> AqueductLinearMPC::dofs()
   if(!node->n_dofs(_sys.number(),_multiplier->number()))
     mooseError("AqueductLinearMPC multiplier has no DOF on anchor");
   result.push_back(node->dof_number(_sys.number(),_multiplier->number(),0));
-  return result;
 }
 void AqueductLinearMPC::computeResidual(const NumericVector<Number> &)
 {
+  if(_storage)
+  {
+    auto & ids=_storage->dofs();dofs(ids);const auto & solution=*_sys.currentSolution();
+    auto & r=_storage->residual();Real gap=0;
+    for(unsigned j=0;j<_nodes.size();++j)
+    {
+      r(j)=_coefficients[j]*solution(ids.back())*_variables[j]->scalingFactor();
+      gap+=_coefficients[j]*solution(ids[j]);
+    }
+    r(ids.size()-1)=(gap-_compliance*solution(ids.back()))*_multiplier->scalingFactor();
+    addResiduals(_assembly,r,ids,1.);return;
+  }
   auto ids=dofs();const auto & solution=*_sys.currentSolution();
   DenseVector<Number> r(ids.size());r.zero();Real gap=0;
   for(unsigned j=0;j<_nodes.size();++j)
@@ -88,6 +110,13 @@ void AqueductLinearMPC::computeResidual(const NumericVector<Number> &)
 }
 void AqueductLinearMPC::computeJacobian(const SparseMatrix<Number> &)
 {
+  if(_storage)
+  {
+    auto & ids=_storage->dofs();dofs(ids);
+    for(unsigned j=0;j<_nodes.size();++j)_scales_scratch[j]=_variables[j]->scalingFactor();
+    const auto & K=_storage->jacobian(_scales_scratch,_multiplier->scalingFactor(),_compliance);
+    addJacobian(_assembly,K,ids,ids,1.);return;
+  }
   auto ids=dofs();DenseMatrix<Number> K(ids.size(),ids.size());K.zero();
   for(unsigned j=0;j<_nodes.size();++j)
   {

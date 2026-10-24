@@ -4,7 +4,7 @@
 Custom HEX8+Bbar, MITC4, mortar Tie, contact and HHT deviations are explicit in
 full-input-identity.json. This is not Abaqus equivalence or final acceptance.
 """
-import argparse,csv,json,shutil
+import argparse,csv,json,shutil,re
 from pathlib import Path
 from collections import defaultdict
 import numpy as np
@@ -18,7 +18,13 @@ ALPHA=-.41421;BETA=(1-ALPHA)**2/4;GAMMA=.5-ALPHA
 
 def quoted(values):return "'"+' '.join(map(str,values))+"'"
 
-def build(preparation,motion,output,end_time=1.01,mumps_memory_retry=False,diagnostics=False,ignore_zero_entries=False,hash_assembly=False,field_interval=0.,cartesian_arm=False,initial_dynamic_dt=None):
+def configure_mpc_storage(text, enabled=False):
+    if not enabled:return text
+    return re.sub(r'(?m)^(\s*)type = (AqueductLinearMPC|AqueductEmbeddedMPC)$',
+                  lambda m:m.group(0)+'\n'+m.group(1)+'reuse_assembly_storage = true',text)
+
+
+def build(preparation,motion,output,end_time=1.01,mumps_memory_retry=False,diagnostics=False,ignore_zero_entries=False,hash_assembly=False,field_interval=0.,cartesian_arm=False,initial_dynamic_dt=None,reuse_mpc_storage=False):
     if initial_dynamic_dt is not None and (not np.isfinite(initial_dynamic_dt) or initial_dynamic_dt<=0 or initial_dynamic_dt>.0025):raise ValueError('initial dynamic dt must be finite in (0,.0025]')
     root=Path(preparation);out=Path(output);motion=Path(motion)
     if out.exists():raise ValueError('output exists')
@@ -219,12 +225,14 @@ def build(preparation,motion,output,end_time=1.01,mumps_memory_retry=False,diagn
         text+=block('Outputs/terminal','type = Console\nmax_rows = 2')
         text+=block('Outputs/fields',f'type = Exodus\nfile_base = aqueduct_full_candidate_out\nmin_simulation_time_interval = {field_interval}\nexecute_on = \'initial timestep_end final\'')
         text=text.replace('::ascii_info_detail','::ascii_info')
+    text=configure_mpc_storage(text,reuse_mpc_storage)
     (out/'aqueduct_full_candidate.i').write_text(text)
     identity=dict(case_id=c['case_id'],full_assembly=True,end_time_total_s=end_time,dynamic_duration_s=end_time-1,source_inp=c['source'],source_contract_sha256=sha(root/'assembly-contract.json'),elements={k:sum(len(g['ids']) for g in group.values() if g['signature'][0]==k) for k in ('HEX8','TRUSS','SHELL4')},nodes=len(xyz),mpc_rows=len(rows),embedded_nodes=len(embedded_nodes),embedded_equations=3*len(embedded_nodes),embedded_formulation='explicit conjugate multipliers; all physical mass/force retained; current algebraic rows',connector_count=4,contact_pairs=4,probes=probes,hht=dict(alpha=ALPHA,beta=BETA,gamma=GAMMA),first_candidate_user_regression_waiver='2026-10-24; seven not run, not passed',
                   deviations=['HEX8 full integration Bbar and six-DOF MITC4/SPOS shell accepted engineering replacements.', 'Custom consistent primal mortar Tie; actual slave membership preserved, coefficients differ from Abaqus; only fully bound secondary facets integrated.', 'Candidate normal-plane Tie adjustment, max .198 micrometre; exact ODB adjustment pending.', 'Explicit HHT alpha=-.41421 inferred from 2025 contact default; exact Abaqus2022 parameters unverified.', 'Base DOFs4-6 are absent on solid base nodes, so source zero rotation BCs have no active DOF; no physical rotary restraint is removed.', 'Unforced static stage one step instead of Abaqus automatic increments; source stabilization .0002 not implemented; zero displacement gives zero stabilization work.', 'Short first full-assembly candidate, not complete27.5s; no matching Abaqus output or engineering threshold.', 'Consistent truss line mass rho*A; original Abaqus reduced-integration/hourglass and source truss mass equivalence pending.'])
     if end_time>=28.5:
         identity['deviations']=[v.replace('Short first full-assembly candidate, not complete27.5s; no matching Abaqus output or engineering threshold.','Full source horizon requested (static1s + dynamic27.5s, total28.5s); actual completion and accuracy require terminal native evidence and matching Abaqus reference.') for v in identity['deviations']]
     identity['solver_memory_policy']=dict(workspace_estimate_increase_percent=100,max_working_memory_MB_per_rank=2048,MPI_ranks=4,diagnostic_print_level=2,error_on_linear_failure=True,physics_and_tolerances_unchanged=True) if mumps_memory_retry else None
+    identity['mpc_assembly_storage']=dict(enabled=reuse_mpc_storage,default=False,dof_values_refreshed_every_assembly=True,constant_matrix_scaling_checked=True)
     identity['ignore_zero_jacobian_entries']=ignore_zero_entries
     identity['hash_table_matrix_assembly']=hash_assembly
     identity['field_output_minimum_interval_s']=field_interval
@@ -235,4 +243,4 @@ def build(preparation,motion,output,end_time=1.01,mumps_memory_retry=False,diagn
     identity['artifacts']={p.name:sha(p) for p in out.iterdir()};(out/'full-input-identity.json').write_text(json.dumps(identity,indent=2)+'\n');return identity
 
 if __name__=='__main__':
-    p=argparse.ArgumentParser(description=__doc__);p.add_argument('--preparation',required=True);p.add_argument('--motion',required=True);p.add_argument('--output',required=True);p.add_argument('--end-time',type=float,default=1.01);p.add_argument('--mumps-memory-retry',action='store_true');p.add_argument('--diagnostics',action='store_true');p.add_argument('--ignore-zero-entries',action='store_true');p.add_argument('--hash-assembly',action='store_true');p.add_argument('--field-interval',type=float,default=0.);p.add_argument('--cartesian-arm',action='store_true');p.add_argument('--initial-dynamic-dt',type=float);a=p.parse_args();print(json.dumps(build(a.preparation,a.motion,a.output,a.end_time,a.mumps_memory_retry,a.diagnostics,a.ignore_zero_entries,a.hash_assembly,a.field_interval,a.cartesian_arm,a.initial_dynamic_dt),indent=2))
+    p=argparse.ArgumentParser(description=__doc__);p.add_argument('--preparation',required=True);p.add_argument('--motion',required=True);p.add_argument('--output',required=True);p.add_argument('--end-time',type=float,default=1.01);p.add_argument('--mumps-memory-retry',action='store_true');p.add_argument('--diagnostics',action='store_true');p.add_argument('--ignore-zero-entries',action='store_true');p.add_argument('--hash-assembly',action='store_true');p.add_argument('--field-interval',type=float,default=0.);p.add_argument('--cartesian-arm',action='store_true');p.add_argument('--initial-dynamic-dt',type=float);p.add_argument('--reuse-mpc-storage',action='store_true');a=p.parse_args();print(json.dumps(build(a.preparation,a.motion,a.output,a.end_time,a.mumps_memory_retry,a.diagnostics,a.ignore_zero_entries,a.hash_assembly,a.field_interval,a.cartesian_arm,a.initial_dynamic_dt,a.reuse_mpc_storage),indent=2))
