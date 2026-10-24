@@ -112,7 +112,7 @@ def build(preparation,motion,output,end_time=1.01,mumps_memory_retry=False,diagn
                     name=f'shell_q{qp}_l{layer}_{v}'
                     auxkernels+=block(name,f'type = MaterialStdVectorAux\nvariable = {name}\nproperty = aq_shell_state\nindex = {5*layer+j}\nselected_qp = {qp}\nblock = {quoted(shell)}\nexecute_on = TIMESTEP_END')
         for tag in ('time','nontime'):
-            for j,v in enumerate(FIELDS):auxkernels+=block(f'{tag}_{v}',f'type = TagVectorAux\nvariable = {tag}_{v}\nv = {v}\nvector_tag = {tag}\nremove_variable_scaling = true\nblock = {quoted(sorted(group) if j<3 else shell)}\nexecute_on = TIMESTEP_END')
+            for j,v in enumerate(FIELDS):auxkernels+=block(f'{tag}_{v}',f'type = TagVectorAux\nvariable = {tag}_{v}\nv = {v}\nvector_tag = {tag}\nremove_variable_scaling = true\nblock = {quoted(sorted(group) if j<3 else shell)}')
     text+=block('AuxKernels',auxkernels)
     constraints=''
     for i,r in enumerate(rows):constraints+=block(f'mpc_{i}',f'type = AqueductLinearMPC\nvariable = ux\nanchor_node = {r["anchor"]}\nterm_nodes = {quoted(t["node"] for t in r["terms"])}\nterms = {quoted(t["variable"] for t in r["terms"])}\ncoefficients = {quoted(t["coefficient"] for t in r["terms"])}\nmultiplier = lm{r["multiplier"]}')
