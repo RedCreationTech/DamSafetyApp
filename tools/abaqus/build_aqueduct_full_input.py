@@ -18,7 +18,7 @@ ALPHA=-.41421;BETA=(1-ALPHA)**2/4;GAMMA=.5-ALPHA
 
 def quoted(values):return "'"+' '.join(map(str,values))+"'"
 
-def build(preparation,motion,output,end_time=1.01,mumps_memory_retry=False,diagnostics=False,ignore_zero_entries=False,hash_assembly=False):
+def build(preparation,motion,output,end_time=1.01,mumps_memory_retry=False,diagnostics=False,ignore_zero_entries=False,hash_assembly=False,field_interval=0.):
     root=Path(preparation);out=Path(output);motion=Path(motion)
     if out.exists():raise ValueError('output exists')
     c=json.loads((root/'assembly-contract.json').read_text());implementation=json.loads((root/'interface-implementation.json').read_text())
@@ -60,6 +60,7 @@ def build(preparation,motion,output,end_time=1.01,mumps_memory_retry=False,diagn
     physics=''
     for name,bb in [('concrete',concrete),('steel',steel)]:physics+=block(name,'block = '+quoted(bb)+"\nstrain = SMALL\nincremental = true\nvolumetric_locking_correction = true\nsave_in = 'fx fy fz'\ngenerate_output = 'stress_xx stress_yy stress_zz stress_xy stress_xz stress_yz strain_xx strain_yy strain_zz strain_xy strain_xz strain_yz'")
     text+=block('Physics/SolidMechanics/QuasiStatic',physics)
+    if field_interval<0 or (field_interval>0 and not diagnostics):raise ValueError('Thinned fields require native diagnostics and a nonnegative interval')
     aux=''.join(block(v,'block = '+quoted(sorted(group))) for v in ('fx','fy','fz','vx','vy','vz','ax','ay','az'))
     for b in bars:aux+=block(f'area_{b}',f'block = {b}\nfamily = MONOMIAL\norder = CONSTANT\ninitial_condition = {group[b]["section"]["area_m2"]}')
     aux+=''.join(block(v,'block = '+quoted(concrete)+'\nfamily = MONOMIAL\norder = CONSTANT') for v in ('damaget','damagec'))
@@ -72,6 +73,11 @@ def build(preparation,motion,output,end_time=1.01,mumps_memory_retry=False,diagn
                     aux+=block(f'shell_q{qp}_l{layer}_{v}','block = '+quoted(shell)+'\nfamily = MONOMIAL\norder = CONSTANT')
         for tag in ('time','nontime'):
             for j,v in enumerate(FIELDS):aux+=block(f'{tag}_{v}','block = '+quoted(sorted(group) if j<3 else shell))
+    if field_interval>0:
+        for j,v in enumerate(FIELDS):aux+=block('old_nontime_'+v,'block = '+quoted(sorted(group) if j<3 else shell))
+        for v in ('vrx','vry','vrz','arx','ary','arz'):aux+=block(v,'block = '+quoted(shell))
+        for tag in ('time','nontime','old_nontime'):
+            for axis in 'xyz':aux+=block('cross_'+tag+'_'+axis,'block = '+quoted(sorted(group)))
     text+=block('AuxVariables',aux)
     materials='';functions=block('steel_hardening',"type = PiecewiseLinear\nx = '0 .1'\ny = '400e6 696e6'\nextrap = false")
     for name,bb,mat in [('concrete',concrete,'con'),('steel',steel,'steel')]:
@@ -113,6 +119,14 @@ def build(preparation,motion,output,end_time=1.01,mumps_memory_retry=False,diagn
                     auxkernels+=block(name,f'type = MaterialStdVectorAux\nvariable = {name}\nproperty = aq_shell_state\nindex = {5*layer+j}\nselected_qp = {qp}\nblock = {quoted(shell)}\nexecute_on = TIMESTEP_END')
         for tag in ('time','nontime'):
             for j,v in enumerate(FIELDS):auxkernels+=block(f'{tag}_{v}',f'type = TagVectorAux\nvariable = {tag}_{v}\nv = {v}\nvector_tag = {tag}\nremove_variable_scaling = true\nblock = {quoted(sorted(group) if j<3 else shell)}')
+    if field_interval>0:
+        for j,v in enumerate(FIELDS):auxkernels+=block('old_nontime_'+v,f'type = CopyValueAux\nvariable = old_nontime_{v}\nsource = nontime_{v}\nstate = OLD\nblock = {quoted(sorted(group) if j<3 else shell)}\nexecute_on = TIMESTEP_END')
+        for v,axis in zip(FIELDS[3:],'xyz'):
+            auxkernels+=block('rot_accel_'+axis,f'type = NewmarkAccelAux\nvariable = ar{axis}\ndisplacement = {v}\nvelocity = vr{axis}\nbeta = {BETA}\nblock = {quoted(shell)}\nexecute_on = TIMESTEP_END')+block('rot_velocity_'+axis,f'type = NewmarkVelAux\nvariable = vr{axis}\nacceleration = ar{axis}\ngamma = {GAMMA}\nblock = {quoted(shell)}\nexecute_on = TIMESTEP_END')
+        for tag in ('time','nontime','old_nontime'):
+            for axis,expression in zip('xyz',(f'y*{tag}_uz-z*{tag}_uy',f'z*{tag}_ux-x*{tag}_uz',f'x*{tag}_uy-y*{tag}_ux')):
+                name='cross_'+tag+'_'+axis
+                auxkernels+=block(name,f'type = ParsedAux\nvariable = {name}\ncoupled_variables = {quoted(tag+"_u"+a for a in "xyz")}\nexpression = \'{expression}\'\nuse_xyzt = true\nuse_displaced_mesh = false\nblock = {quoted(sorted(group))}\nexecute_on = TIMESTEP_END')
     text+=block('AuxKernels',auxkernels)
     constraints=''
     for i,r in enumerate(rows):constraints+=block(f'mpc_{i}',f'type = AqueductLinearMPC\nvariable = ux\nanchor_node = {r["anchor"]}\nterm_nodes = {quoted(t["node"] for t in r["terms"])}\nterms = {quoted(t["variable"] for t in r["terms"])}\ncoefficients = {quoted(t["coefficient"] for t in r["terms"])}\nmultiplier = lm{r["multiplier"]}')
@@ -162,6 +176,11 @@ def build(preparation,motion,output,end_time=1.01,mumps_memory_retry=False,diagn
             for extreme in ('min','max'):
                 post+=block(f'{v}_{extreme}',f'type = NodalExtremeValue\nvariable = {v}\nboundary = aq_contact_{j:02d}_secondary\nvalue_type = {extreme}')
     for axis in 'xyz':post+=block('base_current_force_'+axis,f'type = NodalSum\nvariable = f{axis}\nboundary = {quoted(ns_names)}')
+    if field_interval>0:
+        for tag in ('time','nontime','old_nontime'):
+            for axis in 'xyz':
+                for name,var,domain in [('global_'+tag+'_f'+axis,tag+'_u'+axis,'block = '+quoted(sorted(group))),('base_'+tag+'_f'+axis,tag+'_u'+axis,'boundary = '+quoted(ns_names)),('spin_'+tag+'_m'+axis,tag+'_r'+axis,'block = '+quoted(shell)),('cross_'+tag+'_m'+axis,'cross_'+tag+'_'+axis,'block = '+quoted(sorted(group))),('base_'+tag+'_m'+axis,'cross_'+tag+'_'+axis,'boundary = '+quoted(ns_names))]:
+                    post+=block(name,f'type = NodalSum\nvariable = {var}\n{domain}\nexecute_on = \'initial timestep_end\'')
     text+=block('Postprocessors',post)+block('Preconditioning',block('smp','type = SMP\nfull = true'))
     text+=block('Executioner',f'type = Transient\nsolve_type = NEWTON\nend_time = {end_time}\ndtmin = 1e-8\nnl_abs_tol = 1e-5\nnl_rel_tol = 1e-8\nnl_max_its = 35\nline_search = basic\npetsc_options_iname = \'-pc_type -pc_factor_mat_solver_type\'\npetsc_options_value = \'lu mumps\'\n'+block('TimeIntegrator',f'type = AqueductHHT\nbeta = {BETA}\ngamma = {GAMMA}\nhht_alpha = {ALPHA}\nhht_start_time = 1\ninactive_tsteps = 1\nalgebraic_variables = {quoted(lmnames)}')+block('TimeStepper','type = FunctionDT\nfunction = dt_clock'))
     text+=block('Outputs','csv = true\nexodus = true\nprint_linear_residuals = false')
@@ -173,14 +192,20 @@ def build(preparation,motion,output,end_time=1.01,mumps_memory_retry=False,diagn
     if diagnostics:
         text+=block('Outputs/profile','type = PerfGraphOutput\nlevel = 5\nheaviest_sections = 25\nheaviest_branch = true')
         text=text.replace('-mat_mumps_icntl_23\'', '-mat_mumps_icntl_23 -ksp_view_mat\'').replace('lu mumps 100 2 2048\'', 'lu mumps 100 2 2048 ::ascii_info_detail\'')
+    if field_interval>0:
+        text=text.replace('exodus = true','exodus = false')
+        text+=block('Outputs/fields',f'type = Exodus\nfile_base = aqueduct_full_candidate_out\nmin_simulation_time_interval = {field_interval}\nexecute_on = \'initial timestep_end final\'')
+        text=text.replace('::ascii_info_detail','::ascii_info')
     (out/'aqueduct_full_candidate.i').write_text(text)
     identity=dict(case_id=c['case_id'],full_assembly=True,end_time_total_s=end_time,dynamic_duration_s=end_time-1,source_inp=c['source'],source_contract_sha256=sha(root/'assembly-contract.json'),elements={k:sum(len(g['ids']) for g in group.values() if g['signature'][0]==k) for k in ('HEX8','TRUSS','SHELL4')},nodes=len(xyz),mpc_rows=len(rows),embedded_nodes=len(embedded_nodes),embedded_equations=3*len(embedded_nodes),embedded_formulation='explicit conjugate multipliers; all physical mass/force retained; current algebraic rows',connector_count=4,contact_pairs=4,probes=probes,hht=dict(alpha=ALPHA,beta=BETA,gamma=GAMMA),first_candidate_user_regression_waiver='2026-10-24; seven not run, not passed',
                   deviations=['HEX8 full integration Bbar and six-DOF MITC4/SPOS shell accepted engineering replacements.', 'Custom consistent primal mortar Tie; actual slave membership preserved, coefficients differ from Abaqus; only fully bound secondary facets integrated.', 'Candidate normal-plane Tie adjustment, max .198 micrometre; exact ODB adjustment pending.', 'Explicit HHT alpha=-.41421 inferred from 2025 contact default; exact Abaqus2022 parameters unverified.', 'Base DOFs4-6 are absent on solid base nodes, so source zero rotation BCs have no active DOF; no physical rotary restraint is removed.', 'Unforced static stage one step instead of Abaqus automatic increments; source stabilization .0002 not implemented; zero displacement gives zero stabilization work.', 'Short first full-assembly candidate, not complete27.5s; no matching Abaqus output or engineering threshold.', 'Consistent truss line mass rho*A; original Abaqus reduced-integration/hourglass and source truss mass equivalence pending.'])
     identity['solver_memory_policy']=dict(workspace_estimate_increase_percent=100,max_working_memory_MB_per_rank=2048,MPI_ranks=4,diagnostic_print_level=2,error_on_linear_failure=True,physics_and_tolerances_unchanged=True) if mumps_memory_retry else None
     identity['ignore_zero_jacobian_entries']=ignore_zero_entries
     identity['hash_table_matrix_assembly']=hash_assembly
+    identity['field_output_minimum_interval_s']=field_interval
+    identity['history_output']='Every accepted step CSV; native previous NONTIME and rotation accelerations preserved at each sampled field frame' if field_interval>0 else 'Every accepted step CSV and full fields'
     identity['native_diagnostics']=dict(enabled=diagnostics,bar_fields=5,shell_inplane_qps=4,shell_layers=3,shell_state_components=['local_sxx','local_syy','local_szz','local_sxy','peq'],residual_tags=['TIME','NONTIME'],meaning='Unmodified complete tagged residuals; reconstruct normalized HHT before nodal BCs; not direct Abaqus RF') if diagnostics else None
     identity['artifacts']={p.name:sha(p) for p in out.iterdir()};(out/'full-input-identity.json').write_text(json.dumps(identity,indent=2)+'\n');return identity
 
 if __name__=='__main__':
-    p=argparse.ArgumentParser(description=__doc__);p.add_argument('--preparation',required=True);p.add_argument('--motion',required=True);p.add_argument('--output',required=True);p.add_argument('--end-time',type=float,default=1.01);p.add_argument('--mumps-memory-retry',action='store_true');p.add_argument('--diagnostics',action='store_true');p.add_argument('--ignore-zero-entries',action='store_true');p.add_argument('--hash-assembly',action='store_true');a=p.parse_args();print(json.dumps(build(a.preparation,a.motion,a.output,a.end_time,a.mumps_memory_retry,a.diagnostics,a.ignore_zero_entries,a.hash_assembly),indent=2))
+    p=argparse.ArgumentParser(description=__doc__);p.add_argument('--preparation',required=True);p.add_argument('--motion',required=True);p.add_argument('--output',required=True);p.add_argument('--end-time',type=float,default=1.01);p.add_argument('--mumps-memory-retry',action='store_true');p.add_argument('--diagnostics',action='store_true');p.add_argument('--ignore-zero-entries',action='store_true');p.add_argument('--hash-assembly',action='store_true');p.add_argument('--field-interval',type=float,default=0.);a=p.parse_args();print(json.dumps(build(a.preparation,a.motion,a.output,a.end_time,a.mumps_memory_retry,a.diagnostics,a.ignore_zero_entries,a.hash_assembly,a.field_interval),indent=2))
