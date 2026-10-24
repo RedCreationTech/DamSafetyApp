@@ -1,4 +1,5 @@
 #include "AqueductFlatShell.h"
+#include "AqueductHHTScheme.h"
 #include "libmesh/elem.h"
 
 registerMooseObject("DamSafetyApp", AqueductFlatShellStress);
@@ -137,10 +138,14 @@ InputParameters AqueductFlatShellInertia::validParams()
   auto p=ADTimeKernel::validParams();couplings(p);section(p);
   p.addRequiredRangeCheckedParam<Real>("density","density>0","Mass density");
   p.addRequiredRangeCheckedParam<unsigned int>("component","component<6","Global displacement/rotation component");
+  p.addRangeCheckedParam<Real>("hht_alpha",0.,"hht_alpha>=-0.5 & hht_alpha<=0","Normalized whole-system HHT mass scaling; zero preserves Newmark");
+  p.addParam<Real>("hht_start_time",-1e200,"Disable inertia through this static-stage end time");
   return p;
 }
 AqueductFlatShellInertia::AqueductFlatShellInertia(const InputParameters & p)
  :ADTimeKernel(p),_component(getParam<unsigned int>("component")),_rho(getParam<Real>("density")),
+ _hht_mass_scale(AqueductHHTScheme::massScale(getParam<Real>("hht_alpha"))),
+ _hht_start_time(getParam<Real>("hht_start_time")),
  _mass(AqueductShell::moments(getParam<Real>("thickness"),getParam<Real>("offset")))
 {
   if(coupledComponents("displacements")!=3 || coupledComponents("rotations")!=3)
@@ -154,6 +159,7 @@ AqueductFlatShellInertia::AqueductFlatShellInertia(const InputParameters & p)
 }
 ADReal AqueductFlatShellInertia::computeQpResidual()
 {
+  if(_t<=_hht_start_time)return 0.;
   auto n=AqueductShell::frame(quad(*_current_elem)).n;
   std::array<ADReal,3> a,r;
   ADReal normal_rotation=0;
@@ -166,5 +172,5 @@ ADReal AqueductFlatShellInertia::computeQpResidual()
   const ADReal residual=_component<3 ?
     _mass.zero*a[j]+_mass.first*(r[k]*n[l]-r[l]*n[k]) :
     _mass.first*(n[k]*a[l]-n[l]*a[k])+_mass.second*(r[j]-n[j]*normal_rotation);
-  return _rho*_test[_i][_qp]*residual;
+  return _hht_mass_scale*_rho*_test[_i][_qp]*residual;
 }

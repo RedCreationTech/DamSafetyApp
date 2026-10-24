@@ -49,6 +49,7 @@ protected:
   ADReal computeQpResidual() override;
   unsigned int _component;
   Real _rho;
+  Real _hht_mass_scale, _hht_start_time;
   AqueductShell::Moments _mass;
   std::array<const ADVariableValue *,6> _accelerations;
 };
