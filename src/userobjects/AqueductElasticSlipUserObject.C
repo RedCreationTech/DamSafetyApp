@@ -1,6 +1,7 @@
 #include "AqueductElasticSlipUserObject.h"
 #include "MooseVariableFE.h"
 #include "AutomaticMortarGeneration.h"
+#include "FEProblemBase.h"
 
 registerMooseObject("DamSafetyApp", AqueductElasticSlipUserObject);
 
@@ -29,10 +30,10 @@ void AqueductElasticSlipUserObject::timestepSetup()
 {
   LMWeightedVelocitiesUserObject::timestepSetup();
   // Rejected attempts retain the same step number: never commit their trial history.
-  if (_history_step != _t_step)
+  if (_history_step != _fe_problem.timeStep())
   {
     _old_elastic = _trial_elastic;
-    _history_step = _t_step;
+    _history_step = _fe_problem.timeStep();
   }
 }
 void AqueductElasticSlipUserObject::initialize()
@@ -62,6 +63,6 @@ void AqueductElasticSlipUserObject::computeQpProperties()
   trimInteriorNodeDerivatives(smap, vars, secondary, true);
   for (unsigned j = 0; j < 3; ++j)
     _qp_real_tangential_velocity_nodal(j) =
-        (secondary[j] - (*_secondary_old[j])[_qp] - primary[j] + (*_primary_old[j])[_qp]) / _dt;
+        (secondary[j] - (*_secondary_old[j])[_qp] - primary[j] + (*_primary_old[j])[_qp]) / _fe_problem.dt();
   _qp_tangential_velocity_nodal = _qp_real_tangential_velocity_nodal * (_JxW_msm[_qp] * _coord[_qp]);
 }
