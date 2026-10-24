@@ -67,7 +67,7 @@ def cross_matrix(r):return np.array([[0,-r[2],r[1]],[r[2],0,-r[0]],[-r[1],r[0],0
 
 def read_geometry(root):
     with netCDF4.Dataset(root/'assembly-geometry.e') as nc:
-        coords=np.column_stack([nc[k][:] for k in ('coordx','coordy','coordz')])
+        coords=np.asarray(np.column_stack([nc[k][:] for k in ('coordx','coordy','coordz')]))
         ids=np.array(nc['elem_num_map'][:],int);blocks={};connectivity={};types={};offset=0
         for j,block in enumerate(np.array(nc['eb_prop1'][:],int),1):
             conn=np.array(nc[f'connect{j}'][:],int);typ=nc[f'connect{j}'].elem_type
@@ -124,7 +124,7 @@ def build_embedded_precheck(preparation,audit,output):
     return record
 
 
-def build(preparation,audit,output):
+def build(preparation,audit,output,s2s_operator=None):
     root=Path(preparation);audit=Path(audit);out=Path(output)
     if out.exists():raise ValueError('output already exists')
     contract=json.loads((root/'assembly-contract.json').read_text())
@@ -134,19 +134,11 @@ def build(preparation,audit,output):
     if audit_summary['contract_sha256']!=sha(root/'assembly-contract.json'):raise ValueError('audit identity differs')
     coords,connectivity,blocks,types,origins=read_geometry(root)
     rows=[];adjusted=[];tied_nodes=set();faces=contract['surfaces']
-    for tie in contract['interfaces']['ties']:
-        slave,primary=tie['surfaces'];nodes=sorted({n for f in faces[slave] for n in f['nodes']})
-        projected=project_surface([coords[n-1] for n in nodes],faces[primary],coords)
-        for node,p in zip(nodes,projected):
-            if node in tied_nodes:raise ValueError('multiple Tie definitions own one slave node')
-            tied_nodes.add(node)
-            if tie['options'].get('adjust','').lower()!='yes':raise ValueError('source adjust semantics changed')
-            adjusted.append(dict(node=node,original=coords[node-1].tolist(),adjusted=p['point'].tolist(),distance_m=p['distance']))
-            coords[node-1]=p['point']
-            for j in range(3):
-                terms=[dict(node=node-1,variable=('ux','uy','uz')[j],coefficient=1.)]
-                terms += [dict(node=n-1,variable=('ux','uy','uz')[j],coefficient=-float(w)) for n,w in zip(p['facet']['nodes'],p['weights']) if abs(w)>1e-15]
-                rows.append(dict(kind='tie',source_line=tie['source_line'],anchor=node-1,multiplier=j,terms=terms))
+    if s2s_operator is None:raise ValueError('Actual-member S2S operator is required; nearest-face Tie is prohibited')
+    operator=json.loads(Path(s2s_operator).read_text())
+    if operator['source_contract_sha256']!=sha(root/'assembly-contract.json'):raise ValueError('S2S source identity differs')
+    rows.extend(operator['rows']);adjusted=operator['adjustments']
+    for item in adjusted:coords[item['node']-1]=item['adjusted']
     shell_distances=[]
     for coupling in contract['interfaces']['shell_solid']:
         slave,primary=coupling['surfaces'];nodes=sorted({n for f in faces[slave] for n in f['nodes']})
@@ -186,9 +178,10 @@ def build(preparation,audit,output):
     for name in ('assembly-geometry.e','element-map.csv','source-utf8.inp'):shutil.copyfile(root/name,out/name)
     with netCDF4.Dataset(out/'assembly-geometry.e','r+') as nc:
         for j,k in enumerate(('coordx','coordy','coordz')):nc[k][:]=coords[:,j]
-        if 'num_side_sets' in nc.dimensions:raise ValueError('preparation sidesets already exist; do not replace them implicitly')
-        nss=2*len(contract['interfaces']['contacts']);nc.createDimension('num_side_sets',nss)
-        nc.createVariable('ss_status','i4',('num_side_sets',))[:]=1
+        if 'num_side_sets' in nc.dimensions and len(nc.dimensions['num_side_sets']):raise ValueError('preparation sidesets already exist; do not replace them implicitly')
+        nss=2*len(contract['interfaces']['contacts'])
+        if 'num_side_sets' not in nc.dimensions:nc.createDimension('num_side_sets',nss)
+        nc.createVariable('ss_status','i4',('num_side_sets',))[:nss]=1
         ids=nc.createVariable('ss_prop1','i4',('num_side_sets',));ids.setncattr('name','ID');ids[:]=np.arange(10001,10001+nss)
         names=[];order=np.array(nc['elem_num_map'][:],int);internal={eid:i+1 for i,eid in enumerate(order)}
         for j,contact in enumerate(contract['interfaces']['contacts'],1):
@@ -232,4 +225,4 @@ def build(preparation,audit,output):
     return summary
 
 if __name__=='__main__':
-    p=argparse.ArgumentParser(description=__doc__);p.add_argument('--preparation',required=True);p.add_argument('--audit',required=True);p.add_argument('--output',required=True);p.add_argument('--embedded-precheck-only',action='store_true');a=p.parse_args();print(json.dumps((build_embedded_precheck if a.embedded_precheck_only else build)(a.preparation,a.audit,a.output),indent=2))
+    p=argparse.ArgumentParser(description=__doc__);p.add_argument('--preparation',required=True);p.add_argument('--audit',required=True);p.add_argument('--output',required=True);p.add_argument('--s2s-operator');p.add_argument('--embedded-precheck-only',action='store_true');a=p.parse_args();print(json.dumps(build_embedded_precheck(a.preparation,a.audit,a.output) if a.embedded_precheck_only else build(a.preparation,a.audit,a.output,a.s2s_operator),indent=2))

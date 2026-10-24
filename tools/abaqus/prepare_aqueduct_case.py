@@ -149,6 +149,9 @@ def resolve_elset(model, name):
 
 def resolve_surfaces(model, gm):
     faces = dict(mesh.C3D8_FACES)
+    # Legacy mesh.C3D8_FACES is an unordered node-set map. Numerical QUAD4
+    # integration requires a cyclic S6 order; (1,4,5,8) is a bow tie.
+    faces['S6'] = (4,1,5,8)
     shell = {'SPOS': (1, 2, 3, 4), 'SNEG': (1, 2, 3, 4),
              'E1': (1, 2), 'E2': (2, 3), 'E3': (3, 4), 'E4': (4, 1)}
     instances = {i.name: i.part for i in model.instances}

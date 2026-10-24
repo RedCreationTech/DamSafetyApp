@@ -26,7 +26,9 @@ AqueductHHT::AqueductHHT(const InputParameters & p)
 }
 void AqueductHHT::initialSetup()
 {
-  _algebraic_dofs.clear();auto & system=_sys.system();
+  _algebraic_dofs.clear();
+  if(!_nl)return; // MOOSE also constructs an auxiliary-system integrator.
+  auto & system=_sys.system();
   for(const auto & name:getParam<std::vector<VariableName>>("algebraic_variables"))
   {
     if(!system.has_variable(name))paramError("algebraic_variables","Unknown multiplier variable "+name);
