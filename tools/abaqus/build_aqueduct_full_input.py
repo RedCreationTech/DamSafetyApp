@@ -18,7 +18,8 @@ ALPHA=-.41421;BETA=(1-ALPHA)**2/4;GAMMA=.5-ALPHA
 
 def quoted(values):return "'"+' '.join(map(str,values))+"'"
 
-def build(preparation,motion,output,end_time=1.01,mumps_memory_retry=False,diagnostics=False,ignore_zero_entries=False,hash_assembly=False,field_interval=0.,cartesian_arm=False):
+def build(preparation,motion,output,end_time=1.01,mumps_memory_retry=False,diagnostics=False,ignore_zero_entries=False,hash_assembly=False,field_interval=0.,cartesian_arm=False,initial_dynamic_dt=None):
+    if initial_dynamic_dt is not None and (not np.isfinite(initial_dynamic_dt) or initial_dynamic_dt<=0 or initial_dynamic_dt>.0025):raise ValueError('initial dynamic dt must be finite in (0,.0025]')
     root=Path(preparation);out=Path(output);motion=Path(motion)
     if out.exists():raise ValueError('output exists')
     c=json.loads((root/'assembly-contract.json').read_text());implementation=json.loads((root/'interface-implementation.json').read_text())
@@ -200,6 +201,8 @@ def build(preparation,motion,output,end_time=1.01,mumps_memory_retry=False,diagn
             for axis in 'xyz':
                 for name,var,domain in [('global_'+tag+'_f'+axis,tag+'_u'+axis,'block = '+quoted(sorted(group))),('base_'+tag+'_f'+axis,tag+'_u'+axis,'boundary = '+quoted(ns_names)),('spin_'+tag+'_m'+axis,tag+'_r'+axis,'block = '+quoted(shell)),('cross_'+tag+'_m'+axis,'cross_'+tag+'_'+axis,'block = '+quoted(sorted(group))),('base_'+tag+'_m'+axis,'cross_'+tag+'_'+axis,'boundary = '+quoted(ns_names))]:
                     post+=block(name,f'type = NodalSum\nvariable = {var}\n{domain}\nexecute_on = \'initial timestep_end\'')
+    if initial_dynamic_dt is not None:
+        text=text.replace("if(t<1,1,.0025)",f'if(t<1,1,if(t<{1+initial_dynamic_dt/2},{initial_dynamic_dt},.0025))')
     text+=block('Postprocessors',post)+block('Preconditioning',block('smp','type = SMP\nfull = true'))
     text+=block('Executioner',f'type = Transient\nsolve_type = NEWTON\nend_time = {end_time}\ndtmin = 1e-8\nnl_abs_tol = 1e-5\nnl_rel_tol = 1e-8\nnl_max_its = 35\nline_search = basic\npetsc_options_iname = \'-pc_type -pc_factor_mat_solver_type\'\npetsc_options_value = \'lu mumps\'\n'+block('TimeIntegrator',f'type = AqueductHHT\nbeta = {BETA}\ngamma = {GAMMA}\nhht_alpha = {ALPHA}\nhht_start_time = 1\ninactive_tsteps = 1\nalgebraic_variables = {quoted(lmnames)}')+block('TimeStepper','type = FunctionDT\nfunction = dt_clock'))
     text+=block('Outputs','csv = true\nexodus = true\nprint_linear_residuals = false')
@@ -223,10 +226,11 @@ def build(preparation,motion,output,end_time=1.01,mumps_memory_retry=False,diagn
     identity['ignore_zero_jacobian_entries']=ignore_zero_entries
     identity['hash_table_matrix_assembly']=hash_assembly
     identity['field_output_minimum_interval_s']=field_interval
+    identity['time_control']=dict(source_static_initial_s=.01,source_static_duration_s=1.,source_dynamic_initial_s=.001,source_dynamic_duration_s=27.5,source_dynamic_minimum_s=1e-8,candidate_static_one_unforced_step_s=1.,candidate_dynamic_initial_s=initial_dynamic_dt if initial_dynamic_dt is not None else .0025,candidate_dynamic_nominal_s=.0025,candidate_minimum_s=1e-8,candidate_dynamic_policy='FunctionDT first increment then fixed nominal; rejection cutback retained; not Abaqus automatic accuracy-controlled adaptivity',full_target_total_s=28.5)
     identity['connector_formulation']='linearized Cartesian with node-a reference arm and conjugate moment; Align unchanged' if cartesian_arm else 'fixed-global translation springs plus Align; noncoincident arm terms missing'
     identity['history_output']='Every accepted step CSV; native previous NONTIME and rotation accelerations preserved at each sampled field frame' if field_interval>0 else 'Every accepted step CSV and full fields'
     identity['native_diagnostics']=dict(enabled=diagnostics,bar_fields=5,shell_inplane_qps=4,shell_layers=3,shell_state_components=['local_sxx','local_syy','local_szz','local_sxy','peq'],residual_tags=['TIME','NONTIME'],meaning='Unmodified complete tagged residuals; reconstruct normalized HHT before nodal BCs; not direct Abaqus RF') if diagnostics else None
     identity['artifacts']={p.name:sha(p) for p in out.iterdir()};(out/'full-input-identity.json').write_text(json.dumps(identity,indent=2)+'\n');return identity
 
 if __name__=='__main__':
-    p=argparse.ArgumentParser(description=__doc__);p.add_argument('--preparation',required=True);p.add_argument('--motion',required=True);p.add_argument('--output',required=True);p.add_argument('--end-time',type=float,default=1.01);p.add_argument('--mumps-memory-retry',action='store_true');p.add_argument('--diagnostics',action='store_true');p.add_argument('--ignore-zero-entries',action='store_true');p.add_argument('--hash-assembly',action='store_true');p.add_argument('--field-interval',type=float,default=0.);p.add_argument('--cartesian-arm',action='store_true');a=p.parse_args();print(json.dumps(build(a.preparation,a.motion,a.output,a.end_time,a.mumps_memory_retry,a.diagnostics,a.ignore_zero_entries,a.hash_assembly,a.field_interval,a.cartesian_arm),indent=2))
+    p=argparse.ArgumentParser(description=__doc__);p.add_argument('--preparation',required=True);p.add_argument('--motion',required=True);p.add_argument('--output',required=True);p.add_argument('--end-time',type=float,default=1.01);p.add_argument('--mumps-memory-retry',action='store_true');p.add_argument('--diagnostics',action='store_true');p.add_argument('--ignore-zero-entries',action='store_true');p.add_argument('--hash-assembly',action='store_true');p.add_argument('--field-interval',type=float,default=0.);p.add_argument('--cartesian-arm',action='store_true');p.add_argument('--initial-dynamic-dt',type=float);a=p.parse_args();print(json.dumps(build(a.preparation,a.motion,a.output,a.end_time,a.mumps_memory_retry,a.diagnostics,a.ignore_zero_entries,a.hash_assembly,a.field_interval,a.cartesian_arm,a.initial_dynamic_dt),indent=2))
