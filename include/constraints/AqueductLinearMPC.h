@@ -2,6 +2,7 @@
 #include "NodalConstraint.h"
 #include "MeshGenerator.h"
 #include "AqueductMPCAssemblyStorage.h"
+#include "AqueductMPCCrossJacobian.h"
 #include <memory>
 
 // Mixed linear row C*u-compliance*lambda=0 and conjugate C^T*lambda; zero compliance is kinematic.
@@ -24,6 +25,7 @@ protected:
   MooseVariable * _multiplier;
   const Real _compliance;
   std::unique_ptr<AqueductMPCAssemblyStorage> _storage;
+  std::unique_ptr<AqueductMPCCrossJacobian> _cross_jacobian;
   std::vector<Real> _scales_scratch;
 };
 

@@ -1,6 +1,7 @@
 #pragma once
 #include "NodalConstraint.h"
 #include "AqueductMPCAssemblyStorage.h"
+#include "AqueductMPCCrossJacobian.h"
 #include <array>
 
 /** Audited host interpolation with explicit conjugate multipliers.
@@ -23,6 +24,7 @@ protected:
   std::vector<Row> _rows;
   const bool _reuse_storage;
   std::vector<AqueductMPCAssemblyStorage> _storage;
+  std::vector<AqueductMPCCrossJacobian> _cross_jacobians;
   std::array<MooseVariable *,3> _physical, _multipliers;
   std::vector<dof_id_type> dofs(const Row &,unsigned int) const;
   void dofs(const Row &,unsigned int,std::vector<dof_id_type> &) const;

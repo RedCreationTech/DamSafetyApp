@@ -22,6 +22,7 @@ InputParameters AqueductLinearMPC::validParams()
   p.addRequiredCoupledVar("multiplier","One multiplier variable active at anchor_node");
   p.addRangeCheckedParam<Real>("multiplier_compliance",0.,"multiplier_compliance>=0","Physical compliance in C*u-compliance*lambda=0; zero is a kinematic row");
   p.addParam<bool>("reuse_assembly_storage",false,"Reuse constant row matrices and containers; refresh DOF values every call");
+  p.addParam<bool>("assemble_cross_blocks",false,"Omit identically zero physical blocks; requires reuse_assembly_storage");
   p.suppressParameter<MooseEnum>("formulation");
   p.suppressParameter<NonlinearVariableName>("variable_secondary");
   p.set<bool>("use_displaced_mesh")=false;
@@ -32,6 +33,8 @@ AqueductLinearMPC::AqueductLinearMPC(const InputParameters & p)
  _nodes(getParam<std::vector<dof_id_type>>("term_nodes")),
  _coefficients(getParam<std::vector<Real>>("coefficients")),_multiplier(getVar("multiplier",0)),_compliance(getParam<Real>("multiplier_compliance"))
 {
+  if(getParam<bool>("assemble_cross_blocks") && !getParam<bool>("reuse_assembly_storage"))
+    paramError("assemble_cross_blocks","Requires reuse_assembly_storage = true");
   if(_nodes.size()<2 || _nodes.size()!=_coefficients.size() || _nodes.size()!=coupledComponents("terms"))
     paramError("term_nodes","At least two matching nodes, variables and coefficients are required");
   if(coupledComponents("multiplier")!=1) paramError("multiplier","Exactly one multiplier is required");
@@ -62,6 +65,8 @@ AqueductLinearMPC::AqueductLinearMPC(const InputParameters & p)
   {
     _storage=std::make_unique<AqueductMPCAssemblyStorage>(_coefficients);
     _scales_scratch.resize(_coefficients.size());
+    if(getParam<bool>("assemble_cross_blocks"))
+      _cross_jacobian=std::make_unique<AqueductMPCCrossJacobian>(_coefficients.size());
   }
 }
 std::vector<dof_id_type> AqueductLinearMPC::dofs()
@@ -115,7 +120,11 @@ void AqueductLinearMPC::computeJacobian(const SparseMatrix<Number> &)
     auto & ids=_storage->dofs();dofs(ids);
     for(unsigned j=0;j<_nodes.size();++j)_scales_scratch[j]=_variables[j]->scalingFactor();
     const auto & K=_storage->jacobian(_scales_scratch,_multiplier->scalingFactor(),_compliance);
-    addJacobian(_assembly,K,ids,ids,1.);return;
+    if(_cross_jacobian)
+      _cross_jacobian->assemble(K,ids,_sys.dofMap(),[&](const auto & block,const auto & rows,const auto & cols)
+        {addJacobian(_assembly,block,rows,cols,1.);});
+    else addJacobian(_assembly,K,ids,ids,1.);
+    return;
   }
   auto ids=dofs();DenseMatrix<Number> K(ids.size(),ids.size());K.zero();
   for(unsigned j=0;j<_nodes.size();++j)

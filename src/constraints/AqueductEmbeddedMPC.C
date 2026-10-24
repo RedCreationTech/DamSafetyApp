@@ -21,6 +21,7 @@ InputParameters AqueductEmbeddedMPC::validParams()
   p.addRequiredParam<FileName>("source_map","Audited unique embedded node/host geometry map");
   p.addRequiredParam<std::vector<SubdomainID>>("allowed_primary_block_ids","Source-approved solid host blocks");
   p.addParam<bool>("reuse_assembly_storage",false,"Reuse constant row matrices and containers; refresh DOF values every call");
+  p.addParam<bool>("assemble_cross_blocks",false,"Omit identically zero physical blocks; requires reuse_assembly_storage");
   p.suppressParameter<MooseEnum>("formulation");
   p.suppressParameter<NonlinearVariableName>("variable_secondary");
   p.set<bool>("use_displaced_mesh")=false;
@@ -30,6 +31,8 @@ InputParameters AqueductEmbeddedMPC::validParams()
 AqueductEmbeddedMPC::AqueductEmbeddedMPC(const InputParameters & p):NodalConstraint(p),
  _reuse_storage(getParam<bool>("reuse_assembly_storage"))
 {
+  if(getParam<bool>("assemble_cross_blocks") && !_reuse_storage)
+    paramError("assemble_cross_blocks","Requires reuse_assembly_storage = true");
   if(getParam<bool>("use_displaced_mesh"))paramError("use_displaced_mesh","Source SMALL strain uses reference coordinates");
   if(coupledComponents("displacements")!=3 || coupledComponents("multipliers")!=3)
     paramError("multipliers","Exactly three physical variables and three multipliers required");
@@ -84,6 +87,11 @@ AqueductEmbeddedMPC::AqueductEmbeddedMPC(const InputParameters & p):NodalConstra
     _storage.reserve(3*_rows.size());
     for(const auto & row:_rows)for(unsigned j=0;j<3;++j)
       _storage.emplace_back(std::vector<Real>(row.coefficients.begin(),row.coefficients.end()),false);
+    if(getParam<bool>("assemble_cross_blocks"))
+    {
+      _cross_jacobians.reserve(3*_rows.size());
+      for(std::size_t i=0;i<3*_rows.size();++i)_cross_jacobians.emplace_back(9);
+    }
   }
   // NodalConstraint invokes this batched assembler once. Avoid reinitializing
   // dense nodal arrays for every node in the entire reinforcement network.
@@ -139,7 +147,10 @@ void AqueductEmbeddedMPC::computeJacobian(const SparseMatrix<Number> &)
       auto & storage=_storage[3*i+j];auto & ids=storage.dofs();dofs(row,j,ids);
       std::array<Real,9> scales;scales.fill(_physical[j]->scalingFactor());
       const auto & K=storage.jacobian(scales,_multipliers[j]->scalingFactor(),0.);
-      addJacobian(_assembly,K,ids,ids,1.);continue;
+      if(_cross_jacobians.empty())addJacobian(_assembly,K,ids,ids,1.);
+      else _cross_jacobians[3*i+j].assemble(K,ids,_sys.dofMap(),[&](const auto & block,const auto & rows,const auto & cols)
+        {addJacobian(_assembly,block,rows,cols,1.);});
+      continue;
     }
     const auto ids=dofs(row,j);DenseMatrix<Number> K(10,10);K.zero();
     for(unsigned k=0;k<9;++k){K(k,9)=row.coefficients[k]*_physical[j]->scalingFactor();K(9,k)=row.coefficients[k]*_multipliers[j]->scalingFactor();}
