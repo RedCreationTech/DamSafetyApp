@@ -172,7 +172,6 @@ def build(preparation,motion,output,end_time=1.01,mumps_memory_retry=False,diagn
         text=text.replace("petsc_options_value = 'lu mumps'", "petsc_options_value = 'lu mumps 100 2 2048'")
     if diagnostics:
         text+=block('Outputs/profile','type = PerfGraphOutput\nlevel = 5\nheaviest_sections = 25\nheaviest_branch = true')
-        text=text.replace('-ksp_error_if_not_converged -ksp_converged_reason', '-ksp_error_if_not_converged -ksp_converged_reason -log_view')
         text=text.replace('-mat_mumps_icntl_23\'', '-mat_mumps_icntl_23 -ksp_view_mat\'').replace('lu mumps 100 2 2048\'', 'lu mumps 100 2 2048 ::ascii_info_detail\'')
     (out/'aqueduct_full_candidate.i').write_text(text)
     identity=dict(case_id=c['case_id'],full_assembly=True,end_time_total_s=end_time,dynamic_duration_s=end_time-1,source_inp=c['source'],source_contract_sha256=sha(root/'assembly-contract.json'),elements={k:sum(len(g['ids']) for g in group.values() if g['signature'][0]==k) for k in ('HEX8','TRUSS','SHELL4')},nodes=len(xyz),mpc_rows=len(rows),embedded_nodes=len(embedded_nodes),embedded_equations=3*len(embedded_nodes),embedded_formulation='explicit conjugate multipliers; all physical mass/force retained; current algebraic rows',connector_count=4,contact_pairs=4,probes=probes,hht=dict(alpha=ALPHA,beta=BETA,gamma=GAMMA),first_candidate_user_regression_waiver='2026-10-24; seven not run, not passed',
