@@ -123,9 +123,9 @@ def build(preparation,motion,output,end_time=1.01):
     probes=[]
     # Real source nodes, one high node per instance group plus connector endpoints.
     with (root/'node-map.csv').open() as f:nmap=list(csv.DictReader(f))
-    for inst in ('caoshen-new2-1','paijia-1','paijia-2-1','paijia-DI-1','gangliang-1'):
+    for inst in ('caoshen（dangkuai-1','paijia-1','paijia-1-lin-2-1','paijia-DI-1','paijia-DI-1-lin-2-1','gangliang-1'):
         candidates=[r for r in nmap if r['instance'].lower()==inst.lower()]
-        if not candidates:continue
+        if not candidates:raise ValueError('source probe instance missing: '+inst)
         r=max(candidates,key=lambda r:float(r['z_m']));probes.append(dict(name='probe_'+str(len(probes)),node=int(r['exodus_node'])-1,instance=r['instance'],abaqus_local_node=int(r['abaqus_node_label']),position_m=[float(r[k]) for k in ('x_m','y_m','z_m')]))
     for r in probes:
         for v in (*FIELDS[:3],'vx','vy','vz','ax','ay','az'):post+=block(r['name']+'_'+v,f'type = NodalVariableValue\nvariable = {v}\nnodeid = {r["node"]}')

@@ -178,6 +178,12 @@ class PrepareAqueductTest(unittest.TestCase):
         self.assertFalse(d['ready_for_solve'])
         self.assertFalse(d['raw_amplitudes_are_effective_motion'])
 
+    def test_s6_surface_order_is_cyclic_for_numerical_integration(self):
+        self.source.write_bytes(FIXTURE.replace('SOLIDFACE,S1','SOLIDFACE,S6').encode('gbk'))
+        out=self.work/'s6';tool.prepare(self.source,out)
+        d=json.loads((out/'assembly-contract.json').read_text())
+        self.assertEqual(d['surfaces']['S1'][0]['nodes'],[4,1,5,8])
+
     def test_units_scale_stress_density_area_but_not_plastic_strain(self):
         out = self.work / 'out'
         tool.prepare(self.source, out)
