@@ -70,7 +70,7 @@ def build(preparation,motion,output,end_time=1.01):
             materials+=block('cdp_update',bp+f'\ntype = AbaqusCDPStressUpdate\nyoungs_modulus = {E}\npoissons_ratio = {nu}\ndilation_angle = {params[0]}\neccentricity = {params[1]}\nbiaxial_to_uniaxial_compression_ratio = {params[2]}\ntensile_meridian_ratio = {params[3]}\nviscosity = {params[4]}\ntension_recovery = 0\ncompression_recovery = 1\nmaximum_substeps = 256\nmaximum_strain_increment = 2.5e-5\nenable_performance_diagnostics = true\n'+ '\n'.join(f'{n}_file = {n}.csv' for n in ('compression_hardening','compression_damage','tension_stiffening','tension_damage')))
             for n in ('compression_hardening','compression_damage','tension_stiffening','tension_damage'):
                 with (out/f'{n}.csv').open('w',newline='') as f:
-                    w=csv.writer(f);w.writerow(['damage' if n.endswith('damage') else 'stress_pa','inelastic_strain']);w.writerows(c['materials_si']['con']['cdp_'+n])
+                    w=csv.writer(f);w.writerow([('damage_c' if n.startswith('compression') else 'damage_t') if n.endswith('damage') else 'stress_pa','inelastic_strain' if n.startswith('compression') else 'cracking_strain']);w.writerows(c['materials_si']['con']['cdp_'+n])
         else:
             materials+=block('steel_stress',bp+'\ntype = ComputeMultipleInelasticStress\ninelastic_models = steel_update\ntangent_operator = nonlinear')+block('steel_update',bp+'\ntype = IsotropicPlasticityStressUpdate\nyield_stress = 400e6\nhardening_function = steel_hardening')
     materials+=block('truss',f'type = AqueductSteelTruss\nblock = {quoted(bars)}\ndisplacements = \'ux uy uz\'\nyoungs_modulus = 200e9\nyield_stress = 400e6\nultimate_stress = 696e6\nplastic_strain_at_ultimate = .1')
@@ -85,7 +85,7 @@ def build(preparation,motion,output,end_time=1.01):
         kernels+=block('shell_mass_'+v,f'type = AqueductFlatShellInertia\nvariable = {v}\ncomponent = {j}\nblock = {quoted(shell)}\nrotations = \'rx ry rz\'\ndensity = 7850\nthickness = .1\noffset = .5\nhht_alpha = {ALPHA}\nhht_start_time = 1')
     for v,axis in zip(FIELDS,'xyz'):kernels+=block('mass_'+v,f'type = AqueductHHTInertia\nvariable = {v}\nblock = {quoted(solids+bars)}\nbeta = {BETA}\ngamma = {GAMMA}\nvelocity = v{axis}\nacceleration = a{axis}\nhht_alpha = {ALPHA}\nhht_start_time = 1\nuse_displaced_mesh = false\nsave_in = f{axis}')
     text+=block('Kernels',kernels)
-    auxkernels=''.join(block(v,f'type = MaterialRealAux\nvariable = {v}\nproperty = cdp_damage_{v[-1]}\nblock = {quoted(concrete)}\nexecute_on = TIMESTEP_END') for v in ('damaget','damagec'))
+    auxkernels=''.join(block(v,f'type = MaterialRealAux\nvariable = {v}\nproperty = Damage{v[-1].upper()}\nblock = {quoted(concrete)}\nexecute_on = TIMESTEP_END') for v in ('damaget','damagec'))
     for v,axis in zip(FIELDS,'xyz'):
         auxkernels+=block('accel_'+axis,f'type = NewmarkAccelAux\nvariable = a{axis}\ndisplacement = {v}\nvelocity = v{axis}\nbeta = {BETA}\nexecute_on = timestep_end')+block('velocity_'+axis,f'type = NewmarkVelAux\nvariable = v{axis}\nacceleration = a{axis}\ngamma = {GAMMA}\nexecute_on = timestep_end')
     text+=block('AuxKernels',auxkernels)
