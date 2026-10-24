@@ -18,7 +18,7 @@ ALPHA=-.41421;BETA=(1-ALPHA)**2/4;GAMMA=.5-ALPHA
 
 def quoted(values):return "'"+' '.join(map(str,values))+"'"
 
-def build(preparation,motion,output,end_time=1.01,mumps_memory_retry=False):
+def build(preparation,motion,output,end_time=1.01,mumps_memory_retry=False,diagnostics=False):
     root=Path(preparation);out=Path(output);motion=Path(motion)
     if out.exists():raise ValueError('output exists')
     c=json.loads((root/'assembly-contract.json').read_text());implementation=json.loads((root/'interface-implementation.json').read_text())
@@ -63,6 +63,15 @@ def build(preparation,motion,output,end_time=1.01,mumps_memory_retry=False):
     aux=''.join(block(v,'block = '+quoted(sorted(group))) for v in ('fx','fy','fz','vx','vy','vz','ax','ay','az'))
     for b in bars:aux+=block(f'area_{b}',f'block = {b}\nfamily = MONOMIAL\norder = CONSTANT\ninitial_condition = {group[b]["section"]["area_m2"]}')
     aux+=''.join(block(v,'block = '+quoted(concrete)+'\nfamily = MONOMIAL\norder = CONSTANT') for v in ('damaget','damagec'))
+    if diagnostics:
+        for v in ('bar_stress','bar_plastic','bar_peq','bar_total_strain','bar_elastic_strain'):
+            aux+=block(v,'block = '+quoted(bars)+'\nfamily = MONOMIAL\norder = CONSTANT')
+        for qp in range(4):
+            for layer in range(3):
+                for v in ('sxx','syy','szz','sxy','peq'):
+                    aux+=block(f'shell_q{qp}_l{layer}_{v}','block = '+quoted(shell)+'\nfamily = MONOMIAL\norder = CONSTANT')
+        for tag in ('time','nontime'):
+            for j,v in enumerate(FIELDS):aux+=block(f'{tag}_{v}','block = '+quoted(sorted(group) if j<3 else shell))
     text+=block('AuxVariables',aux)
     materials='';functions=block('steel_hardening',"type = PiecewiseLinear\nx = '0 .1'\ny = '400e6 696e6'\nextrap = false")
     for name,bb,mat in [('concrete',concrete,'con'),('steel',steel,'steel')]:
@@ -94,6 +103,16 @@ def build(preparation,motion,output,end_time=1.01,mumps_memory_retry=False):
     auxkernels=''.join(block(v,f'type = MaterialRealAux\nvariable = {v}\nproperty = Damage{v[-1].upper()}\nblock = {quoted(concrete)}\nexecute_on = TIMESTEP_END') for v in ('damaget','damagec'))
     for v,axis in zip(FIELDS,'xyz'):
         auxkernels+=block('accel_'+axis,f'type = NewmarkAccelAux\nvariable = a{axis}\ndisplacement = {v}\nvelocity = v{axis}\nbeta = {BETA}\nexecute_on = timestep_end')+block('velocity_'+axis,f'type = NewmarkVelAux\nvariable = v{axis}\nacceleration = a{axis}\ngamma = {GAMMA}\nexecute_on = timestep_end')
+    if diagnostics:
+        for v,prop in [('bar_stress','axial_stress'),('bar_plastic','signed_plastic_stretch'),('bar_peq','equivalent_plastic_stretch'),('bar_total_strain','total_stretch'),('bar_elastic_strain','elastic_stretch')]:
+            auxkernels+=block(v,f'type = MaterialRealAux\nvariable = {v}\nproperty = {prop}\nblock = {quoted(bars)}\nexecute_on = TIMESTEP_END')
+        for qp in range(4):
+            for layer in range(3):
+                for j,v in enumerate(('sxx','syy','szz','sxy','peq')):
+                    name=f'shell_q{qp}_l{layer}_{v}'
+                    auxkernels+=block(name,f'type = MaterialStdVectorAux\nvariable = {name}\nproperty = aq_shell_state\nindex = {5*layer+j}\nselected_qp = {qp}\nblock = {quoted(shell)}\nexecute_on = TIMESTEP_END')
+        for tag in ('time','nontime'):
+            for j,v in enumerate(FIELDS):auxkernels+=block(f'{tag}_{v}',f'type = TagVectorAux\nvariable = {tag}_{v}\nv = {v}\nvector_tag = {tag}\nremove_variable_scaling = true\nblock = {quoted(sorted(group) if j<3 else shell)}\nexecute_on = TIMESTEP_END')
     text+=block('AuxKernels',auxkernels)
     constraints=''
     for i,r in enumerate(rows):constraints+=block(f'mpc_{i}',f'type = AqueductLinearMPC\nvariable = ux\nanchor_node = {r["anchor"]}\nterm_nodes = {quoted(t["node"] for t in r["terms"])}\nterms = {quoted(t["variable"] for t in r["terms"])}\ncoefficients = {quoted(t["coefficient"] for t in r["terms"])}\nmultiplier = lm{r["multiplier"]}')
@@ -151,11 +170,16 @@ def build(preparation,motion,output,end_time=1.01,mumps_memory_retry=False):
         # Bound per-rank factor memory on the selected32GB node; keep all physics.
         text=text.replace("petsc_options_iname = '-pc_type -pc_factor_mat_solver_type'", "petsc_options = '-ksp_error_if_not_converged -ksp_converged_reason'\npetsc_options_iname = '-pc_type -pc_factor_mat_solver_type -mat_mumps_icntl_14 -mat_mumps_icntl_4 -mat_mumps_icntl_23'")
         text=text.replace("petsc_options_value = 'lu mumps'", "petsc_options_value = 'lu mumps 100 2 2048'")
+    if diagnostics:
+        text+=block('Outputs/profile','type = PerfGraphOutput\nlevel = 5\nheaviest_sections = 25\nheaviest_branch = true')
+        text=text.replace('-ksp_error_if_not_converged -ksp_converged_reason', '-ksp_error_if_not_converged -ksp_converged_reason -log_view')
+        text=text.replace('-mat_mumps_icntl_23\'', '-mat_mumps_icntl_23 -ksp_view_mat\'').replace('lu mumps 100 2 2048\'', 'lu mumps 100 2 2048 ::ascii_info_detail\'')
     (out/'aqueduct_full_candidate.i').write_text(text)
     identity=dict(case_id=c['case_id'],full_assembly=True,end_time_total_s=end_time,dynamic_duration_s=end_time-1,source_inp=c['source'],source_contract_sha256=sha(root/'assembly-contract.json'),elements={k:sum(len(g['ids']) for g in group.values() if g['signature'][0]==k) for k in ('HEX8','TRUSS','SHELL4')},nodes=len(xyz),mpc_rows=len(rows),embedded_nodes=len(embedded_nodes),embedded_equations=3*len(embedded_nodes),embedded_formulation='explicit conjugate multipliers; all physical mass/force retained; current algebraic rows',connector_count=4,contact_pairs=4,probes=probes,hht=dict(alpha=ALPHA,beta=BETA,gamma=GAMMA),first_candidate_user_regression_waiver='2026-10-24; seven not run, not passed',
                   deviations=['HEX8 full integration Bbar and six-DOF MITC4/SPOS shell accepted engineering replacements.', 'Custom consistent primal mortar Tie; actual slave membership preserved, coefficients differ from Abaqus; only fully bound secondary facets integrated.', 'Candidate normal-plane Tie adjustment, max .198 micrometre; exact ODB adjustment pending.', 'Explicit HHT alpha=-.41421 inferred from 2025 contact default; exact Abaqus2022 parameters unverified.', 'Base DOFs4-6 are absent on solid base nodes, so source zero rotation BCs have no active DOF; no physical rotary restraint is removed.', 'Unforced static stage one step instead of Abaqus automatic increments; source stabilization .0002 not implemented; zero displacement gives zero stabilization work.', 'Short first full-assembly candidate, not complete27.5s; no matching Abaqus output or engineering threshold.', 'Consistent truss line mass rho*A; original Abaqus reduced-integration/hourglass and source truss mass equivalence pending.'])
     identity['solver_memory_policy']=dict(workspace_estimate_increase_percent=100,max_working_memory_MB_per_rank=2048,MPI_ranks=4,diagnostic_print_level=2,error_on_linear_failure=True,physics_and_tolerances_unchanged=True) if mumps_memory_retry else None
+    identity['native_diagnostics']=dict(enabled=diagnostics,bar_fields=5,shell_inplane_qps=4,shell_layers=3,shell_state_components=['local_sxx','local_syy','local_szz','local_sxy','peq'],residual_tags=['TIME','NONTIME'],meaning='Unmodified complete tagged residuals; reconstruct normalized HHT before nodal BCs; not direct Abaqus RF') if diagnostics else None
     identity['artifacts']={p.name:sha(p) for p in out.iterdir()};(out/'full-input-identity.json').write_text(json.dumps(identity,indent=2)+'\n');return identity
 
 if __name__=='__main__':
-    p=argparse.ArgumentParser(description=__doc__);p.add_argument('--preparation',required=True);p.add_argument('--motion',required=True);p.add_argument('--output',required=True);p.add_argument('--end-time',type=float,default=1.01);p.add_argument('--mumps-memory-retry',action='store_true');a=p.parse_args();print(json.dumps(build(a.preparation,a.motion,a.output,a.end_time,a.mumps_memory_retry),indent=2))
+    p=argparse.ArgumentParser(description=__doc__);p.add_argument('--preparation',required=True);p.add_argument('--motion',required=True);p.add_argument('--output',required=True);p.add_argument('--end-time',type=float,default=1.01);p.add_argument('--mumps-memory-retry',action='store_true');p.add_argument('--diagnostics',action='store_true');a=p.parse_args();print(json.dumps(build(a.preparation,a.motion,a.output,a.end_time,a.mumps_memory_retry,a.diagnostics),indent=2))
