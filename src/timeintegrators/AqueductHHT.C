@@ -17,7 +17,7 @@ InputParameters AqueductHHT::validParams()
 }
 AqueductHHT::AqueductHHT(const InputParameters & p)
  :NewmarkBeta(p),_hht_alpha(getParam<Real>("hht_alpha")),_start_time(getParam<Real>("hht_start_time")),
- _old_forces(addVector("aq_hht_accepted_forces",false,libMesh::GHOSTED))
+ _old_forces(addVector("aq_hht_accepted_forces",true,libMesh::GHOSTED))
 {
   if(_var_restriction) paramError("variables","Whole-system HHT cannot restrict physical variables");
   if(std::abs(_beta-AqueductHHTScheme::beta(_hht_alpha))>1e-12 ||
@@ -69,6 +69,7 @@ void AqueductHHT::postResidual(NumericVector<Number> & residual)
 void AqueductHHT::postStep()
 {
   // TransientBase calls this only for an accepted solve, never on a rejected attempt.
+  // Contact-search EquationSystems::reinit must preserve this accepted physical history.
   copyVector(*_Re_non_time,*_old_forces);clearAlgebraicHistory();
 }
 void AqueductHHT::computeADTimeDerivatives(ADReal & v,const dof_id_type & dof,ADReal & a) const

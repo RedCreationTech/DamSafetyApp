@@ -1,6 +1,12 @@
 #include "AqueductHHTScheme.h"
 #include "gtest/gtest.h"
 #include <array>
+#include "libmesh/replicated_mesh.h"
+#include "libmesh/mesh_generation.h"
+#include "libmesh/equation_systems.h"
+#include "libmesh/explicit_system.h"
+#include "libmesh/numeric_vector.h"
+#include "libmesh/parallel.h"
 
 TEST(AqueductHHTScheme, NormalizationPreservesPhysicalHHTEquation)
 {
@@ -23,4 +29,27 @@ TEST(AqueductHHTScheme, AlphaZeroAndConsistentTangent)
   EXPECT_NEAR((residual(u+h)-residual(u-h))/(2*h),M/(beta*dt*dt*(1+alpha))+K,1e-5);
   EXPECT_THROW(AqueductHHTScheme::massScale(-1),std::invalid_argument);
   EXPECT_THROW(AqueductHHTScheme::massScale(.1),std::invalid_argument);
+}
+
+TEST(AqueductHHTScheme, LibMeshGhostReinitPreservesAcceptedHistory)
+{
+  libMesh::Parallel::Communicator comm(MPI_COMM_WORLD);
+  libMesh::ReplicatedMesh mesh(comm,3);
+  libMesh::MeshTools::Generation::build_cube(mesh,1,1,1,0,1,0,1,0,1,libMesh::HEX8);
+  libMesh::EquationSystems equations(mesh);
+  auto & system=equations.add_system<libMesh::ExplicitSystem>("history_contract");
+  system.add_variable("u",libMesh::FIRST);
+  auto & transient=system.add_vector("old_project_false",false,libMesh::GHOSTED);
+  auto & preserved=system.add_vector("accepted_project_true",true,libMesh::GHOSTED);
+  equations.init();
+  for(auto i=preserved.first_local_index();i<preserved.last_local_index();++i)
+  {
+    transient.set(i,1.+i);preserved.set(i,1.+i);
+  }
+  transient.close();preserved.close();
+  const auto expected=preserved.l2_norm();
+  equations.reinit();
+  EXPECT_GT(expected,0.);
+  EXPECT_DOUBLE_EQ(transient.l2_norm(),0.);
+  EXPECT_NEAR(preserved.l2_norm(),expected,1e-12);
 }
