@@ -1,10 +1,16 @@
 #include "AbaqusCDPStressUpdate.h"
 
 #include "MooseException.h"
+#include "FEProblemBase.h"
+#include "libmesh/elem.h"
 
 #include <array>
+#include <cctype>
 #include <chrono>
+#include <cstdio>
 #include <exception>
+#include <filesystem>
+#include <limits>
 
 registerMooseObject("DamSafetyApp", AbaqusCDPStressUpdate);
 
@@ -59,6 +65,22 @@ AbaqusCDPStressUpdate::validParams()
                         false,
                         "Measure per-material-call elapsed time and expose detailed local solver "
                         "counters as material properties");
+  params.addParam<bool>("enable_exact_result_cache", false,
+                        "Opt-in reuse of complete successful results for bit-identical point inputs");
+  params.addParam<bool>("observe_exact_result_cache", false,
+                        "Count potential cache hits but always execute the original integrator");
+  params.addRangeCheckedParam<unsigned int>("exact_result_cache_capacity", 65536,
+                                             "exact_result_cache_capacity > 0",
+                                             "Maximum cached points per material/thread");
+  params.addParam<std::string>("exact_cache_diagnostics_prefix", "",
+                               "Optional per-rank/thread lifetime cache counters, written on shutdown");
+  params.addParam<std::string>("failure_point_capture_prefix", "",
+                               "Empty disables capture; otherwise bounded per-rank/thread point packets");
+  params.addRangeCheckedParam<unsigned int>("failure_point_capture_limit", 1,
+                                             "failure_point_capture_limit > 0", "Capture attempts per material/thread");
+  params.addParam<Real>("failure_point_capture_start", 0., "Total-time window start");
+  params.addParam<Real>("failure_point_capture_end", std::numeric_limits<Real>::max(),
+                       "Total-time window end");
   return params;
 }
 
@@ -90,6 +112,7 @@ AbaqusCDPStressUpdate::AbaqusCDPStressUpdate(const InputParameters & parameters)
                         {getParam<unsigned int>("maximum_substeps"),
                          getParam<Real>("maximum_strain_increment"),
                          getParam<Real>("reference_tangent_perturbation")}),
+    _enable_exact_result_cache(getParam<bool>("enable_exact_result_cache")),
     _backbone_plastic_strain(
         declareProperty<RankTwoTensor>(_base_name + "cdp_backbone_plastic_strain")),
     _backbone_plastic_strain_old(
@@ -129,6 +152,145 @@ AbaqusCDPStressUpdate::AbaqusCDPStressUpdate(const InputParameters & parameters)
     _integration_microseconds(
         declareProperty<Real>(_base_name + "cdp_integration_microseconds"))
 {
+  if (_enable_exact_result_cache && getParam<bool>("observe_exact_result_cache"))
+    paramError("observe_exact_result_cache", "Observe and reuse modes are mutually exclusive");
+  if (_enable_exact_result_cache || getParam<bool>("observe_exact_result_cache"))
+    _exact_cache = std::make_unique<AbaqusCDPExactResultCache>(
+        getParam<unsigned int>("exact_result_cache_capacity"));
+  std::string safe_name=name();
+  for(char & c:safe_name)if(!std::isalnum(static_cast<unsigned char>(c)))c='_';
+  const auto suffix="."+safe_name+".rank"+std::to_string(processor_id())+
+                    ".thread"+std::to_string(_tid);
+  const auto & diagnostics=getParam<std::string>("exact_cache_diagnostics_prefix");
+  if(!diagnostics.empty())
+  {
+    if(!_exact_cache)paramError("exact_cache_diagnostics_prefix", "Requires observe or reuse mode");
+    const auto path=diagnostics+suffix+".csv";
+    if(std::filesystem::exists(path))paramError("exact_cache_diagnostics_prefix", "File already exists");
+    _cache_diagnostics.open(path);
+    if(!_cache_diagnostics)paramError("exact_cache_diagnostics_prefix", "Cannot create diagnostics");
+    _cache_diagnostics << "requests,potential_hits,reused_hits,integrations,stores,capacity_skips,"
+                          "invalidations,peak_entries,entry_payload_bytes,integrator_microseconds,"
+                          "lookup_store_microseconds\n";
+    _cache_diagnostics.flush();
+  }
+  const auto start=getParam<Real>("failure_point_capture_start");
+  const auto end=getParam<Real>("failure_point_capture_end");
+  if(!std::isfinite(start) || !std::isfinite(end) || end<start)
+    paramError("failure_point_capture_end", "Capture window must be finite and ordered");
+  if(!getParam<std::string>("failure_point_capture_prefix").empty())
+  {
+    _capture_template=std::make_unique<AbaqusCDPPointPacket>();
+    _capture_template->local=_local_integrator.parameters();
+    _capture_template->state=_state_integrator.parameters();
+    _capture_template->substeps=_substep_integrator.parameters();
+    _capture_template->material=name();
+    _capture_template->setTables(_table);
+  }
+}
+
+AbaqusCDPStressUpdate::~AbaqusCDPStressUpdate()
+{
+  if(_exact_cache && _cache_diagnostics.is_open())
+  {
+    const auto & s=_exact_cache->counters();
+    _cache_diagnostics << s.requests << ',' << s.potential_hits << ',' << s.reused_hits << ','
+        << _cache_integrations << ',' << s.stores << ',' << s.capacity_skips << ','
+        << s.invalidations << ',' << s.peak_entries << ',' << _exact_cache->entryPayloadBytes() << ','
+        << _cache_integrator_microseconds << ',' << _cache_lookup_store_microseconds << '\n';
+    _cache_diagnostics.flush();
+    if(!_cache_diagnostics)std::fprintf(stderr,"CDP cache diagnostic write failed\n");
+  }
+}
+
+void AbaqusCDPStressUpdate::timestepSetup()
+{
+  StressUpdateBase::timestepSetup();
+  if(_exact_cache)_exact_cache->invalidate();
+}
+void AbaqusCDPStressUpdate::residualSetup()
+{
+  StressUpdateBase::residualSetup();
+  // Retain entries only from the latest residual evaluation to its Jacobian.
+  if(_exact_cache)_exact_cache->invalidate();
+}
+void AbaqusCDPStressUpdate::meshChanged()
+{
+  StressUpdateBase::meshChanged();
+  if(_exact_cache)_exact_cache->invalidate();
+}
+
+AbaqusCDPSubstepIntegrator::LinearizedResult
+AbaqusCDPStressUpdate::integrateWithOptionalCache(const SymmetricTensor & old_strain,
+                                                 const SymmetricTensor & new_strain,
+                                                 const CoreState & old_state)
+{
+  if(!_exact_cache)
+    return _substep_integrator.integrateLinearized(old_strain,new_strain,_dt,old_state);
+  const auto lookup_start=std::chrono::steady_clock::now();
+  const auto key=AbaqusCDPExactResultCache::key(_current_elem->id(),_qp,old_strain,new_strain,
+      _dt,old_state,(_bnd || _neighbor) ? _current_side : std::numeric_limits<unsigned int>::max());
+  const auto * hit=_exact_cache->find(key,_enable_exact_result_cache);
+  _cache_lookup_store_microseconds += std::chrono::duration<double,std::micro>(
+      std::chrono::steady_clock::now()-lookup_start).count();
+  if(hit && _enable_exact_result_cache)return *hit;
+  ++_cache_integrations;
+  const auto core_start=std::chrono::steady_clock::now();
+  auto result = [&]() {
+    try
+    {
+      auto computed=_substep_integrator.integrateLinearized(old_strain,new_strain,_dt,old_state);
+      _cache_integrator_microseconds += std::chrono::duration<double,std::micro>(
+          std::chrono::steady_clock::now()-core_start).count();
+      return computed;
+    }
+    catch(...)
+    {
+      _cache_integrator_microseconds += std::chrono::duration<double,std::micro>(
+          std::chrono::steady_clock::now()-core_start).count();
+      throw;
+    }
+  }();
+  const auto store_start=std::chrono::steady_clock::now();
+  _exact_cache->store(key,result);
+  _cache_lookup_store_microseconds += std::chrono::duration<double,std::micro>(
+      std::chrono::steady_clock::now()-store_start).count();
+  return result;
+}
+
+void AbaqusCDPStressUpdate::captureFailure(const SymmetricTensor & old_strain,
+                                           const SymmetricTensor & new_strain,
+                                           const CoreState & old_state,
+                                           const char * error) noexcept
+{
+  if(!_capture_template || _t<getParam<Real>("failure_point_capture_start") ||
+     _t>getParam<Real>("failure_point_capture_end") ||
+     _capture_attempts>=getParam<unsigned int>("failure_point_capture_limit"))return;
+  const auto record=_capture_attempts++;
+  try
+  {
+    auto packet=*_capture_template;
+    packet.element=_current_elem->id();packet.qp=_qp;packet.rank=processor_id();packet.thread=_tid;
+    packet.side=(_bnd || _neighbor) ? _current_side : std::numeric_limits<unsigned int>::max();
+    packet.step=_fe_problem.timeStep();packet.time=_t;packet.dt=_dt;
+    for(unsigned int j=0;j<3;++j)packet.position[j]=_q_point[_qp](j);
+    packet.old_strain=old_strain;packet.new_strain=new_strain;packet.old=old_state;
+    packet.expected_error=error;
+    std::string safe_name=name();
+    for(char & c:safe_name)if(!std::isalnum(static_cast<unsigned char>(c)))c='_';
+    const auto path=getParam<std::string>("failure_point_capture_prefix")+"."+safe_name+
+        ".rank"+std::to_string(packet.rank)+".thread"+std::to_string(packet.thread)+
+        ".record"+std::to_string(record)+".txt";
+    if(std::filesystem::exists(path))throw std::runtime_error("Capture file already exists");
+    std::ofstream out(path);packet.write(out);out.flush();
+    if(!out)throw std::runtime_error("Capture flush failed");
+  }
+  catch(const std::exception & e)
+  {
+    // Diagnostic I/O must never replace the original material exception.
+    std::fprintf(stderr,"CDP point capture failed: %s\n",e.what());
+  }
+  catch(...){std::fprintf(stderr,"CDP point capture failed: unknown diagnostic error\n");}
 }
 
 void
@@ -289,8 +451,7 @@ AbaqusCDPStressUpdate::updateState(RankTwoTensor & strain_increment,
   try
   {
     const auto integration_start = std::chrono::steady_clock::now();
-    const auto result =
-        _substep_integrator.integrateLinearized(old_total_strain, new_total_strain, _dt, old_state);
+    const auto result = integrateWithOptionalCache(old_total_strain,new_total_strain,old_state);
     const Real integration_microseconds =
         _enable_performance_diagnostics
             ? std::chrono::duration<Real, std::micro>(std::chrono::steady_clock::now() -
@@ -310,6 +471,8 @@ AbaqusCDPStressUpdate::updateState(RankTwoTensor & strain_increment,
   }
   catch (const std::exception & error)
   {
+    if(_exact_cache)_exact_cache->invalidate();
+    captureFailure(old_total_strain,new_total_strain,old_state,error.what());
     throw MooseException(error.what());
   }
 }

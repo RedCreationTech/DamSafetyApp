@@ -81,6 +81,7 @@ public:
 
   static SymmetricTensor applyTangent(const TangentMatrix & tangent,
                                       const SymmetricTensor & direction);
+  const Parameters & parameters() const { return _parameters; }
 
 private:
   const AbaqusCDPStateIntegrator & _state_integrator;

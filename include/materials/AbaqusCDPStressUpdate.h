@@ -1,7 +1,11 @@
 #pragma once
 
 #include "AbaqusCDPSubstepIntegrator.h"
+#include "AbaqusCDPExactResultCache.h"
+#include "AbaqusCDPPointPacket.h"
 #include "StressUpdateBase.h"
+#include <fstream>
+#include <memory>
 
 /**
  * MOOSE StressUpdateBase adapter for the table-driven Abaqus-CDP-compatible
@@ -17,6 +21,10 @@ public:
   static InputParameters validParams();
 
   AbaqusCDPStressUpdate(const InputParameters & parameters);
+  ~AbaqusCDPStressUpdate() override;
+  void timestepSetup() override;
+  void residualSetup() override;
+  void meshChanged() override;
 
   void updateState(RankTwoTensor & strain_increment,
                    RankTwoTensor & inelastic_strain_increment,
@@ -47,12 +55,24 @@ private:
   CoreState oldState() const;
   void storeState(const AbaqusCDPSubstepIntegrator::LinearizedResult & result,
                   Real integration_microseconds);
+  AbaqusCDPSubstepIntegrator::LinearizedResult integrateWithOptionalCache(
+      const SymmetricTensor & old_strain, const SymmetricTensor & new_strain,
+      const CoreState & old_state);
+  void captureFailure(const SymmetricTensor & old_strain, const SymmetricTensor & new_strain,
+                      const CoreState & old_state, const char * error) noexcept;
 
   const bool _enable_performance_diagnostics;
   const CDPMaterialTable _table;
   const AbaqusCDPLocalIntegrator _local_integrator;
   const AbaqusCDPStateIntegrator _state_integrator;
   const AbaqusCDPSubstepIntegrator _substep_integrator;
+  const bool _enable_exact_result_cache;
+  std::unique_ptr<AbaqusCDPExactResultCache> _exact_cache;
+  std::uint64_t _cache_integrations = 0;
+  double _cache_integrator_microseconds = 0., _cache_lookup_store_microseconds = 0.;
+  std::ofstream _cache_diagnostics;
+  std::unique_ptr<AbaqusCDPPointPacket> _capture_template;
+  unsigned int _capture_attempts = 0;
 
   MaterialProperty<RankTwoTensor> & _backbone_plastic_strain;
   const MaterialProperty<RankTwoTensor> & _backbone_plastic_strain_old;

@@ -4,6 +4,7 @@
 #include "CDPMaterialTable.h"
 
 #include <array>
+#include <ostream>
 #include <string>
 
 /**
@@ -93,7 +94,18 @@ public:
     LocalMatrix finite_difference;
   };
 
-  AbaqusCDPLocalIntegrator(const CDPMaterialTable & table, Parameters parameters);
+  /** Replay-only passive trace. Production materials never attach a sink. */
+  struct DiagnosticTrace
+  {
+    std::ostream * stream = nullptr;
+    std::size_t limit = 100000;
+    std::size_t written = 0, dropped = 0, calls = 0;
+    bool io_failed = false;
+  };
+
+  AbaqusCDPLocalIntegrator(const CDPMaterialTable & table,
+                          Parameters parameters,
+                          DiagnosticTrace * trace = nullptr);
 
   Result integrate(const SymmetricTensor & total_strain, const State & old_state) const;
   LinearizedResult integrateLinearized(const SymmetricTensor & total_strain,
@@ -106,6 +118,7 @@ public:
                                                   const State & old_state) const;
 
   static std::string branchName(ActiveBranch branch);
+  const Parameters & parameters() const { return _parameters; }
 
 private:
   struct LocalFactorization
@@ -150,6 +163,7 @@ private:
 
   const CDPMaterialTable & _table;
   const Parameters _parameters;
+  DiagnosticTrace * const _trace;
   const double _initial_tension_strength;
   const double _initial_compression_strength;
   const double _stress_scale_floor;

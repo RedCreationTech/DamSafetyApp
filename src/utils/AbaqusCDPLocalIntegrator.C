@@ -337,9 +337,11 @@ finiteTensor(const SymmetricTensor & tensor)
 }
 
 AbaqusCDPLocalIntegrator::AbaqusCDPLocalIntegrator(const CDPMaterialTable & table,
-                                                   Parameters parameters)
+                                                   Parameters parameters,
+                                                   DiagnosticTrace * trace)
   : _table(table),
     _parameters(parameters),
+    _trace(trace),
     _initial_tension_strength(
         table.responseByEquivalentPlasticStrain(CDPMaterialTable::Branch::TENSION, 0.0)
             .stress.value),
@@ -695,6 +697,65 @@ AbaqusCDPLocalIntegrator::integrate(const SymmetricTensor & total_strain,
       CDPMaterialTable::Branch::COMPRESSION, old_state.compressive_equivalent_plastic_strain);
   const double stress_scale = stressScale(total_strain, old_state);
 
+  const std::size_t trace_call = _trace ? ++_trace->calls : 0;
+  const auto trace = [&](const char * event,
+                          unsigned int iteration,
+                          const char * method,
+                          double alpha,
+                          const LocalVector & x,
+                          const Evaluation * evaluation,
+                          bool accepted) {
+    if (!_trace || !_trace->stream)
+      return;
+    if (_trace->written >= _trace->limit)
+    {
+      ++_trace->dropped;
+      return;
+    }
+    try
+    {
+      auto & out = *_trace->stream;
+      if (!_trace->written)
+      {
+        out << "call,event,iteration,method,alpha,accepted,norm,stress_scale,strain_scale";
+        for (unsigned int i=0;i<6;++i) out << ",strain" << i;
+        for (unsigned int i=0;i<6;++i) out << ",old_plastic" << i;
+        out << ",old_kappa_t,old_kappa_c";
+        for (unsigned int i=0;i<9;++i) out << ",unknown" << i;
+        for (unsigned int i=0;i<9;++i) out << ",residual" << i;
+        out << '\n';
+      }
+      out << std::setprecision(17) << trace_call << ',' << event << ',' << iteration << ','
+          << method << ',' << alpha << ',' << accepted << ',';
+      if (evaluation) out << infinityNorm(evaluation->residual);
+      out << ',' << stress_scale << ',' << _strain_scale;
+      for (double v : total_strain) out << ',' << v;
+      for (double v : old_state.plastic_strain) out << ',' << v;
+      out << ',' << old_state.tensile_equivalent_plastic_strain
+          << ',' << old_state.compressive_equivalent_plastic_strain;
+      for (double v : x) out << ',' << v;
+      for (unsigned int i=0;i<9;++i)
+      {
+        out << ',';
+        if (evaluation) out << evaluation->residual[i];
+      }
+      out << '\n';
+      if (!out)
+      {
+        _trace->io_failed = true;
+        _trace->stream = nullptr;
+      }
+      else
+        ++_trace->written;
+    }
+    catch (...)
+    {
+      _trace->io_failed = true;
+      _trace->stream = nullptr;
+    }
+  };
+  trace("begin", 0, "none", 0., {}, nullptr, false);
+
   const double trial_yield = AbaqusCDPFormula::yieldFunction(
       trial_stress,
       old_compression.value,
@@ -742,6 +803,7 @@ AbaqusCDPLocalIntegrator::integrate(const SymmetricTensor & total_strain,
 
   Evaluation current = evaluate(unknown, total_strain, old_state, stress_scale);
   double residual_norm = infinityNorm(current.residual);
+  trace("initial", 0, "none", 0., unknown, &current, false);
   const auto currentBranch = [&](const Evaluation & evaluation) {
     const double tolerance = 10.0 * std::numeric_limits<double>::epsilon() * _strain_scale;
     if (evaluation.tensile_increment <= tolerance)
@@ -763,7 +825,7 @@ AbaqusCDPLocalIntegrator::integrate(const SymmetricTensor & total_strain,
     LocalVector right_hand_side;
     for (std::size_t i = 0; i < local_size; ++i)
       right_hand_side[i] = -current.residual[i];
-    const auto try_increment = [&](const LocalVector & increment) {
+    const auto try_increment = [&](const LocalVector & increment, const char * method) {
       for (double line_search = 1.0; line_search >= _parameters.minimum_line_search;
            line_search *= 0.5)
       {
@@ -772,10 +834,16 @@ AbaqusCDPLocalIntegrator::integrate(const SymmetricTensor & total_strain,
           candidate_unknown[i] += line_search * increment[i];
         if (candidate_unknown[6] < 0.0 || candidate_unknown[7] < 0.0 ||
             candidate_unknown[8] < 0.0)
+        {
+          trace("inadmissible", iterations+1, method, line_search, candidate_unknown,
+                nullptr, false);
           continue;
+        }
 
         auto candidate = evaluate(candidate_unknown, total_strain, old_state, stress_scale);
         const double candidate_norm = infinityNorm(candidate.residual);
+        trace("candidate", iterations+1, method, line_search, candidate_unknown, &candidate,
+              std::isfinite(candidate_norm) && candidate_norm < residual_norm);
         if (std::isfinite(candidate_norm) && candidate_norm < residual_norm)
         {
           unknown = candidate_unknown;
@@ -797,11 +865,12 @@ AbaqusCDPLocalIntegrator::integrate(const SymmetricTensor & total_strain,
         ++automatic_jacobian_evaluations;
         const auto factorization = factorLinearSystem(automatic);
         ++local_factorizations;
-        accepted = try_increment(solveLinearSystem(factorization, right_hand_side));
+        accepted = try_increment(solveLinearSystem(factorization, right_hand_side), "AD");
         ++local_backsolves;
       }
       catch (const std::runtime_error &)
       {
+        trace("AD_exception", iterations+1, "AD", 0., unknown, &current, false);
         accepted = false;
       }
       if (!accepted)
@@ -811,7 +880,7 @@ AbaqusCDPLocalIntegrator::integrate(const SymmetricTensor & total_strain,
         ++finite_difference_jacobian_evaluations;
         const auto factorization = factorLinearSystem(reference);
         ++local_factorizations;
-        accepted = try_increment(solveLinearSystem(factorization, right_hand_side));
+        accepted = try_increment(solveLinearSystem(factorization, right_hand_side), "FD");
         ++local_backsolves;
       }
     }
@@ -821,11 +890,12 @@ AbaqusCDPLocalIntegrator::integrate(const SymmetricTensor & total_strain,
       ++finite_difference_jacobian_evaluations;
       const auto factorization = factorLinearSystem(reference);
       ++local_factorizations;
-      accepted = try_increment(solveLinearSystem(factorization, right_hand_side));
+      accepted = try_increment(solveLinearSystem(factorization, right_hand_side), "FD");
       ++local_backsolves;
     }
     if (!accepted)
     {
+      trace("line_search_failure", iterations+1, "none", 0., unknown, &current, false);
       std::ostringstream message;
       message << std::setprecision(16) << "line search failed at iteration " << iterations + 1
               << ", residual=" << residual_norm
@@ -839,6 +909,7 @@ AbaqusCDPLocalIntegrator::integrate(const SymmetricTensor & total_strain,
 
   if (residual_norm > _parameters.residual_tolerance)
   {
+    trace("iteration_limit", iterations, "none", 0., unknown, &current, false);
     std::ostringstream message;
     message << std::setprecision(16) << "local Newton failed after " << iterations
             << " iterations, residual=" << residual_norm
@@ -850,6 +921,7 @@ AbaqusCDPLocalIntegrator::integrate(const SymmetricTensor & total_strain,
   }
 
   State new_state = old_state;
+  trace("converged", iterations, "none", 0., unknown, &current, true);
   new_state.plastic_strain = add(old_state.plastic_strain, current.plastic_increment);
   new_state.tensile_equivalent_plastic_strain = current.tensile_equivalent_plastic_strain;
   new_state.compressive_equivalent_plastic_strain =

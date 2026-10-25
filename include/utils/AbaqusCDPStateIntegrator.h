@@ -66,6 +66,7 @@ public:
   LinearizedResult integrateLinearized(const SymmetricTensor & total_strain,
                                        double time_step,
                                        const State & old_state) const;
+  const Parameters & parameters() const { return _parameters; }
 
 private:
   Result assembleResult(const SymmetricTensor & total_strain,
