@@ -167,12 +167,7 @@ AbaqusCDPStressUpdate::AbaqusCDPStressUpdate(const InputParameters & parameters)
     if(!_exact_cache)paramError("exact_cache_diagnostics_prefix", "Requires observe or reuse mode");
     const auto path=diagnostics+suffix+".csv";
     if(std::filesystem::exists(path))paramError("exact_cache_diagnostics_prefix", "File already exists");
-    _cache_diagnostics.open(path);
-    if(!_cache_diagnostics)paramError("exact_cache_diagnostics_prefix", "Cannot create diagnostics");
-    _cache_diagnostics << "requests,potential_hits,reused_hits,integrations,stores,capacity_skips,"
-                          "invalidations,peak_entries,entry_payload_bytes,integrator_microseconds,"
-                          "lookup_store_microseconds\n";
-    _cache_diagnostics.flush();
+    _cache_diagnostics_path=path;
   }
   const auto start=getParam<Real>("failure_point_capture_start");
   const auto end=getParam<Real>("failure_point_capture_end");
@@ -227,6 +222,18 @@ AbaqusCDPStressUpdate::integrateWithOptionalCache(const SymmetricTensor & old_st
 {
   if(!_exact_cache)
     return _substep_integrator.integrateLinearized(old_strain,new_strain,_dt,old_state);
+  // C06 checks the input before solving in the same directory; checks must not create output.
+  if(!_cache_diagnostics_path.empty() && !_cache_diagnostics.is_open())
+  {
+    if(std::filesystem::exists(_cache_diagnostics_path))
+      paramError("exact_cache_diagnostics_prefix", "File already exists");
+    _cache_diagnostics.open(_cache_diagnostics_path);
+    if(!_cache_diagnostics)paramError("exact_cache_diagnostics_prefix", "Cannot create diagnostics");
+    _cache_diagnostics << "requests,potential_hits,reused_hits,integrations,stores,capacity_skips,"
+                          "invalidations,peak_entries,entry_payload_bytes,integrator_microseconds,"
+                          "lookup_store_microseconds\n";
+    _cache_diagnostics.flush();
+  }
   const auto lookup_start=std::chrono::steady_clock::now();
   const auto key=AbaqusCDPExactResultCache::key(_current_elem->id(),_qp,old_strain,new_strain,
       _dt,old_state,(_bnd || _neighbor) ? _current_side : std::numeric_limits<unsigned int>::max());

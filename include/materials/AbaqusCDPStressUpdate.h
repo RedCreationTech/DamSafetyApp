@@ -70,6 +70,7 @@ private:
   std::unique_ptr<AbaqusCDPExactResultCache> _exact_cache;
   std::uint64_t _cache_integrations = 0;
   double _cache_integrator_microseconds = 0., _cache_lookup_store_microseconds = 0.;
+  std::string _cache_diagnostics_path;
   std::ofstream _cache_diagnostics;
   std::unique_ptr<AbaqusCDPPointPacket> _capture_template;
   unsigned int _capture_attempts = 0;
