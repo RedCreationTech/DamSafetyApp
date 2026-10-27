@@ -35,9 +35,10 @@ void DS04GSP1AuditProblem::initialSetup()
   const auto *original = nl.currentSolution();
   auto x = original->clone();
   auto residual = x->zero_clone();
-  // At INITIAL no solve has assembled/closed the system matrix yet.
-  sys.get_system_matrix().close();
-  auto J = sys.get_system_matrix().zero_clone();
+  // At INITIAL the live matrix has no populated sparsity to clone. Allocate
+  // the complete eight-DOF audit pattern without changing the solver matrix.
+  auto J = SparseMatrix<Number>::build(comm());
+  J->init(8, 8, 8, 8, 8, 0);
   time() = .002;
   dt() = .002;
   dtOld() = .002;
@@ -57,6 +58,7 @@ void DS04GSP1AuditProblem::initialSetup()
     mapping << i << ',' << node->id() << ',' << (*node)(0) << ',' << (*node)(1) << ',' << dofs[i][0]
             << ',' << dofs[i][1] << '\n';
   }
+  mapping.close();
   auto history = [&](const std::string &name)
   {
     std::ofstream f(name);
@@ -102,6 +104,7 @@ void DS04GSP1AuditProblem::initialSetup()
   history("audit_history_before.csv");
   std::ofstream cases("audit_cases.csv");
   cases << "case,status\n";
+  cases.flush();
   for (const auto &name : {"zero", "micro", "affine", "rigid", "tension", "compression"})
   {
     const std::string stem = std::string("audit_") + name;
@@ -163,6 +166,7 @@ void DS04GSP1AuditProblem::initialSetup()
           }
       evaluate(*x, stem + "_replay");
       cases << name << ",complete\n";
+      cases.flush();
     }
     catch (const std::exception &e)
     {
