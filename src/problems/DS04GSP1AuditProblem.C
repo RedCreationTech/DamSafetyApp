@@ -1,4 +1,5 @@
 #include "CDPAssemblyProbe.h"
+#include "KernelBase.h"
 #include "DS04GSP1AuditProblem.h"
 #include "MaterialPropertyStorage.h"
 #include "MooseMesh.h"
@@ -43,6 +44,25 @@ void DS04GSP1AuditProblem::initialSetup()
   dt() = .002;
   dtOld() = .002;
   executeControls(EXEC_TIMESTEP_BEGIN);
+  // Normal Transient initialization refreshes this warehouse after INITIAL.
+  // This audit runs inside initialSetup, so perform that lifecycle step here.
+  std::ofstream active("audit_active_kernels.csv");
+  active << "stage,kernel,enabled,cached_active\n";
+  auto record_active = [&](const std::string & stage)
+  {
+    std::set<std::string> names;
+    for (const auto & k : nl.getKernelWarehouse().getActiveObjects()) names.insert(k->name());
+    for (const auto & k : nl.getKernelWarehouse().getObjects())
+      active << stage << ',' << k->name() << ',' << k->enabled() << ',' << names.count(k->name()) << '\n';
+    return names;
+  };
+  record_active("before_refresh");
+  updateActiveObjects();
+  const auto active_names = record_active("after_refresh");
+  for (const auto & name : active_names)
+    if (name.find("TM_all") != std::string::npos || name.find("gravity") != std::string::npos)
+      mooseError("Frozen internal-stiffness audit must exclude dynamic/gravity kernels");
+  active.close();
   std::array<std::array<dof_id_type, 2>, 4> dofs;
   std::array<double, 2> center{};
   std::ofstream mapping("audit_dof_map.csv");
