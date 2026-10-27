@@ -54,6 +54,14 @@ void ADDS04GSP1Correction::initialSetup()
 {
   if (getBlockCoordSystem() != Moose::COORD_XYZ)
     mooseError("SP1 requires Cartesian XY");
+  auto *selected = getVar("displacements", _component);
+  for (const auto &field : {"velocity", "acceleration"})
+  {
+    auto *aux = getVar(field, 0);
+    if (coupledComponents(field) != 1 || aux->kind() != Moose::VAR_AUXILIARY ||
+        aux->feType() != selected->feType() || aux->blockIDs() != selected->blockIDs())
+      mooseError("SP1 requires matching nodal Newmark auxiliary FE/block spaces");
+  }
   for (unsigned c = 0; c < 2; ++c)
   {
     auto *u = getVar("displacements", c);
@@ -64,7 +72,8 @@ void ADDS04GSP1Correction::initialSetup()
 ADReal ADDS04GSP1Correction::computeQpResidual()
 {
   if (_qrule->n_points() != 1 || _current_elem->type() != QUAD4 || _u[0]->size() != 4 ||
-      _u[1]->size() != 4)
+      _u[1]->size() != 4 || _old.size() != 4 || _older.size() != 4 || _v_old.size() != 4 ||
+      _a_old.size() != 4)
     mooseError("SP1 requires one center QP and exactly four-node QUAD4");
   if (!std::isfinite(_density[_qp]) || std::abs(_density[_qp] - _rho) > 1e-12 * _rho)
     mooseError("SP1 density differs from frozen constant");
