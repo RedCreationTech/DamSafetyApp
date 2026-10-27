@@ -132,6 +132,9 @@ TEST(DS04GFalseRotationTangent, SixRealMaterialInputsCompleteForceChainTwoGeomet
         Six strain=six(DS04GFalseRotation::increment(F*Fold.inverse()));
         for(unsigned k=0;k<6;++k)strain[k]+=s0[k];
         const auto r=sub.integrateLinearized(s0,strain,dt,old);
+        EXPECT_EQ(r.result.accepted_substeps,baseline.result.accepted_substeps);
+        EXPECT_EQ(r.result.final_result.backbone.active_branch,
+                  baseline.result.final_result.backbone.active_branch);
         const auto sigma=weights.current*tensor(r.result.final_result.cauchy_stress)+
                            weights.old*sold+weights.older*solder;
         std::array<double,8> force{};
@@ -166,5 +169,49 @@ TEST(DS04GFalseRotationTangent, SixRealMaterialInputsCompleteForceChainTwoGeomet
       }
       EXPECT_GE(passed,2u)<<id<<" distorted="<<distorted;
     }
+  }
+}
+
+TEST(DS04GFalseRotationTangent, ManufacturedN8N16N64MaterialAndMappingDerivatives)
+{
+  const std::string path="unit/data/ds04g-sp1/";
+  CDPMaterialTable tables(path+"compression_hardening.csv",path+"compression_damage.csv",
+                          path+"tension_stiffening.csv",path+"tension_damage.csv",E);
+  AbaqusCDPLocalIntegrator local(tables,{E,nu,30.,.1,1.16,.6667});
+  AbaqusCDPStateIntegrator core(local,{0,1,.0005});
+  AbaqusCDPSubstepIntegrator sub(core,{256,2.5e-5,1e-8});
+  for (unsigned mode=0;mode<3;++mode)
+  {
+    RankTwoTensor F(RankTwoTensor::initIdentity);
+    if(mode==0){F(0,0)+=1e-4;F(0,1)=2e-4;F(1,1)-=1e-4;}
+    if(mode==1){F(0,0)+=2e-4;F(1,1)-=4e-5;}
+    if(mode==2){F(0,0)-=8e-4;F(1,1)+=1.6e-4;}
+    const Six zero{};const State old;
+    const auto base=sub.integrateLinearized(zero,six(DS04GFalseRotation::increment(F)),.002,old);
+    const auto D=tangent(base.algorithmic_tangent);
+    unsigned passed=0;
+    for (Real h : {1e-7,3e-8,1e-8})
+    {
+      double delta2=0,ref2=0;
+      for(unsigned i=0;i<2;++i)for(unsigned j=0;j<2;++j)
+      {
+        RankTwoTensor L;L(i,j)=1;
+        const auto plus=sub.integrateLinearized(zero,six(DS04GFalseRotation::increment(F+h*L*F)),.002,old);
+        const auto minus=sub.integrateLinearized(zero,six(DS04GFalseRotation::increment(F-h*L*F)),.002,old);
+        EXPECT_EQ(plus.result.accepted_substeps,base.result.accepted_substeps);
+        EXPECT_EQ(minus.result.accepted_substeps,base.result.accepted_substeps);
+        EXPECT_EQ(plus.result.final_result.backbone.active_branch,base.result.final_result.backbone.active_branch);
+        EXPECT_EQ(minus.result.final_result.backbone.active_branch,base.result.final_result.backbone.active_branch);
+        const auto analytic=D*DS04GFalseRotation::incrementDerivative(F,L*F);
+        const auto fd=(tensor(plus.result.final_result.cauchy_stress)-
+                       tensor(minus.result.final_result.cauchy_stress))/(2*h);
+        delta2+=(analytic-fd).L2norm()*(analytic-fd).L2norm();ref2+=fd.L2norm()*fd.L2norm();
+      }
+      const double error=std::sqrt(delta2/std::max(ref2,1e-24));
+      std::cout<<"DS04G_PARTITION_CHAIN mode="<<mode<<" N="<<base.result.accepted_substeps
+               <<" h="<<h<<" relative="<<error<<'\n';
+      passed+=error<=1e-6;
+    }
+    EXPECT_GE(passed,2u)<<"mode="<<mode;
   }
 }
