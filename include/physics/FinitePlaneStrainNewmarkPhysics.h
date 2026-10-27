@@ -12,4 +12,5 @@ public:
 protected:
   InputParameters getKernelParameters(std::string type) override;
   const bool _enabled;
+  const bool _sp1;
 };

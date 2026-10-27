@@ -1,0 +1,50 @@
+{
+  "square.mtx": {
+    "source": "/Users/a123/Desktop/code/damASR/docs/verification/evidence/2026-10-23-ds04g-native-matrix-export-review/raw/ds04g_square_mm_t1_X1_STIF-1.mtx",
+    "sha256": "ef73760b82e590201ddde38f732b55d183fd98a72388d328f63807769c3873ab"
+  },
+  "e833.mtx": {
+    "source": "/Users/a123/Desktop/code/damASR/docs/verification/evidence/2026-10-27-ds04g-e833-native-matrix-return-review/raw/SIM_export/ds04g_e833_mm_t1_X1_STIF-1.mtx",
+    "sha256": "3cd1a2a3b94636a267d4d833468045fd850b2d53b3be3c13792dc0c5e378d1c3"
+  },
+  "P06.txt": {
+    "source_commit": "7e0328e9a255c3a57a725589cbc2e2a2c1a0b6f8",
+    "sha256": "8a21d318747a1a654c0cb92bbb2bb4d6240c8df3b0816533ab111c33efd89c5f"
+  },
+  "P04.txt": {
+    "source_commit": "7e0328e9a255c3a57a725589cbc2e2a2c1a0b6f8",
+    "sha256": "9f250fba7f3290d73d1d51ab23e3efd2daab98e05398ff5a60e45185f6cceeb3"
+  },
+  "P05.txt": {
+    "source_commit": "7e0328e9a255c3a57a725589cbc2e2a2c1a0b6f8",
+    "sha256": "a5cee29c97ed3fb31420f3e34baecfdb0dd1e5180191f949e1f567261f7342ed"
+  },
+  "P01.txt": {
+    "source_commit": "7e0328e9a255c3a57a725589cbc2e2a2c1a0b6f8",
+    "sha256": "ce9039fb157600818d61243cb2b2ac435479829596b6a6b1b5ea255ca06ec610"
+  },
+  "P02.txt": {
+    "source_commit": "7e0328e9a255c3a57a725589cbc2e2a2c1a0b6f8",
+    "sha256": "f4cbde8dc495a91aaecd9c4af329a62bf693a03d4fc2d3f2fef3673738b5f1df"
+  },
+  "compression_damage.csv": {
+    "source_commit": "7e0328e9a255c3a57a725589cbc2e2a2c1a0b6f8",
+    "sha256": "0c3ebf82ad07bcc58aadab62935d52c802d0d545d41c9793c4e6ff382db3d2db"
+  },
+  "P03.txt": {
+    "source_commit": "7e0328e9a255c3a57a725589cbc2e2a2c1a0b6f8",
+    "sha256": "b01a36d60b532ab1614598e61dea61ba2d89966234b379bbdb9e86502c2ab96e"
+  },
+  "compression_hardening.csv": {
+    "source_commit": "7e0328e9a255c3a57a725589cbc2e2a2c1a0b6f8",
+    "sha256": "66ccbd5a6dbbfb64468c353e8f4cfb3eb38dc42a1e4d6b1b3c217c188376aabf"
+  },
+  "tension_stiffening.csv": {
+    "source_commit": "7e0328e9a255c3a57a725589cbc2e2a2c1a0b6f8",
+    "sha256": "2dcd2936911d0e2ed9f7254c73b5d0476ba11cbf2ea74ee565c641c231c1733f"
+  },
+  "tension_damage.csv": {
+    "source_commit": "7e0328e9a255c3a57a725589cbc2e2a2c1a0b6f8",
+    "sha256": "fa9e314c57ecf460bb7385fa242ac6fb7e28de89e713148d4057eb3c25b5f724"
+  }
+}
