@@ -6,7 +6,7 @@ class FinitePlaneStrainNewmarkPhysics : public DynamicSolidMechanicsPhysics
 {
 public:
   static InputParameters validParams();
-  FinitePlaneStrainNewmarkPhysics(const InputParameters & parameters);
+  FinitePlaneStrainNewmarkPhysics(const InputParameters &parameters);
   void act() override;
 
 protected:
