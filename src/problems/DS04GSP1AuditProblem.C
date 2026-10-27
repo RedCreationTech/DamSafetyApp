@@ -19,6 +19,8 @@ InputParameters DS04GSP1AuditProblem::validParams()
 {
   auto p = FEProblem::validParams();
   p.addClassDescription("TEST ONLY: frozen serial one-QUAD4 actual assembly; no time advance");
+  p.addParam<bool>("audit_kinematics", false, "Capture same-call F/Fold/rotation and true material tangent");
+  p.addParam<bool>("refine_compression", false, "Add smaller compression FD scales within N64");
   return p;
 }
 DS04GSP1AuditProblem::DS04GSP1AuditProblem(const InputParameters &p) : FEProblem(p) {}
@@ -108,7 +110,8 @@ void DS04GSP1AuditProblem::initialSetup()
   };
   auto evaluate = [&](const NumericVector<Number> &u, const std::string &name)
   {
-    CDPAssemblyProbe::beginCapture(name + "_qp.csv", false, true);
+    CDPAssemblyProbe::beginCapture(name + "_qp.csv", false, true,
+                                   getParam<bool>("audit_kinematics"));
     try
     {
       FEProblem::computeResidual(u, *residual, 0);
@@ -166,13 +169,28 @@ void DS04GSP1AuditProblem::initialSetup()
     {
       x->print_matlab(stem + "_u.m");
       evaluate(*x, stem + "_base");
-      FEProblem::computeJacobian(*x, *J, 0);
+      if (getParam<bool>("audit_kinematics"))
+        CDPAssemblyProbe::beginCapture(stem + "_jac_material.csv", true, true, true);
+      try
+      {
+        FEProblem::computeJacobian(*x, *J, 0);
+      }
+      catch (...)
+      {
+        if (getParam<bool>("audit_kinematics"))
+          CDPAssemblyProbe::endCapture();
+        throw;
+      }
+      if (getParam<bool>("audit_kinematics"))
+        CDPAssemblyProbe::endCapture();
       J->print_matlab(stem + "_J.m");
       for (unsigned i = 0; i < 4; ++i)
         for (unsigned c = 0; c < 2; ++c)
-          for (unsigned k = 0; k < 3; ++k)
+          for (unsigned k = 0; k < (getParam<bool>("refine_compression") &&
+                                      std::string(name) == "compression" ? 5u : 3u); ++k)
           {
-            const Real h = std::pow(10., -5 - static_cast<int>(k));
+            const Real h = k == 3 ? 3e-8 : k == 4 ? 1e-8 :
+                                                     std::pow(10., -5 - static_cast<int>(k));
             for (const Real sign : {1., -1.})
             {
               auto trial = x->clone();

@@ -37,14 +37,22 @@ InputParameters FinitePlaneStrainNewmarkPhysics::validParams()
                         "Must match the TimePeriod static phase endpoint");
   params.addParam<Real>("sp1_gravity", -9.8,
                         "Uniform Y gravity; must match original Gravity kernel");
+  params.addParam<bool>("sp1_consistent_tangent", false,
+                        "Opt-in rotation-false Taylor/geometry Jacobian; original residual retained");
   return params;
 }
 
 FinitePlaneStrainNewmarkPhysics::FinitePlaneStrainNewmarkPhysics(const InputParameters &parameters)
     : DynamicSolidMechanicsPhysics(parameters),
       _enabled(getParam<bool>("enable_finite_newmark_damping")),
-      _sp1(getParam<MooseEnum>("spatial_discretization") == "sp1_center_hg")
+      _sp1(getParam<MooseEnum>("spatial_discretization") == "sp1_center_hg"),
+      _sp1_consistent(getParam<bool>("sp1_consistent_tangent"))
 {
+  if (_sp1_consistent && !_sp1)
+    paramError("sp1_consistent_tangent", "Requires spatial_discretization=sp1_center_hg");
+  if (_sp1_consistent && isParamValid("decomposition_method") &&
+      getParam<MooseEnum>("decomposition_method") != "TaylorExpansion")
+    paramError("sp1_consistent_tangent", "Requires the frozen TaylorExpansion strain path");
   if (_sp1 &&
       (_enabled || _ndisp != 2 || !_use_displaced_mesh ||
        getParam<MooseEnum>("strain") != "FINITE" ||
@@ -75,7 +83,15 @@ InputParameters FinitePlaneStrainNewmarkPhysics::getKernelParameters(std::string
   auto params = DynamicSolidMechanicsPhysics::getKernelParameters(type);
   if (_enabled && type == "DynamicStressDivergenceTensors")
     params.set<MaterialPropertyName>("zeta") = "0.0";
+  if (_sp1_consistent && type == "DS04GSP1StressDivergence")
+    params.set<bool>("sp1_dynamic") = true;
   return params;
+}
+
+std::string FinitePlaneStrainNewmarkPhysics::getKernelType()
+{
+  return _sp1_consistent ? "DS04GSP1StressDivergence"
+                         : DynamicSolidMechanicsPhysics::getKernelType();
 }
 
 void FinitePlaneStrainNewmarkPhysics::act()

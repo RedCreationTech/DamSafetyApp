@@ -10,7 +10,8 @@ class CDPAssemblyProbe : public Material
 public:
   static InputParameters validParams();
   CDPAssemblyProbe(const InputParameters & p);
-  static void beginCapture(const std::string & path, bool tangent, bool all_elements = false);
+  static void beginCapture(const std::string & path, bool tangent, bool all_elements = false,
+                           bool kinematics = false);
   static void endCapture();
 protected:
   void computeQpProperties() override;
@@ -22,6 +23,9 @@ protected:
   const MaterialProperty<Real> & _probe_substeps;
   const MaterialProperty<Real> & _probe_depth;
   const MaterialProperty<Real> & _probe_fallbacks;
+  const MaterialProperty<RankTwoTensor> * _probe_F = nullptr;
+  const MaterialProperty<RankTwoTensor> * _probe_Fold = nullptr;
+  const MaterialProperty<RankTwoTensor> * _probe_rotation = nullptr;
   // References only: the observer never updates a constitutive property.
   std::vector<const MaterialProperty<RankTwoTensor> *> _history_tensors;
   std::vector<const MaterialProperty<Real> *> _history_scalars;

@@ -1,4 +1,5 @@
 #include "CDPAssemblyProbe.h"
+#include "DS04GFalseRotationTangent.h"
 #include "libmesh/elem.h"
 #include <fstream>
 #include <iomanip>
@@ -9,6 +10,7 @@ namespace
 std::ofstream cdp_probe_stream;
 bool cdp_probe_tangent = false;
 bool cdp_probe_all = false;
+bool cdp_probe_kinematics = false;
 const std::vector<std::string> tensor_history_names = {
     "cdp_backbone_plastic_strain", "cdp_viscous_plastic_strain",
     "elastic_strain", "mechanical_strain"};
@@ -19,6 +21,7 @@ InputParameters CDPAssemblyProbe::validParams()
 {
   auto p = Material::validParams();
   p.addRequiredParam<std::vector<dof_id_type>>("probe_elements", "Selected libMesh element IDs");
+  p.addParam<bool>("capture_kinematics", false, "Test-only F/Fold/rotation capture dependencies");
   p.addClassDescription("Passive material observer gated by accepted-state Output");
   return p;
 }
@@ -33,6 +36,12 @@ CDPAssemblyProbe::CDPAssemblyProbe(const InputParameters & p)
     _probe_depth(getMaterialProperty<Real>("cdp_maximum_partition_depth")),
     _probe_fallbacks(getMaterialProperty<Real>("cdp_jacobian_fallbacks"))
 {
+  if (getParam<bool>("capture_kinematics"))
+  {
+    _probe_F = &getMaterialProperty<RankTwoTensor>("deformation_gradient");
+    _probe_Fold = &getMaterialPropertyOld<RankTwoTensor>("deformation_gradient");
+    _probe_rotation = &getMaterialProperty<RankTwoTensor>("rotation_increment");
+  }
   for (const auto & name : tensor_history_names)
   {
     _history_tensors.push_back(&getMaterialProperty<RankTwoTensor>(name));
@@ -49,12 +58,14 @@ CDPAssemblyProbe::CDPAssemblyProbe(const InputParameters & p)
   for (const auto id : getParam<std::vector<dof_id_type>>("probe_elements"))
     _probe_elements.insert(id);
 }
-void CDPAssemblyProbe::beginCapture(const std::string & path, bool tangent, bool all_elements)
+void CDPAssemblyProbe::beginCapture(const std::string & path, bool tangent, bool all_elements,
+                                    bool kinematics)
 {
   if (libMesh::n_threads() != 1)
     ::mooseError("CDPAssemblyProbe requires one thread per MPI rank");
   cdp_probe_tangent = tangent;
   cdp_probe_all = all_elements;
+  cdp_probe_kinematics = kinematics;
   cdp_probe_stream.open(path);
   if (!cdp_probe_stream) ::mooseError("Cannot open assembly probe capture");
   cdp_probe_stream << std::setprecision(17) << "element,qp,x,y,z,kappa_t,DamageT,substeps,depth,fallbacks";
@@ -62,6 +73,9 @@ void CDPAssemblyProbe::beginCapture(const std::string & path, bool tangent, bool
     for (unsigned int c=0;c<9;++c) cdp_probe_stream << ',' << name << c;
   if (tangent)
     for (unsigned int c=0;c<81;++c) cdp_probe_stream << ",C" << c;
+  if (kinematics)
+    for (const auto * name : {"F", "Fold", "rotation", "T_reconstructed"})
+      for (unsigned c = 0; c < 9; ++c) cdp_probe_stream << ',' << name << c;
   for (const auto & name : tensor_history_names)
     for (const auto age : {"new", "old"})
       for (unsigned int c = 0; c < 9; ++c)
@@ -89,6 +103,15 @@ void CDPAssemblyProbe::computeQpProperties()
   if (cdp_probe_tangent)
     for (unsigned int c=0;c<81;++c)
       cdp_probe_stream << ',' << _probe_tangent[_qp](c/27,(c/9)%3,(c/3)%3,c%3);
+  if (cdp_probe_kinematics)
+  {
+    if (!_probe_F || !_probe_Fold || !_probe_rotation)
+      mooseError("Kinematic probe capture requires explicit capture_kinematics=true");
+    const auto T = DS04GFalseRotation::increment((*_probe_F)[_qp] * (*_probe_Fold)[_qp].inverse());
+    for (const auto * tensor : {&(*_probe_F)[_qp], &(*_probe_Fold)[_qp],
+                                &(*_probe_rotation)[_qp], &T})
+      for (unsigned c = 0; c < 9; ++c) cdp_probe_stream << ',' << (*tensor)(c/3,c%3);
+  }
   for (const auto * property : _history_tensors)
     for (unsigned int c = 0; c < 9; ++c)
       cdp_probe_stream << ',' << (*property)[_qp](c / 3, c % 3);
