@@ -114,7 +114,7 @@ TEST(DS04GFalseRotationTangent, SixRealMaterialInputsCompleteForceChainTwoGeomet
     const auto weights=DS04GSP1::history(-.05,.003604,dt);
     // Real constitutive inputs embedded into synthetic finite old geometry.
     // Old/older stresses below are fixed test loads, not reconstructed dam history.
-    const auto sold=tensor(expected_stress), solder=.8*sold;
+    const RankTwoTensor sold=tensor(expected_stress), solder=.8*sold;
     for (bool distorted : {false,true})
     {
       auto X=nodes(distorted);
