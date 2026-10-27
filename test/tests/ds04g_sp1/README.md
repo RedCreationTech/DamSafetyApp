@@ -28,6 +28,12 @@ entrance). Compression adds h3=3e-8 and h4=1e-8 m; old h0/h1/h2 stay unchanged.
 These flags do not execute time steps; actually running this FE assembly
 fixture still requires LIMS and belongs to the subsequent combined gate.
 
+`Problem/refine_nonlinear=true` also adds h3/h4 to affine and tension. This is
+needed to show two small-h scales after large-h truncation/partition effects;
+it does not alter the base U, material parameters, or the original h0/h1/h2.
+The consistent mode rejects `tangent_operator=elastic` rather than silently
+treating C0 as the full material update derivative.
+
 The added C++ tests independently finite-difference Taylor kinematics and the
 material/geometry force chain for six frozen real material inputs in both
 test geometries, including finite synthetic old geometry and prescribed old

@@ -21,6 +21,7 @@ InputParameters DS04GSP1AuditProblem::validParams()
   p.addClassDescription("TEST ONLY: frozen serial one-QUAD4 actual assembly; no time advance");
   p.addParam<bool>("audit_kinematics", false, "Capture same-call F/Fold/rotation and true material tangent");
   p.addParam<bool>("refine_compression", false, "Add smaller compression FD scales within N64");
+  p.addParam<bool>("refine_nonlinear", false, "Add smaller affine/tension/compression FD scales");
   return p;
 }
 DS04GSP1AuditProblem::DS04GSP1AuditProblem(const InputParameters &p) : FEProblem(p) {}
@@ -186,8 +187,11 @@ void DS04GSP1AuditProblem::initialSetup()
       J->print_matlab(stem + "_J.m");
       for (unsigned i = 0; i < 4; ++i)
         for (unsigned c = 0; c < 2; ++c)
-          for (unsigned k = 0; k < (getParam<bool>("refine_compression") &&
-                                      std::string(name) == "compression" ? 5u : 3u); ++k)
+          for (unsigned k = 0; k < ((getParam<bool>("refine_compression") &&
+                                      std::string(name) == "compression") ||
+                                     (getParam<bool>("refine_nonlinear") &&
+                                      (std::string(name) == "affine" || std::string(name) == "tension" ||
+                                       std::string(name) == "compression")) ? 5u : 3u); ++k)
           {
             const Real h = k == 3 ? 3e-8 : k == 4 ? 1e-8 :
                                                      std::pow(10., -5 - static_cast<int>(k));

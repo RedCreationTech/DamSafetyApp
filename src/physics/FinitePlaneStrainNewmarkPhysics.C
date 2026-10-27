@@ -158,6 +158,9 @@ void FinitePlaneStrainNewmarkPhysics::act()
           q.get<bool>("perform_finite_strain_rotations"))
         mooseError(
             "SP1 retains original finite-strain rotation policy; do not change it simultaneously");
+      if (_sp1_consistent && action->getMooseObjectType() == "ComputeMultipleInelasticStress" &&
+          q.get<MooseEnum>("tangent_operator") != "nonlinear")
+        mooseError("SP1 consistent tangent requires the nonlinear material tangent");
     }
     if (gravity_count != 1 || phase_count != 1)
       mooseError("SP1 requires exactly one original uniform Gravity and one TimePeriod phase");
