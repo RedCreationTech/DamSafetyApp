@@ -1,0 +1,14 @@
+[Tests]
+  [square_syntax]
+    type = RunApp
+    input = square_audit.i
+    cli_args = '--check-input'
+    requirement = 'The bounded SP1 assembly audit shall construct with original material tables and no time advancement.'
+  []
+  [e833_syntax]
+    type = RunApp
+    input = e833_audit.i
+    cli_args = '--check-input'
+    requirement = 'The actual distorted 833 geometry shall construct for a bounded free-eight-DOF audit.'
+  []
+[]
