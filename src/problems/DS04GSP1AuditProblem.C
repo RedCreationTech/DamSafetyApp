@@ -35,6 +35,8 @@ void DS04GSP1AuditProblem::initialSetup()
   const auto *original = nl.currentSolution();
   auto x = original->clone();
   auto residual = x->zero_clone();
+  // At INITIAL no solve has assembled/closed the system matrix yet.
+  sys.get_system_matrix().close();
   auto J = sys.get_system_matrix().zero_clone();
   time() = .002;
   dt() = .002;
