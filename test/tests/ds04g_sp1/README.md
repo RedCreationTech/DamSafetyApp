@@ -7,3 +7,29 @@ It creates reference-assembly HG/mass corrections and current-geometry uniform Y
 The unit tests check geometry/mode/AD suboperators and replay six frozen material-core inputs. They do NOT replace actual FE element assembly, FINITE prestress rotation, full coupled Jacobian, seven frozen LIMS cases or the same-candidate DEFAULT3.50s control. No new finite-element run is authorized by this file. Never promote this candidate or register a production solver solely from unit tests or --check-input.
 
 No production constitutive formula/table is modified. Abaqus native matrices are initial elasticity only; dynamic/CDP equivalence remains open.
+
+## Opt-in rotation-false tangent (work package A)
+
+`sp1_consistent_tangent=false` is the default. True is admitted only with
+`spatial_discretization=sp1_center_hg`, OFF and the frozen TaylorExpansion/false
+stress path. It selects `DS04GSP1StressDivergence` for the generated dynamic
+kernel. Explicit static kernels must use that type with `sp1_dynamic=false`
+(its default). Both residuals directly delegate to their original parent.
+The Jacobian contracts the unchanged material D_alg with the exact Taylor
+increment derivative and adds current volume/gradient terms. Dynamic geometry
+uses the complete A*stress+B*old+C*older stress, not just A*current stress.
+The original reference HG and its own history weights remain separate.
+
+The frozen audit can request `Problem/audit_kinematics=true`,
+`Problem/refine_compression=true`, and `Materials/probe/capture_kinematics=true`.
+It captures same-call Jacobian material C plus nine-entry F/Fold/rotation,
+and a field explicitly named `T_reconstructed` (not a directly observed CDP
+entrance). Compression adds h3=3e-8 and h4=1e-8 m; old h0/h1/h2 stay unchanged.
+These flags do not execute time steps; actually running this FE assembly
+fixture still requires LIMS and belongs to the subsequent combined gate.
+
+The added C++ tests independently finite-difference Taylor kinematics and the
+material/geometry force chain for six frozen real material inputs in both
+test geometries, including finite synthetic old geometry and prescribed old
+stress weights. They are not an actual FE/Newmark/rollback test or a new dam
+trajectory. Same-binary seven frozen LIMS regressions remain required.

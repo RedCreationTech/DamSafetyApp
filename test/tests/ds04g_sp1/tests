@@ -11,4 +11,23 @@
     cli_args = '--check-input'
     requirement = 'The actual distorted 833 geometry shall construct for a bounded free-eight-DOF audit.'
   []
+  [square_consistent_syntax]
+    type = RunApp
+    input = square_audit.i
+    cli_args = '--check-input Physics/SolidMechanics/FiniteNewmark/all/sp1_consistent_tangent=true Kernels/static_x/type=DS04GSP1StressDivergence Kernels/static_y/type=DS04GSP1StressDivergence Problem/audit_kinematics=true Problem/refine_compression=true Materials/probe/capture_kinematics=true'
+    requirement = 'The opt-in false-rotation tangent and test-only kinematic capture shall construct without advancing time.'
+  []
+  [e833_consistent_syntax]
+    type = RunApp
+    input = e833_audit.i
+    cli_args = '--check-input Physics/SolidMechanics/FiniteNewmark/all/sp1_consistent_tangent=true Kernels/static_x/type=DS04GSP1StressDivergence Kernels/static_y/type=DS04GSP1StressDivergence Problem/audit_kinematics=true Problem/refine_compression=true Materials/probe/capture_kinematics=true'
+    requirement = 'The opt-in tangent shall admit the frozen distorted geometry and original material identity.'
+  []
+  [consistent_reject_legacy]
+    type = RunException
+    input = square_audit.i
+    cli_args = '--check-input Physics/SolidMechanics/FiniteNewmark/all/spatial_discretization=legacy_q4 Physics/SolidMechanics/FiniteNewmark/all/sp1_consistent_tangent=true'
+    expect_err = 'Requires spatial_discretization=sp1_center_hg'
+    requirement = 'The tangent switch shall not silently alter the default LEGACY path.'
+  []
 []
