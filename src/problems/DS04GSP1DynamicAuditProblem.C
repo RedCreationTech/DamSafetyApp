@@ -80,7 +80,7 @@ void DS04GSP1DynamicAuditProblem::initialSetup()
   }
   const Real original_time = time(), original_oldtime = timeOld(), original_dt = dt(), original_dtold = dtOld();
   const int original_step = timeStep();
-  auto & storage = getMaterialPropertyStorage();
+  auto & storage = const_cast<MaterialPropertyStorage &>(getMaterialPropertyStorage());
   // Test injection is done once per case, never during a residual/Jacobian evaluation.
   auto visit = [&](auto action)
   {

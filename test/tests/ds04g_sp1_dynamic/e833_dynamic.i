@@ -98,6 +98,7 @@
 [Materials/probe]
   type = CDPAssemblyProbe
   probe_elements = 0
+  capture_kinematics = true
 []
 [Controls/phase]
   type = TimePeriod
