@@ -6,6 +6,7 @@
 #include "MooseObjectAction.h"
 #include "SetupQuadratureAction.h"
 #include "libmesh/enum_quadrature_type.h"
+#include <algorithm>
 #include <cmath>
 
 registerMooseAction("DamSafetyApp", FinitePlaneStrainNewmarkPhysics, "meta_action");
@@ -56,6 +57,8 @@ FinitePlaneStrainNewmarkPhysics::FinitePlaneStrainNewmarkPhysics(const InputPara
 {
   if (_sp1_consistent && !_sp1)
     paramError("sp1_consistent_tangent", "Requires spatial_discretization=sp1_center_hg");
+  if (_sp1 && _enabled && !_sp1_consistent)
+    paramError("enable_finite_newmark_damping", "SP1 velocity-rate damping requires sp1_consistent_tangent=true");
   if (getParam<bool>("sp1_gravity_jacobian") && !_sp1)
     paramError("sp1_gravity_jacobian", "Requires spatial_discretization=sp1_center_hg");
   if (getParam<bool>("sp1_two_interval_history") && (!_sp1 || !_sp1_consistent))
@@ -67,7 +70,7 @@ FinitePlaneStrainNewmarkPhysics::FinitePlaneStrainNewmarkPhysics(const InputPara
       getParam<MooseEnum>("decomposition_method") != "TaylorExpansion")
     paramError("sp1_consistent_tangent", "Requires the frozen TaylorExpansion strain path");
   if (_sp1 &&
-      (_enabled || _ndisp != 2 || !_use_displaced_mesh ||
+      (_ndisp != 2 || !_use_displaced_mesh ||
        getParam<MooseEnum>("strain") != "FINITE" ||
        getParam<MooseEnum>("planar_formulation") != "PLANE_STRAIN" ||
        isParamValid("out_of_plane_strain") || _use_ad || _lagrangian_kernels ||
@@ -76,7 +79,7 @@ FinitePlaneStrainNewmarkPhysics::FinitePlaneStrainNewmarkPhysics(const InputPara
        !getParam<std::vector<MaterialPropertyName>>("eigenstrain_names").empty() ||
        !isParamValid("expected_youngs_modulus") || !isParamValid("expected_poissons_ratio") ||
        !isParamValid("expected_stiffness_damping") || !isParamValid("sp1_density")))
-    mooseError("SP1 requires FINITE PLANE_STRAIN, constant E/nu/density, Newmark damping OFF, no "
+    mooseError("SP1 requires FINITE PLANE_STRAIN, constant E/nu/density, no "
                "Bbar/extra strain/eigenstrain/base_name");
   if (_enabled &&
       (_ndisp != 2 || !_use_displaced_mesh || getParam<MooseEnum>("strain") != "FINITE" ||
@@ -94,7 +97,8 @@ FinitePlaneStrainNewmarkPhysics::FinitePlaneStrainNewmarkPhysics(const InputPara
 InputParameters FinitePlaneStrainNewmarkPhysics::getKernelParameters(std::string type)
 {
   auto params = DynamicSolidMechanicsPhysics::getKernelParameters(type);
-  if (_enabled && type == "DynamicStressDivergenceTensors")
+  if (_enabled && (type == "DynamicStressDivergenceTensors" ||
+                   type == "DS04GSP1StressDivergence"))
     params.set<MaterialPropertyName>("zeta") = "0.0";
   if (_sp1_consistent && type == "DS04GSP1StressDivergence")
   {
@@ -174,6 +178,14 @@ void FinitePlaneStrainNewmarkPhysics::act()
             q.get<std::vector<Real>>("end_time") !=
                 std::vector<Real>{getParam<Real>("sp1_static_end")})
           mooseError("SP1 static_end must match the original single TimePeriod phase");
+        if (_enabled)
+          for (const auto & axis : {"x", "y"})
+          {
+            const auto tag = "*/ds04g_" + name() + "_velocity_damping_" + axis;
+            const auto & disabled = q.get<std::vector<std::string>>("disable_objects");
+            if (std::find(disabled.begin(), disabled.end(), tag) == disabled.end())
+              mooseError("SP1 velocity-rate damping requires TimePeriod disable_objects to include ", tag);
+          }
       }
       if (action->getMooseObjectType() == "ComputeMultipleInelasticStress" &&
           q.get<bool>("perform_finite_strain_rotations"))

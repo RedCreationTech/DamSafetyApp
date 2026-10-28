@@ -1,8 +1,10 @@
 #include "AbaqusCDPSubstepIntegrator.h"
+#include "FinitePlaneStrainVelocityRate.h"
 #include "gtest/gtest.h"
 #include <algorithm>
 #include <cmath>
 #include <fstream>
+#include <iostream>
 namespace
 {
 using State = AbaqusCDPStateIntegrator::State;
@@ -96,6 +98,32 @@ TEST_P(DS04GSP1MaterialReplay, FrozenCompleteUpdateAndOldStateReplay)
   EXPECT_EQ(pack(b.result.final_result.state), state);
   EXPECT_EQ(b.algorithmic_tangent, a.algorithmic_tangent);
   EXPECT_EQ(pack(s), old);
+  if (id == "P01" || id == "P06")
+  {
+    // Real damaged/plastic inputs test separation of material history from C0 damping.
+    RankTwoTensor gradient, old_gradient, velocity, acceleration;
+    gradient(0,0) = strain1[0]; gradient(1,1) = strain1[1];
+    gradient(0,1) = gradient(1,0) = strain1[3];
+    old_gradient(0,0) = strain0[0]; old_gradient(1,1) = strain0[1];
+    old_gradient(0,1) = old_gradient(1,0) = strain0[3];
+    velocity(0,0) = .001; velocity(1,1) = -.0003; velocity(0,1) = .0002;
+    const auto before = pack(s);
+    const auto damping = FinitePlaneStrainVelocityRate::nominalStress(
+        gradient, old_gradient, velocity, acceleration, dt, .275625, .55, -.05,
+        .003604, 2.97915e10, .2);
+    (void)sub.integrateLinearized(strain0, strain1, dt, s);
+    const auto replay = FinitePlaneStrainVelocityRate::nominalStress(
+        gradient, old_gradient, velocity, acceleration, dt, .275625, .55, -.05,
+        .003604, 2.97915e10, .2);
+    EXPECT_EQ(pack(s), before);
+    EXPECT_DOUBLE_EQ((damping-replay).L2norm(), 0.);
+    ASSERT_GT(old[14], 0.);
+    ASSERT_GT(damping.L2norm(), 0.);
+    EXPECT_GT((damping-damping*(1-old[14])).L2norm(), 0.);
+    std::cout << "DS04G C0 rate real input " << id << " oldDT=" << old[14]
+              << " nominal_damping_norm=" << damping.L2norm()
+              << " accepted_old_unchanged=1 material_replay_unchanged=1\n";
+  }
 }
 INSTANTIATE_TEST_SUITE_P(RealInputs, DS04GSP1MaterialReplay,
                          testing::Values("P01", "P02", "P03", "P04", "P05", "P06"));

@@ -110,4 +110,28 @@
     expect_err = 'Requires spatial_discretization=sp1_center_hg'
     requirement = 'The HG damping exclusion option shall reject a non-SP1 discretization instead of silently changing the default.'
   []
+  [e833_entity_rate]
+    type = RunApp
+    input = e833_entity_rate.i
+    expect_out = 'DS04G dynamic audit complete'
+    max_parallel = 1
+    max_threads = 1
+    requirement = 'SP1 C0 velocity-rate damping shall replace only entity stress-rate damping, preserving HG and accepted histories with full derivatives.'
+  []
+  [e1908_entity_rate]
+    type = RunApp
+    input = e1908_entity_rate.i
+    expect_out = 'DS04G dynamic audit complete'
+    max_parallel = 1
+    max_threads = 1
+    requirement = 'SP1 C0 velocity-rate damping shall replace only entity stress-rate damping, preserving HG and accepted histories with full derivatives.'
+  []
+  [e2032_entity_rate]
+    type = RunApp
+    input = e2032_entity_rate.i
+    expect_out = 'DS04G dynamic audit complete'
+    max_parallel = 1
+    max_threads = 1
+    requirement = 'SP1 C0 velocity-rate damping shall replace only entity stress-rate damping, preserving HG and accepted histories with full derivatives.'
+  []
 []

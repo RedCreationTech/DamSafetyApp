@@ -126,7 +126,7 @@ void DS04GSP1DynamicAuditProblem::initialSetup()
   };
   std::map<std::string, bool> enabled_before;
   for (const auto & k : nl.getKernelWarehouse().getObjects()) enabled_before[k->name()] = k->enabled();
-  const std::map<std::string, std::set<std::string>> groups{
+  std::map<std::string, std::set<std::string>> groups{
     {"entity", {"TM_all0", "TM_all1"}},
     {"mass_base", {"TM_all_inertia_x", "TM_all_inertia_y"}},
     {"mass_correction", {"ds04g_sp1_mass_0", "ds04g_sp1_mass_1"}},
@@ -137,6 +137,13 @@ void DS04GSP1DynamicAuditProblem::initialSetup()
     {"all", {"TM_all0", "TM_all1", "TM_all_inertia_x", "TM_all_inertia_y",
              "ds04g_sp1_mass_0", "ds04g_sp1_mass_1", "gravity_y", "ds04g_sp1_gravity_1",
              "ds04g_sp1_hourglass_0", "ds04g_sp1_hourglass_1"}}};
+  if (enabled_before.count("ds04g_all_velocity_damping_x"))
+  {
+    groups["entity_rate"] = {"ds04g_all_velocity_damping_x", "ds04g_all_velocity_damping_y"};
+    groups["entity_total"] = groups["entity"];
+    groups["entity_total"].insert(groups["entity_rate"].begin(), groups["entity_rate"].end());
+    groups["all"].insert(groups["entity_rate"].begin(), groups["entity_rate"].end());
+  }
   std::ofstream vectors("dynamic_residuals.csv"), matrices("dynamic_matrices.csv"),
     histories("dynamic_histories.csv"), cases("dynamic_cases.csv"), activity("dynamic_active_kernels.csv");
   vectors << std::setprecision(17) << "case,term,evaluation,h_index,perturb_dof,sign,row,value\n";
@@ -153,7 +160,7 @@ void DS04GSP1DynamicAuditProblem::initialSetup()
       {
         const bool on = k->getParam<bool>("use_previous_accepted_interval");
         const Real zeta = k->name() == "ds04g_sp1_hourglass_0" ? k->getParam<Real>("zeta")
-                                                              : .003604;
+            : std::stod(k->getParam<MaterialPropertyName>("zeta"));
         const auto w = on ? DS04GSP1::twoIntervalHistory(-.05,zeta,dt(),dtOld())
                           : DS04GSP1::history(-.05,zeta,dt());
         intervals << hcase << ',' << stage << ',' << k->name() << ',' << dt() << ','

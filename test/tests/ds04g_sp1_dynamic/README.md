@@ -17,3 +17,11 @@
 `sp1_exclude_hourglass_stiffness_damping`默认false，仅`sp1_center_hg`允许开启。开启时只让两个独立HG核使用ζ=0；保留HG弹性Kh和HHT α、实体β、质量α、CDP与全部其他控制。`e*_exclude_hg_beta.i`与`e*_two_interval.i`仅此一行差异。三个几何×四制造历史用于实际R/J、old保持与拒绝重放；不是整坝自然失败、响应改善或完整20秒验收。
 
 `dynamic_interval_weights.csv`新增`zeta_for_weight_check`：HG取实际核参数，实体沿夹具冻结的材料ζ=.003604作独立权重核对；并非新增生产观测。所有原字段及关闭模式原值保持。完整物理门禁由集成仓独立参考比较，不以进程退出成功代替。
+
+## SP1实体C0速度率候选（2026-10-29）
+
+`e*_entity_rate.i`复用既有`enable_finite_newmark_damping=true`，要求SP1相容切线；仅实体散度ζ=0，再由参考构形AD速度率核加βR C0:D。独立HG ζ=.003604、Kh/HHT、质量/重力和材料四表保持。两个新核必须列入TimePeriod静力禁用清单，否则输入被拒绝。默认false及已有LEGACY ON接线保持。
+
+夹具仅在检测到两个速度率核时增加`entity_rate`和`entity_total`分组及总力；原OFF分组/列/材料记录保持。`dynamic_interval_weights.csv`现在从实体实际参数读ζ（ON=0），HG仍取实际参数。拒绝/重放比较包括新核R/J；不是整坝动力计算。
+
+P01/P06真实损伤塑性材料输入另在既有单元测试中检查C0速度率与CDP历史分离，不能把这两点材料核验冒充12组制造历史已成为真实损伤轨迹。有限速度率helper及生产CDP源代码不改。
