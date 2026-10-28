@@ -39,3 +39,18 @@ material/geometry force chain for six frozen real material inputs in both
 test geometries, including finite synthetic old geometry and prescribed old
 stress weights. They are not an actual FE/Newmark/rollback test or a new dam
 trajectory. Same-binary seven frozen LIMS regressions remain required.
+
+## SP1 gravity Jacobian (default off)
+
+`sp1_gravity_jacobian=false` retains the original Gravity/default LEGACY behavior.
+To opt in, set it true in `Physics/SolidMechanics/FiniteNewmark/all` and change
+only the existing uniform Y-gravity block type to `DS04GSP1Gravity`. The wrapper
+inherits the original `Gravity` residual and adds its current-volume X/Y
+derivatives. It uses `GlobalParams/displacements`; the original block name,
+controls, value, function, alpha, and density remain. The SP1 AD gravity
+correction is unchanged. True in LEGACY or true without the paired wrapper is
+rejected. No constitutive, history-weight, or upstream default is changed.
+
+`../ds04g_sp1_dynamic/e*_gravity_jacobian.i` preserve the previous three meshes
+and four prescribed histories. Formal runs go through LIMS; these are zero-step
+manufactured-state assembly audits, not full-dam response or CDP regressions.

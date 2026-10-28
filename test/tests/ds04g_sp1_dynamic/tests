@@ -23,4 +23,28 @@
     max_threads = 1
     requirement = 'Verify prescribed dynamic assembly and bounded rejected-trial replay without changing production operators.'
   []
+  [e833_gravity_jacobian]
+    type = RunApp
+    input = e833_gravity_jacobian.i
+    expect_out = 'DS04G dynamic audit complete'
+    max_parallel = 1
+    max_threads = 1
+    requirement = 'The opt-in SP1 gravity geometric Jacobian shall preserve frozen residual and histories while closing the actual dynamic assembly derivative.'
+  []
+  [e1908_gravity_jacobian]
+    type = RunApp
+    input = e1908_gravity_jacobian.i
+    expect_out = 'DS04G dynamic audit complete'
+    max_parallel = 1
+    max_threads = 1
+    requirement = 'The opt-in SP1 gravity geometric Jacobian shall preserve frozen residual and histories while closing the actual dynamic assembly derivative.'
+  []
+  [e2032_gravity_jacobian]
+    type = RunApp
+    input = e2032_gravity_jacobian.i
+    expect_out = 'DS04G dynamic audit complete'
+    max_parallel = 1
+    max_threads = 1
+    requirement = 'The opt-in SP1 gravity geometric Jacobian shall preserve frozen residual and histories while closing the actual dynamic assembly derivative.'
+  []
 []

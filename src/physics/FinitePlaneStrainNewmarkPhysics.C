@@ -39,6 +39,8 @@ InputParameters FinitePlaneStrainNewmarkPhysics::validParams()
                         "Uniform Y gravity; must match original Gravity kernel");
   params.addParam<bool>("sp1_consistent_tangent", false,
                         "Opt-in rotation-false Taylor/geometry Jacobian; original residual retained");
+  params.addParam<bool>("sp1_gravity_jacobian", false,
+                        "Opt-in center gravity area Jacobian; requires DS04GSP1Gravity, SP1 only");
   return params;
 }
 
@@ -50,6 +52,8 @@ FinitePlaneStrainNewmarkPhysics::FinitePlaneStrainNewmarkPhysics(const InputPara
 {
   if (_sp1_consistent && !_sp1)
     paramError("sp1_consistent_tangent", "Requires spatial_discretization=sp1_center_hg");
+  if (getParam<bool>("sp1_gravity_jacobian") && !_sp1)
+    paramError("sp1_gravity_jacobian", "Requires spatial_discretization=sp1_center_hg");
   if (_sp1_consistent && isParamValid("decomposition_method") &&
       getParam<MooseEnum>("decomposition_method") != "TaylorExpansion")
     paramError("sp1_consistent_tangent", "Requires the frozen TaylorExpansion strain path");
@@ -135,9 +139,14 @@ void FinitePlaneStrainNewmarkPhysics::act()
     for (const auto *action : _awh.getActions<MooseObjectAction>())
     {
       const auto &q = action->getObjectParams();
-      if (action->getMooseObjectType() == "Gravity")
+      if (action->getMooseObjectType() == "Gravity" ||
+          action->getMooseObjectType() == "DS04GSP1Gravity")
       {
         ++gravity_count;
+        if (getParam<bool>("sp1_gravity_jacobian") &&
+            action->getMooseObjectType() != "DS04GSP1Gravity")
+          mooseError("sp1_gravity_jacobian=true requires the original gravity block type "
+                     "DS04GSP1Gravity");
         if (q.get<NonlinearVariableName>("variable") != _displacements[1] ||
             std::abs(q.get<Real>("value") - getParam<Real>("sp1_gravity")) > 1e-14 ||
             std::abs(q.get<Real>("alpha") - getParam<Real>("hht_alpha")) > 1e-14 ||
