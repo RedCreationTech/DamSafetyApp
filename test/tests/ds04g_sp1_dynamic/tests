@@ -1,0 +1,26 @@
+[Tests]
+  [e833]
+    type = RunApp
+    input = e833_dynamic.i
+    expect_out = 'DS04G dynamic audit complete'
+    max_parallel = 1
+    max_threads = 1
+    requirement = 'Verify prescribed dynamic assembly and bounded rejected-trial replay without changing production operators.'
+  []
+  [e1908]
+    type = RunApp
+    input = e1908_dynamic.i
+    expect_out = 'DS04G dynamic audit complete'
+    max_parallel = 1
+    max_threads = 1
+    requirement = 'Verify prescribed dynamic assembly and bounded rejected-trial replay without changing production operators.'
+  []
+  [e2032]
+    type = RunApp
+    input = e2032_dynamic.i
+    expect_out = 'DS04G dynamic audit complete'
+    max_parallel = 1
+    max_threads = 1
+    requirement = 'Verify prescribed dynamic assembly and bounded rejected-trial replay without changing production operators.'
+  []
+[]
