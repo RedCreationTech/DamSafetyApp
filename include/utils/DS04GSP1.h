@@ -139,4 +139,15 @@ inline Weights history(double alpha, double zeta, double h)
   return {1 + alpha + (1 + alpha) * zeta / h, -alpha - (1 + 2 * alpha) * zeta / h,
           alpha * zeta / h};
 }
+// The prior quotient uses the prior accepted interval, never a failed trial dt.
+inline Weights twoIntervalHistory(double alpha, double zeta, double h, double hp)
+{
+  const auto original = history(alpha, zeta, h);
+  if (!(std::isfinite(hp) && hp > 0))
+    throw std::invalid_argument("SP1 invalid previous accepted history interval");
+  if (hp == h)
+    return original;
+  return {original.current, -alpha - (1 + alpha) * zeta / h - alpha * zeta / hp,
+          alpha * zeta / hp};
+}
 } // namespace DS04GSP1

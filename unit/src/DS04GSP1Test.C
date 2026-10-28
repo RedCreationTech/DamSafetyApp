@@ -4,6 +4,7 @@
 #include <algorithm>
 #include <fstream>
 #include <sstream>
+#include <limits>
 namespace
 {
 using Nodes = DS04GSP1::Nodes;
@@ -221,4 +222,37 @@ TEST(DS04GSP1, InvalidAndTranslatedGeometry)
   EXPECT_NEAR(a.stiffness_per_shear, b.stiffness_per_shear, 1e-12);
   std::swap(x[0], x[1]);
   EXPECT_THROW(DS04GSP1::geometry(x), std::invalid_argument);
+}
+
+TEST(DS04GSP1, TwoIntervalsEqualStepAndInvalidPrior)
+{
+  for (double h : {.002,.001,.00025})
+  {
+    const auto old = DS04GSP1::history(-.05,.003604,h);
+    const auto same = DS04GSP1::twoIntervalHistory(-.05,.003604,h,h);
+    EXPECT_EQ(old.current,same.current); EXPECT_EQ(old.old,same.old); EXPECT_EQ(old.older,same.older);
+  }
+  for (double hp : {0.,-1.,std::numeric_limits<double>::infinity(),std::numeric_limits<double>::quiet_NaN()})
+    EXPECT_THROW(DS04GSP1::twoIntervalHistory(-.05,.003604,.002,hp),std::invalid_argument);
+}
+TEST(DS04GSP1, TwoIntervalsConstantAndLinearHistory)
+{
+  constexpr double alpha=-.05,zeta=.003604,rate=7.,old=3.;
+  for (auto h : {.002,.001})
+    for (auto hp : {.002,.001,.00025})
+    {
+      const auto w=DS04GSP1::twoIntervalHistory(alpha,zeta,h,hp);
+      EXPECT_NEAR(w.current+w.old+w.older,1.,2e-15);
+      const double value=w.current*(old+h*rate)+w.old*old+w.older*(old-hp*rate);
+      const double reference=(1+alpha)*(old+h*rate)-alpha*old+zeta*rate;
+      EXPECT_NEAR(value,reference,5e-15);
+    }
+}
+TEST(DS04GSP1, TwoIntervalsOnlyOlderWeightsChange)
+{
+  const auto a=DS04GSP1::history(-.05,.003604,.002);
+  const auto b=DS04GSP1::twoIntervalHistory(-.05,.003604,.002,.00025);
+  EXPECT_EQ(a.current,b.current);
+  EXPECT_NEAR((b.old-a.old)+(b.older-a.older),0.,2e-15);
+  EXPECT_GT(std::abs(b.older-a.older),.6);
 }

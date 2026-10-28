@@ -47,4 +47,36 @@
     max_threads = 1
     requirement = 'The opt-in SP1 gravity geometric Jacobian shall preserve frozen residual and histories while closing the actual dynamic assembly derivative.'
   []
+  [e833_two_interval]
+    type = RunApp
+    input = e833_two_interval.i
+    expect_out = 'DS04G dynamic audit complete'
+    max_parallel = 1
+    max_threads = 1
+    requirement = 'The optional SP1 two-accepted-interval entity and HG shall share full derivatives and preserve accepted state under rejected replay.'
+  []
+  [e1908_two_interval]
+    type = RunApp
+    input = e1908_two_interval.i
+    expect_out = 'DS04G dynamic audit complete'
+    max_parallel = 1
+    max_threads = 1
+    requirement = 'The optional SP1 two-accepted-interval entity and HG shall share full derivatives and preserve accepted state under rejected replay.'
+  []
+  [e2032_two_interval]
+    type = RunApp
+    input = e2032_two_interval.i
+    expect_out = 'DS04G dynamic audit complete'
+    max_parallel = 1
+    max_threads = 1
+    requirement = 'The optional SP1 two-accepted-interval entity and HG shall share full derivatives and preserve accepted state under rejected replay.'
+  []
+  [accepted_interval_reject]
+    type = RunApp
+    input = accepted_interval_reject.i
+    expect_out = 'DS04G accepted interval executioner check complete'
+    max_parallel = 1
+    max_threads = 1
+    requirement = 'The locked Transient executioner shall preserve prior accepted dt during reject and cutback, then advance it only after acceptance.'
+  []
 []

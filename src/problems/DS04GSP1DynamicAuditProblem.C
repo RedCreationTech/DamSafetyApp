@@ -144,6 +144,20 @@ void DS04GSP1DynamicAuditProblem::initialSetup()
   histories << std::setprecision(17) << "case,stage,state,property,qp,component,value\n";
   cases << std::setprecision(17) << "case,h,h_previous,old_before_count,old_unchanged_after_reject,replay_exact,replay_jacobian_exact,status\n";
   activity << "case,term,kernel,enabled,cached_active,use_displaced_mesh\n";
+  std::ofstream intervals("dynamic_interval_weights.csv");
+  intervals << std::setprecision(17) << "case,stage,kernel,h,h_previous,two_interval,A,B,C\n";
+  auto record_intervals = [&](unsigned hcase, const std::string & stage)
+  {
+    for (const auto & k : nl.getKernelWarehouse().getObjects())
+      if (k->name() == "TM_all0" || k->name() == "ds04g_sp1_hourglass_0")
+      {
+        const bool on = k->getParam<bool>("use_previous_accepted_interval");
+        const auto w = on ? DS04GSP1::twoIntervalHistory(-.05,.003604,dt(),dtOld())
+                          : DS04GSP1::history(-.05,.003604,dt());
+        intervals << hcase << ',' << stage << ',' << k->name() << ',' << dt() << ','
+                  << dtOld() << ',' << on << ',' << w.current << ',' << w.old << ',' << w.older << '\n';
+      }
+  };
   auto select = [&](const std::string & name, unsigned history)
   {
     const auto & wanted = groups.at(name);
@@ -226,6 +240,7 @@ void DS04GSP1DynamicAuditProblem::initialSetup()
     };
     record("seeded");
     const auto before = accepted_values();
+    record_intervals(history,"clean");
     for (const auto & group : groups)
     {
       select(group.first, history);
@@ -259,6 +274,7 @@ void DS04GSP1DynamicAuditProblem::initialSetup()
     // Explicit, bounded use of the same restoreSolutions API as a rejected solve.
     // This does not claim an executioner-driven failed CDP trajectory.
     dt()=2*h; time()=2+2*h;
+    record_intervals(history,"rejected_trial");
     auto trial=x->clone();
     for (unsigned j=0;j<8;++j)
       trial->set(dofs[j],uold[j]+2*h*vold[j]+.5*4*h*h*aold[j]);
@@ -272,6 +288,7 @@ void DS04GSP1DynamicAuditProblem::initialSetup()
     const bool old_kept=accepted_values()==before;
     record("after_reject_restore");
     dt()=h; time()=2+h;
+    record_intervals(history,"replay");
     const auto replay=evaluate(*x,history,"all","clean_after_reject",-1,-1,0);
     const bool exact=clean==replay && clean_current==material_values(false);
     FEProblem::computeJacobian(*x,*J,0);
@@ -297,7 +314,7 @@ void DS04GSP1DynamicAuditProblem::initialSetup()
   updateActiveObjects();
   time()=original_time; timeOld()=original_oldtime; timeStep()=original_step; dt()=original_dt; dtOld()=original_dtold;
   FEProblem::computeResidual(*original,*residual,0);
-  if (!mapping || !vectors || !matrices || !histories || !cases || !activity)
+  if (!mapping || !vectors || !matrices || !histories || !cases || !activity || !intervals)
     mooseError("Could not write complete dynamic audit evidence");
   mooseInfo("DS04G dynamic audit complete: four prescribed histories, zero accepted steps");
 }

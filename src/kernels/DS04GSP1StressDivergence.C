@@ -11,15 +11,20 @@ InputParameters DS04GSP1StressDivergence::validParams()
 {
   auto p = DynamicStressDivergenceTensors::validParams();
   p.addClassDescription("Opt-in DS04G center-QP Taylor/rotation-false compatible Jacobian; "
-                        "original residual unchanged");
+                        "original residual retained unless the two-interval history option is enabled");
   p.addParam<bool>("sp1_dynamic", false, "Use the original dynamic stress residual and weights");
+  p.addParam<bool>("use_previous_accepted_interval", false,
+                   "SP1 dynamic only: previous accepted interval in the older rate");
   return p;
 }
 DS04GSP1StressDivergence::DS04GSP1StressDivergence(const InputParameters & p)
     : DynamicStressDivergenceTensors(p), _sp1_dynamic(getParam<bool>("sp1_dynamic")),
+      _two_interval(getParam<bool>("use_previous_accepted_interval")),
       _sp1_F(getMaterialProperty<RankTwoTensor>("deformation_gradient")),
       _sp1_Fold(getMaterialPropertyOld<RankTwoTensor>("deformation_gradient"))
 {
+  if (_two_interval && !_sp1_dynamic)
+    paramError("use_previous_accepted_interval", "Requires sp1_dynamic=true");
   if (_ndisp != 2 || !_use_displaced_mesh || _use_finite_deform_jacobian ||
       _volumetric_locking_correction || _out_of_plane_strain_coupled ||
       !_base_name.empty() || _static_initialization || _component > 1)
@@ -40,8 +45,23 @@ void DS04GSP1StressDivergence::initialSetup()
   if (stress_models != 1 || _mesh.dimension() != 2 || getBlockCoordSystem() != Moose::COORD_XYZ)
     mooseError("SP1 consistent tangent requires one rotation-false stress material in Cartesian XY");
 }
+DS04GSP1::Weights DS04GSP1StressDivergence::historyWeights() const
+{
+  return _two_interval
+      ? DS04GSP1::twoIntervalHistory(_alpha, _zeta[_qp], _dt, _t_step <= 1 ? _dt : _dt_old)
+      : DS04GSP1::history(_alpha, _zeta[_qp], _dt);
+}
 Real DS04GSP1StressDivergence::computeQpResidual()
 {
+  if (_two_interval && _dt > 0)
+  {
+    const auto w = historyWeights();
+    // Preserve upstream summation exactly for equal intervals and the first step.
+    if (_t_step > 1 && _dt_old != _dt)
+      return w.current * (_stress[_qp].row(_component) * _grad_test[_i][_qp]) +
+             w.old * (_stress_old[_qp].row(_component) * _grad_test[_i][_qp]) +
+             w.older * (_stress_older[_qp].row(_component) * _grad_test[_i][_qp]);
+  }
   return _sp1_dynamic ? DynamicStressDivergenceTensors::computeQpResidual()
                       : StressDivergenceTensors::computeQpResidual();
 }
@@ -55,9 +75,9 @@ Real DS04GSP1StressDivergence::tangent(unsigned direction)
   {
     if (_dt <= 0)
       return 0;
-    A = 1 + _alpha + (1 + _alpha) * _zeta[_qp] / _dt;
-    const Real B = -_alpha - (1 + 2 * _alpha) * _zeta[_qp] / _dt;
-    const Real C = _alpha * _zeta[_qp] / _dt;
+    const auto w = historyWeights();
+    A = _two_interval ? w.current : 1 + _alpha + (1 + _alpha) * _zeta[_qp] / _dt;
+    const Real B = w.old, C = w.older;
     effective = A * _stress[_qp] + B * _stress_old[_qp] + C * _stress_older[_qp];
   }
   const auto p = DS04GFalseRotation::contract(_sp1_F[_qp], _sp1_Fold[_qp], _Jacobian_mult[_qp],

@@ -12,6 +12,7 @@ public:
 
 protected:
   ADReal computeQpResidual() override;
+  const bool _two_interval;
   const MooseEnum _term;
   const unsigned _component;
   const Real _youngs, _nu, _rho, _eta, _zeta, _alpha, _beta, _gamma, _static_end, _gravity;

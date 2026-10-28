@@ -26,10 +26,12 @@ InputParameters ADDS04GSP1Correction::validParams()
   p.addParam<MaterialPropertyName>("elasticity_tensor", "elasticity_tensor",
                                    "Constant undamaged C0");
   p.set<bool>("use_displaced_mesh") = false;
+  p.addParam<bool>("use_previous_accepted_interval", false,
+                   "HG only: use the previous accepted interval in the older rate");
   return p;
 }
 ADDS04GSP1Correction::ADDS04GSP1Correction(const InputParameters &p)
-    : ADKernel(p), _term(getParam<MooseEnum>("term")), _component(getParam<unsigned>("component")),
+    : ADKernel(p), _two_interval(getParam<bool>("use_previous_accepted_interval")), _term(getParam<MooseEnum>("term")), _component(getParam<unsigned>("component")),
       _youngs(getParam<Real>("youngs_modulus")), _nu(getParam<Real>("poissons_ratio")),
       _rho(getParam<Real>("expected_density")), _eta(getParam<Real>("eta")),
       _zeta(getParam<Real>("zeta")), _alpha(getParam<Real>("alpha")), _beta(getParam<Real>("beta")),
@@ -39,6 +41,8 @@ ADDS04GSP1Correction::ADDS04GSP1Correction(const InputParameters &p)
       _old(_var.dofValuesOld()), _older(_var.dofValuesOlder()),
       _v_old(coupledDofValuesOld("velocity")), _a_old(coupledDofValuesOld("acceleration"))
 {
+  if (_two_interval && _term != "hourglass")
+    paramError("use_previous_accepted_interval", "Only the SP1 hourglass term uses this option");
   if (_mesh.dimension() != 2 || _component > 1 || _use_displaced_mesh ||
       coupledComponents("displacements") != 2 ||
       !(_youngs > 0 && _rho > 0 && _nu > -1 && _nu < .5 && _beta > 0 && _gamma > 0 &&
@@ -132,7 +136,9 @@ ADReal ADDS04GSP1Correction::computeQpResidual()
     ADReal f = DS04GSP1::hourglass(g, u, _i, mu);
     if (dynamic)
     {
-      const auto w = DS04GSP1::history(_alpha, _zeta, _dt);
+      const auto w = _two_interval
+          ? DS04GSP1::twoIntervalHistory(_alpha, _zeta, _dt, _t_step <= 1 ? _dt : _dt_old)
+          : DS04GSP1::history(_alpha, _zeta, _dt);
       f = w.current * f + w.old * DS04GSP1::hourglass(g, old, _i, mu) +
           w.older * DS04GSP1::hourglass(g, older, _i, mu);
     }

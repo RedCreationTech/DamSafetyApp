@@ -41,6 +41,8 @@ InputParameters FinitePlaneStrainNewmarkPhysics::validParams()
                         "Opt-in rotation-false Taylor/geometry Jacobian; original residual retained");
   params.addParam<bool>("sp1_gravity_jacobian", false,
                         "Opt-in center gravity area Jacobian; requires DS04GSP1Gravity, SP1 only");
+  params.addParam<bool>("sp1_two_interval_history", false,
+                        "SP1 only: use previous accepted dt for the older stress/HG rate");
   return params;
 }
 
@@ -54,6 +56,8 @@ FinitePlaneStrainNewmarkPhysics::FinitePlaneStrainNewmarkPhysics(const InputPara
     paramError("sp1_consistent_tangent", "Requires spatial_discretization=sp1_center_hg");
   if (getParam<bool>("sp1_gravity_jacobian") && !_sp1)
     paramError("sp1_gravity_jacobian", "Requires spatial_discretization=sp1_center_hg");
+  if (getParam<bool>("sp1_two_interval_history") && (!_sp1 || !_sp1_consistent))
+    paramError("sp1_two_interval_history", "Requires SP1 with sp1_consistent_tangent=true");
   if (_sp1_consistent && isParamValid("decomposition_method") &&
       getParam<MooseEnum>("decomposition_method") != "TaylorExpansion")
     paramError("sp1_consistent_tangent", "Requires the frozen TaylorExpansion strain path");
@@ -88,7 +92,10 @@ InputParameters FinitePlaneStrainNewmarkPhysics::getKernelParameters(std::string
   if (_enabled && type == "DynamicStressDivergenceTensors")
     params.set<MaterialPropertyName>("zeta") = "0.0";
   if (_sp1_consistent && type == "DS04GSP1StressDivergence")
+  {
     params.set<bool>("sp1_dynamic") = true;
+    params.set<bool>("use_previous_accepted_interval") = getParam<bool>("sp1_two_interval_history");
+  }
   return params;
 }
 
@@ -189,6 +196,8 @@ void FinitePlaneStrainNewmarkPhysics::act()
         p.set<std::vector<VariableName>>("velocity") = {_velocities[c]};
         p.set<std::vector<VariableName>>("acceleration") = {_accelerations[c]};
         p.set<MooseEnum>("term") = term;
+        p.set<bool>("use_previous_accepted_interval") =
+            std::string(term) == "hourglass" && getParam<bool>("sp1_two_interval_history");
         p.set<unsigned>("component") = c;
         p.set<Real>("youngs_modulus") = getParam<Real>("expected_youngs_modulus");
         p.set<Real>("poissons_ratio") = getParam<Real>("expected_poissons_ratio");
