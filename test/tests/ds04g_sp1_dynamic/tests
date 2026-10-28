@@ -79,4 +79,35 @@
     max_threads = 1
     requirement = 'The locked Transient executioner shall preserve prior accepted dt during reject and cutback, then advance it only after acceptance.'
   []
+  [e833_exclude_hg_beta]
+    type = RunApp
+    input = e833_exclude_hg_beta.i
+    expect_out = 'DS04G dynamic audit complete'
+    max_parallel = 1
+    max_threads = 1
+    requirement = 'The default-off SP1-only option shall exclude independent HG material beta damping while retaining Kh, HHT, entity and mass damping and accepted-state replay.'
+  []
+  [e1908_exclude_hg_beta]
+    type = RunApp
+    input = e1908_exclude_hg_beta.i
+    expect_out = 'DS04G dynamic audit complete'
+    max_parallel = 1
+    max_threads = 1
+    requirement = 'The default-off SP1-only option shall exclude independent HG material beta damping while retaining Kh, HHT, entity and mass damping and accepted-state replay.'
+  []
+  [e2032_exclude_hg_beta]
+    type = RunApp
+    input = e2032_exclude_hg_beta.i
+    expect_out = 'DS04G dynamic audit complete'
+    max_parallel = 1
+    max_threads = 1
+    requirement = 'The default-off SP1-only option shall exclude independent HG material beta damping while retaining Kh, HHT, entity and mass damping and accepted-state replay.'
+  []
+  [exclude_hg_beta_reject_legacy]
+    type = RunException
+    input = e833_exclude_hg_beta.i
+    cli_args = 'Physics/SolidMechanics/FiniteNewmark/all/spatial_discretization=legacy_q4 Physics/SolidMechanics/FiniteNewmark/all/sp1_consistent_tangent=false Physics/SolidMechanics/FiniteNewmark/all/sp1_gravity_jacobian=false Physics/SolidMechanics/FiniteNewmark/all/sp1_two_interval_history=false'
+    expect_err = 'Requires spatial_discretization=sp1_center_hg'
+    requirement = 'The HG damping exclusion option shall reject a non-SP1 discretization instead of silently changing the default.'
+  []
 []

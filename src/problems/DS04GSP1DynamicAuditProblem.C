@@ -145,17 +145,20 @@ void DS04GSP1DynamicAuditProblem::initialSetup()
   cases << std::setprecision(17) << "case,h,h_previous,old_before_count,old_unchanged_after_reject,replay_exact,replay_jacobian_exact,status\n";
   activity << "case,term,kernel,enabled,cached_active,use_displaced_mesh\n";
   std::ofstream intervals("dynamic_interval_weights.csv");
-  intervals << std::setprecision(17) << "case,stage,kernel,h,h_previous,two_interval,A,B,C\n";
+  intervals << std::setprecision(17) << "case,stage,kernel,h,h_previous,two_interval,A,B,C,zeta_for_weight_check\n";
   auto record_intervals = [&](unsigned hcase, const std::string & stage)
   {
     for (const auto & k : nl.getKernelWarehouse().getObjects())
       if (k->name() == "TM_all0" || k->name() == "ds04g_sp1_hourglass_0")
       {
         const bool on = k->getParam<bool>("use_previous_accepted_interval");
-        const auto w = on ? DS04GSP1::twoIntervalHistory(-.05,.003604,dt(),dtOld())
-                          : DS04GSP1::history(-.05,.003604,dt());
+        const Real zeta = k->name() == "ds04g_sp1_hourglass_0" ? k->getParam<Real>("zeta")
+                                                              : .003604;
+        const auto w = on ? DS04GSP1::twoIntervalHistory(-.05,zeta,dt(),dtOld())
+                          : DS04GSP1::history(-.05,zeta,dt());
         intervals << hcase << ',' << stage << ',' << k->name() << ',' << dt() << ','
-                  << dtOld() << ',' << on << ',' << w.current << ',' << w.old << ',' << w.older << '\n';
+                  << dtOld() << ',' << on << ',' << w.current << ',' << w.old << ',' << w.older
+                  << ',' << zeta << '\n';
       }
   };
   auto select = [&](const std::string & name, unsigned history)

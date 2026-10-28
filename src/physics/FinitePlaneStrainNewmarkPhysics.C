@@ -43,6 +43,8 @@ InputParameters FinitePlaneStrainNewmarkPhysics::validParams()
                         "Opt-in center gravity area Jacobian; requires DS04GSP1Gravity, SP1 only");
   params.addParam<bool>("sp1_two_interval_history", false,
                         "SP1 only: use previous accepted dt for the older stress/HG rate");
+  params.addParam<bool>("sp1_exclude_hourglass_stiffness_damping", false,
+                        "SP1 only: exclude material beta damping from independent HG; retain Kh/HHT");
   return params;
 }
 
@@ -58,6 +60,9 @@ FinitePlaneStrainNewmarkPhysics::FinitePlaneStrainNewmarkPhysics(const InputPara
     paramError("sp1_gravity_jacobian", "Requires spatial_discretization=sp1_center_hg");
   if (getParam<bool>("sp1_two_interval_history") && (!_sp1 || !_sp1_consistent))
     paramError("sp1_two_interval_history", "Requires SP1 with sp1_consistent_tangent=true");
+  if (getParam<bool>("sp1_exclude_hourglass_stiffness_damping") && !_sp1)
+    paramError("sp1_exclude_hourglass_stiffness_damping",
+               "Requires spatial_discretization=sp1_center_hg");
   if (_sp1_consistent && isParamValid("decomposition_method") &&
       getParam<MooseEnum>("decomposition_method") != "TaylorExpansion")
     paramError("sp1_consistent_tangent", "Requires the frozen TaylorExpansion strain path");
@@ -203,7 +208,9 @@ void FinitePlaneStrainNewmarkPhysics::act()
         p.set<Real>("poissons_ratio") = getParam<Real>("expected_poissons_ratio");
         p.set<Real>("expected_density") = getParam<Real>("sp1_density");
         p.set<Real>("eta") = eta;
-        p.set<Real>("zeta") = zeta;
+        const bool exclude_hg_beta = std::string(term) == "hourglass" &&
+                                     getParam<bool>("sp1_exclude_hourglass_stiffness_damping");
+        p.set<Real>("zeta") = exclude_hg_beta ? 0. : zeta;
         p.set<Real>("alpha") = getParam<Real>("hht_alpha");
         p.set<Real>("beta") = getParam<Real>("newmark_beta");
         p.set<Real>("gamma") = getParam<Real>("newmark_gamma");

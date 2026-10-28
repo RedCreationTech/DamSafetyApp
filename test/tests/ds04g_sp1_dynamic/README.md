@@ -11,3 +11,9 @@
 `e*_two_interval.i`只在原重力补项输入上开启`sp1_two_interval_history=true`，默认false。实体/HG共用上一接受dt，当前材料系数不变，对应有效应力的几何项同步。`dynamic_interval_weights.csv`补充两核在干净/拒绝/重放时的h/hp与权重；原诊断文件列不变。
 
 `accepted_interval_reject.i`为独立1D/1单元/无材料测试，用真实Transient＋ConstantDT的测试派生Stepper强制一次失败，观察hp经减步及恢复后保持；不代表CDP自然失败事务或坝体计算。总时间.007秒、最多8接受步；不得将该测试Stepper用于生产输入。
+
+## 可选HG材料β排除
+
+`sp1_exclude_hourglass_stiffness_damping`默认false，仅`sp1_center_hg`允许开启。开启时只让两个独立HG核使用ζ=0；保留HG弹性Kh和HHT α、实体β、质量α、CDP与全部其他控制。`e*_exclude_hg_beta.i`与`e*_two_interval.i`仅此一行差异。三个几何×四制造历史用于实际R/J、old保持与拒绝重放；不是整坝自然失败、响应改善或完整20秒验收。
+
+`dynamic_interval_weights.csv`新增`zeta_for_weight_check`：HG取实际核参数，实体沿夹具冻结的材料ζ=.003604作独立权重核对；并非新增生产观测。所有原字段及关闭模式原值保持。完整物理门禁由集成仓独立参考比较，不以进程退出成功代替。
