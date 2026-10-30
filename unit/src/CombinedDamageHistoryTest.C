@@ -118,8 +118,10 @@ TEST(CombinedDamageHistory, Full23By23TransitionIncludesOldScalarHistory)
       const double fd=output<6?(rp.cauchy_stress[output]-rm.cauchy_stress[output])/(2*h):
                                   (p[output-6]-m[output-6])/(2*h);
       const double analytic=base.derivative[input][output];
-      const double scale=output<6?E:1.;
-      EXPECT_NEAR(analytic,fd,1e-6*std::max({1.,std::abs(analytic),std::abs(fd),scale}))
+      const double value_scale=output<6?std::max(std::abs(rp.cauchy_stress[output]),std::abs(rm.cauchy_stress[output])):
+                                          std::max(std::abs(p[output-6]),std::abs(m[output-6]));
+      const double subtraction_roundoff=32*std::numeric_limits<double>::epsilon()*std::max(value_scale,1e-12)/h;
+      EXPECT_NEAR(analytic,fd,1e-6*std::max({1.,std::abs(analytic),std::abs(fd)})+subtraction_roundoff)
           <<"input="<<input<<" output="<<output;
     }
   }
