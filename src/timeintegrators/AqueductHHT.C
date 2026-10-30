@@ -11,18 +11,49 @@ InputParameters AqueductHHT::validParams()
   auto p=NewmarkBeta::validParams();
   p.addRequiredRangeCheckedParam<Real>("hht_alpha","hht_alpha>=-0.5 & hht_alpha<=0","Explicit HHT alpha; no assumed Abaqus version default");
   p.addParam<Real>("hht_start_time",0.,"Unweighted quasi-static stage ends at this total time");
+  p.addParam<bool>("quasistatic_initialization",false,
+                  "Zero all Newmark derivatives through hht_start_time, independent of accepted step count");
   p.addParam<std::vector<VariableName>>("algebraic_variables",{},"Multiplier equations stay at the current time, with zero old-force entries");
   p.addClassDescription("Whole-system normalized HHT accepted-force history; pair every mass with HHT-scaled inertia");
   return p;
 }
 AqueductHHT::AqueductHHT(const InputParameters & p)
- :NewmarkBeta(p),_hht_alpha(getParam<Real>("hht_alpha")),_start_time(getParam<Real>("hht_start_time")),
+ :NewmarkBeta(p),_quasistatic_initialization(getParam<bool>("quasistatic_initialization")),
+ _hht_alpha(getParam<Real>("hht_alpha")),_start_time(getParam<Real>("hht_start_time")),
  _old_forces(addVector("aq_hht_accepted_forces",true,libMesh::GHOSTED))
 {
   if(_var_restriction) paramError("variables","Whole-system HHT cannot restrict physical variables");
+  if(_quasistatic_initialization && (_start_time<=0. || _inactive_tsteps!=0))
+    paramError("quasistatic_initialization","Requires a positive hht_start_time and inactive_tsteps=0");
   if(std::abs(_beta-AqueductHHTScheme::beta(_hht_alpha))>1e-12 ||
      std::abs(_gamma-AqueductHHTScheme::gamma(_hht_alpha))>1e-12)
     paramError("beta","Set beta=(1-alpha)^2/4 and gamma=.5-alpha consistently in integrator, BCs and auxiliaries");
+}
+bool AqueductHHT::quasiStatic() const
+{
+  return _quasistatic_initialization && _fe_problem.time()<=_start_time;
+}
+void AqueductHHT::preStep()
+{
+  NewmarkBeta::preStep();
+  if(_quasistatic_initialization && _fe_problem.timeOld()<_start_time &&
+     _fe_problem.time()>_start_time)
+    mooseError("AqueductHHT requires an accepted step exactly at hht_start_time; add a timestep knot");
+}
+void AqueductHHT::computeTimeDerivatives()
+{
+  NewmarkBeta::computeTimeDerivatives();
+  if(quasiStatic())
+  {
+    // Keep the deformed solution and material history; only pseudo-time rates are zero.
+    _sys.solutionUDot()->zero();_sys.solutionUDot()->close();
+    _sys.solutionUDotDot()->zero();_sys.solutionUDotDot()->close();
+    _du_dotdot_du=0.;computeDuDotDu();
+  }
+}
+Real AqueductHHT::duDotDuCoeff() const
+{
+  return quasiStatic()?0.:NewmarkBeta::duDotDuCoeff();
 }
 void AqueductHHT::initialSetup()
 {
@@ -74,6 +105,6 @@ void AqueductHHT::postStep()
 }
 void AqueductHHT::computeADTimeDerivatives(ADReal & v,const dof_id_type & dof,ADReal & a) const
 {
-  if(_t_step<=_inactive_tsteps){v=0.;a=0.;}
+  if(quasiStatic() || _t_step<=_inactive_tsteps){v=0.;a=0.;}
   else NewmarkBeta::computeADTimeDerivatives(v,dof,a);
 }

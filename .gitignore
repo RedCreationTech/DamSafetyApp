@@ -26,6 +26,8 @@ test/tests/**/elastic_out.csv
 
 # Runtime results
 outputs/
+!include/outputs/
+!src/outputs/
 test/output/
 *.e
 *.exo

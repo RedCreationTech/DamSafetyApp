@@ -1,4 +1,14 @@
 [Tests]
+  [shell_gravity_handoff]
+    type = RunApp
+    input = shell_gravity_handoff.i
+    requirement = 'SPOS shell AD inertia shall preserve a loaded static equilibrium, with region and native ID output schedules.'
+  []
+  [gravity_handoff]
+    type = RunApp
+    input = gravity_handoff.i
+    requirement = 'Nonzero quasi-static displacement shall persist with zero inertia rates until the accepted physical handoff time.'
+  []
   [linear_mpc]
     type = RunApp
     input = linear_mpc.i
