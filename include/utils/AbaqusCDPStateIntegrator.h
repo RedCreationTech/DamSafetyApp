@@ -8,13 +8,14 @@
  * The inviscid backbone is advanced by AbaqusCDPLocalIntegrator. Plastic strain
  * and the two branch damage variables are then regularized independently. The
  * final Cauchy stress is assembled from the viscous effective stress and the
- * public w_t/w_c stiffness-recovery formula.
+ * public w_t/w_c stiffness-recovery formula. The default-OFF scalar option
+ * instead relaxes the combined backbone damage, keeping that same stress weight.
  */
 class AbaqusCDPStateIntegrator
 {
 public:
   using SymmetricTensor = AbaqusCDPLocalIntegrator::SymmetricTensor;
-  static constexpr std::size_t state_size = 16;
+  static constexpr std::size_t state_size = 17;
   static constexpr std::size_t transition_size = 6 + state_size;
   using TransitionColumn = std::array<double, transition_size>;
   using TransitionJacobian = std::array<TransitionColumn, transition_size>;
@@ -25,6 +26,7 @@ public:
     double compression_recovery;
     double relaxation_time;
     double state_tolerance = 1.0e-12;
+    bool use_combined_damage_relaxation = false;
   };
 
   struct State
@@ -33,6 +35,7 @@ public:
     SymmetricTensor viscous_plastic_strain = {0.0, 0.0, 0.0, 0.0, 0.0, 0.0};
     double viscous_tension_damage = 0.0;
     double viscous_compression_damage = 0.0;
+    double viscous_combined_damage = 0.0;
   };
 
   struct Result
@@ -49,8 +52,8 @@ public:
     double compression_damage_lag;
   };
 
-  /** Rows are {Cauchy stress[6], new state[16]}; columns are
-   * {total strain[6], old state[16]}. */
+  /** Rows are {Cauchy stress[6], new state[17]}; columns are
+   * {total strain[6], old state[17]}. The appended state is unused in legacy mode. */
   struct LinearizedResult
   {
     Result result;

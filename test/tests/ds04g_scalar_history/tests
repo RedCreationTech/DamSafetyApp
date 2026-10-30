@@ -1,0 +1,9 @@
+[Tests]
+  [on_input]
+    type = RunApp
+    input = reversal_on.i
+    cli_args = '--check-input'
+    expect_out = 'Syntax OK'
+    requirement = 'The opt-in combined scalar candidate shall admit a bounded finite plane-strain material fixture.'
+  []
+[]

@@ -91,7 +91,9 @@ TEST(DS04GFalseRotationTangent, SixRealMaterialInputsCompleteForceChainTwoGeomet
   CDPMaterialTable tables(path+"compression_hardening.csv",path+"compression_damage.csv",
                           path+"tension_stiffening.csv",path+"tension_damage.csv",E);
   AbaqusCDPLocalIntegrator local(tables,{E,nu,30.,.1,1.16,.6667});
-  AbaqusCDPStateIntegrator core(local,{0,1,.0005});
+  for (const bool scalar : {false,true})
+  {
+  AbaqusCDPStateIntegrator core(local,{0,1,.0005,1e-12,scalar});
   AbaqusCDPSubstepIntegrator sub(core,{256,2.5e-5,1e-8});
   for (const auto *id : {"P01","P02","P03","P04","P05","P06"})
   {
@@ -104,6 +106,9 @@ TEST(DS04GFalseRotationTangent, SixRealMaterialInputsCompleteForceChainTwoGeomet
     old.backbone.compressive_equivalent_plastic_strain=state[7];
     std::copy_n(state.begin()+8,6,old.viscous_plastic_strain.begin());
     old.viscous_tension_damage=state[14];old.viscous_compression_damage=state[15];
+    Six old_elastic;for(unsigned k=0;k<6;++k)old_elastic[k]=s0[k]-old.viscous_plastic_strain[k];
+    old.viscous_combined_damage=AbaqusCDPFormula::combineDamage(old.viscous_compression_damage,
+        old.viscous_tension_damage,0,1,AbaqusCDPFormula::stressInvariants(local.elasticStress(old_elastic)).tension_weight).damage;
     const auto baseline=sub.integrateLinearized(s0,s1,dt,old);
     const auto D=tangent(baseline.algorithmic_tangent);
     Six raw;for (unsigned k=0;k<6;++k)raw[k]=s1[k]-s0[k];
@@ -164,11 +169,12 @@ TEST(DS04GFalseRotationTangent, SixRealMaterialInputsCompleteForceChainTwoGeomet
           }
         }
         const double error=std::sqrt(delta2/std::max(ref2,1e-24));
-        std::cout<<"DS04G_FULL_CHAIN "<<id<<" distorted="<<distorted<<" h="<<h<<" relative="<<error<<'\n';
+        std::cout<<"DS04G_FULL_CHAIN scalar="<<scalar<<" "<<id<<" distorted="<<distorted<<" h="<<h<<" relative="<<error<<'\n';
         passed+=error<=1e-6;
       }
       EXPECT_GE(passed,2u)<<id<<" distorted="<<distorted;
     }
+  }
   }
 }
 
@@ -178,7 +184,9 @@ TEST(DS04GFalseRotationTangent, ManufacturedN8N16N64MaterialAndMappingDerivative
   CDPMaterialTable tables(path+"compression_hardening.csv",path+"compression_damage.csv",
                           path+"tension_stiffening.csv",path+"tension_damage.csv",E);
   AbaqusCDPLocalIntegrator local(tables,{E,nu,30.,.1,1.16,.6667});
-  AbaqusCDPStateIntegrator core(local,{0,1,.0005});
+  for (const bool scalar : {false,true})
+  {
+  AbaqusCDPStateIntegrator core(local,{0,1,.0005,1e-12,scalar});
   AbaqusCDPSubstepIntegrator sub(core,{256,2.5e-5,1e-8});
   for (unsigned mode=0;mode<3;++mode)
   {
@@ -208,10 +216,11 @@ TEST(DS04GFalseRotationTangent, ManufacturedN8N16N64MaterialAndMappingDerivative
         delta2+=(analytic-fd).L2norm()*(analytic-fd).L2norm();ref2+=fd.L2norm()*fd.L2norm();
       }
       const double error=std::sqrt(delta2/std::max(ref2,1e-24));
-      std::cout<<"DS04G_PARTITION_CHAIN mode="<<mode<<" N="<<base.result.accepted_substeps
+      std::cout<<"DS04G_PARTITION_CHAIN scalar="<<scalar<<" mode="<<mode<<" N="<<base.result.accepted_substeps
                <<" h="<<h<<" relative="<<error<<'\n';
       passed+=error<=1e-6;
     }
     EXPECT_GE(passed,2u)<<"mode="<<mode;
+  }
   }
 }

@@ -84,6 +84,8 @@ AbaqusCDPStateIntegrator::integrate(const SymmetricTensor & total_strain,
     stateIntegrationError("time step must be finite and nonnegative");
   validateDamage(old_state.viscous_tension_damage, "old viscous tension damage");
   validateDamage(old_state.viscous_compression_damage, "old viscous compression damage");
+  if (_parameters.use_combined_damage_relaxation)
+    validateDamage(old_state.viscous_combined_damage, "old viscous combined damage");
 
   // The old state remains immutable. Any failure below leaves the caller's
   // checkpoint untouched and makes a cutback retry deterministic.
@@ -137,11 +139,26 @@ AbaqusCDPStateIntegrator::assembleResult(
       subtractStateTensor(total_strain, new_state.viscous_plastic_strain));
   const double tension_weight =
       AbaqusCDPFormula::stressInvariants(viscous_effective_stress).tension_weight;
-  const auto damage = AbaqusCDPFormula::combineDamage(new_state.viscous_compression_damage,
+  auto damage = AbaqusCDPFormula::combineDamage(new_state.viscous_compression_damage,
                                                       new_state.viscous_tension_damage,
                                                       _parameters.tension_recovery,
                                                       _parameters.compression_recovery,
                                                       tension_weight);
+  new_state.viscous_combined_damage = old_state.viscous_combined_damage;
+  if (_parameters.use_combined_damage_relaxation)
+  {
+    const auto target = AbaqusCDPFormula::combineDamage(backbone.backbone_compression_damage,
+                                                       backbone.backbone_tension_damage,
+                                                       _parameters.tension_recovery,
+                                                       _parameters.compression_recovery,
+                                                       tension_weight);
+    // Recovery may decrease the combined scalar even though branch damage is irreversible.
+    new_state.viscous_combined_damage = AbaqusCDPFormula::duvautLionsUpdate(
+        old_state.viscous_combined_damage, target.damage, time_step, _parameters.relaxation_time);
+    validateDamage(new_state.viscous_combined_damage, "new viscous combined damage");
+    damage.damage = new_state.viscous_combined_damage;
+    damage.stiffness_factor = 1.0 - damage.damage;
+  }
   const auto cauchy_stress = scaleStateTensor(viscous_effective_stress, damage.stiffness_factor);
 
   const auto plastic_lag =
@@ -173,6 +190,8 @@ AbaqusCDPStateIntegrator::integrateLinearized(const SymmetricTensor & total_stra
     stateIntegrationError("time step must be finite and nonnegative");
   validateDamage(old_state.viscous_tension_damage, "old viscous tension damage");
   validateDamage(old_state.viscous_compression_damage, "old viscous compression damage");
+  if (_parameters.use_combined_damage_relaxation)
+    validateDamage(old_state.viscous_combined_damage, "old viscous combined damage");
 
   const auto backbone =
       _backbone_integrator.integrateLinearized(total_strain, old_state.backbone);
@@ -211,10 +230,16 @@ AbaqusCDPStateIntegrator::integrateLinearized(const SymmetricTensor & total_stra
   const double tension_recovery_factor = linearized.result.damage.tensile_recovery_factor;
   const double compression_recovery_factor =
       linearized.result.damage.compressive_recovery_factor;
+  const double target_dc = _parameters.use_combined_damage_relaxation
+                               ? linearized.result.backbone.backbone_compression_damage
+                               : linearized.result.state.viscous_compression_damage;
+  const double target_dt = _parameters.use_combined_damage_relaxation
+                               ? linearized.result.backbone.backbone_tension_damage
+                               : linearized.result.state.viscous_tension_damage;
   const double compression_factor =
-      1.0 - tension_recovery_factor * linearized.result.state.viscous_compression_damage;
+      1.0 - tension_recovery_factor * target_dc;
   const double tension_factor =
-      1.0 - compression_recovery_factor * linearized.result.state.viscous_tension_damage;
+      1.0 - compression_recovery_factor * target_dt;
 
   for (std::size_t input = 0; input < transition_size; ++input)
   {
@@ -239,6 +264,7 @@ AbaqusCDPStateIntegrator::integrateLinearized(const SymmetricTensor & total_stra
     SymmetricTensor old_viscous_plastic_derivative = {0.0, 0.0, 0.0, 0.0, 0.0, 0.0};
     double old_tension_damage_derivative = 0.0;
     double old_compression_damage_derivative = 0.0;
+    double old_combined_damage_derivative = 0.0;
     if (input >= 6)
     {
       const std::size_t old_state_index = input - 6;
@@ -248,6 +274,8 @@ AbaqusCDPStateIntegrator::integrateLinearized(const SymmetricTensor & total_stra
         old_tension_damage_derivative = 1.0;
       else if (old_state_index == 15)
         old_compression_damage_derivative = 1.0;
+      else if (old_state_index == 16)
+        old_combined_damage_derivative = 1.0;
     }
 
     SymmetricTensor new_viscous_plastic_derivative;
@@ -277,17 +305,27 @@ AbaqusCDPStateIntegrator::integrateLinearized(const SymmetricTensor & total_stra
         -_parameters.tension_recovery * tension_weight_derivative;
     const double compression_recovery_derivative =
         _parameters.compression_recovery * tension_weight_derivative;
+    const double target_dc_derivative = _parameters.use_combined_damage_relaxation
+                                           ? compression.damage.right_derivative * local_output[13]
+                                           : new_compression_damage_derivative;
+    const double target_dt_derivative = _parameters.use_combined_damage_relaxation
+                                           ? tension.damage.right_derivative * local_output[12]
+                                           : new_tension_damage_derivative;
     const double compression_factor_derivative =
-        -(tension_recovery_derivative *
-              linearized.result.state.viscous_compression_damage +
-          tension_recovery_factor * new_compression_damage_derivative);
+        -(tension_recovery_derivative * target_dc +
+          tension_recovery_factor * target_dc_derivative);
     const double tension_factor_derivative =
-        -(compression_recovery_derivative *
-              linearized.result.state.viscous_tension_damage +
-          compression_recovery_factor * new_tension_damage_derivative);
-    const double stiffness_derivative =
+        -(compression_recovery_derivative * target_dt +
+          compression_recovery_factor * target_dt_derivative);
+    double stiffness_derivative =
         compression_factor_derivative * tension_factor +
         compression_factor * tension_factor_derivative;
+    const double combined_damage_derivative = _parameters.use_combined_damage_relaxation
+        ? (1.0 - relaxation_factor) * old_combined_damage_derivative -
+              relaxation_factor * stiffness_derivative
+        : old_combined_damage_derivative;
+    if (_parameters.use_combined_damage_relaxation)
+      stiffness_derivative = -combined_damage_derivative;
 
     for (std::size_t row = 0; row < 6; ++row)
       linearized.derivative[input][row] =
@@ -303,6 +341,7 @@ AbaqusCDPStateIntegrator::integrateLinearized(const SymmetricTensor & total_stra
     linearized.derivative[input][6 + 7] = local_output[13];
     linearized.derivative[input][6 + 14] = new_tension_damage_derivative;
     linearized.derivative[input][6 + 15] = new_compression_damage_derivative;
+    linearized.derivative[input][6 + 16] = combined_damage_derivative;
   }
   return linearized;
 }

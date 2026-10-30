@@ -33,6 +33,9 @@ AbaqusCDPStressUpdate::validParams()
       "compression_recovery", 0.0, "compression_recovery >= 0 & compression_recovery <= 1", "w_c");
   params.addRangeCheckedParam<Real>(
       "viscosity", 0.0, "viscosity >= 0", "Duvaut-Lions relaxation time");
+  params.addParam<bool>("use_combined_damage_relaxation", false,
+                        "Relax the combined backbone degradation scalar using the existing "
+                        "viscous-effective-stress recovery weight; legacy branch outputs unchanged");
   params.addRangeCheckedParam<unsigned int>(
       "maximum_local_iterations", 40, "maximum_local_iterations > 0", "Local Newton limit");
   params.addRangeCheckedParam<Real>(
@@ -65,6 +68,7 @@ AbaqusCDPStressUpdate::validParams()
 AbaqusCDPStressUpdate::AbaqusCDPStressUpdate(const InputParameters & parameters)
   : StressUpdateBase(parameters),
     _enable_performance_diagnostics(getParam<bool>("enable_performance_diagnostics")),
+    _use_combined_damage_relaxation(getParam<bool>("use_combined_damage_relaxation")),
     _table(getParam<FileName>("compression_hardening_file"),
            getParam<FileName>("compression_damage_file"),
            getParam<FileName>("tension_stiffening_file"),
@@ -85,7 +89,8 @@ AbaqusCDPStressUpdate::AbaqusCDPStressUpdate(const InputParameters & parameters)
                       {getParam<Real>("tension_recovery"),
                        getParam<Real>("compression_recovery"),
                        getParam<Real>("viscosity"),
-                       1.0e-12}),
+                       1.0e-12,
+                       _use_combined_damage_relaxation}),
     _substep_integrator(_state_integrator,
                         {getParam<unsigned int>("maximum_substeps"),
                          getParam<Real>("maximum_strain_increment"),
@@ -109,6 +114,9 @@ AbaqusCDPStressUpdate::AbaqusCDPStressUpdate(const InputParameters & parameters)
     _damage_c(declareProperty<Real>(_base_name + "DamageC")),
     _damage_c_old(getMaterialPropertyOld<Real>(_base_name + "DamageC")),
     _combined_damage(declareProperty<Real>(_base_name + "cdp_combined_damage")),
+    _combined_damage_old(_use_combined_damage_relaxation
+                            ? &getMaterialPropertyOld<Real>(_base_name + "cdp_combined_damage")
+                            : nullptr),
     _stiffness_factor(declareProperty<Real>(_base_name + "cdp_stiffness_factor")),
     _local_iterations(declareProperty<Real>(_base_name + "cdp_local_iterations")),
     _jacobian_fallbacks(declareProperty<Real>(_base_name + "cdp_jacobian_fallbacks")),
@@ -165,6 +173,11 @@ AbaqusCDPStressUpdate::propagateQpStatefulProperties()
   _viscous_plastic_strain[_qp] = _viscous_plastic_strain_old[_qp];
   _damage_t[_qp] = _damage_t_old[_qp];
   _damage_c[_qp] = _damage_c_old[_qp];
+  if (_combined_damage_old)
+  {
+    _combined_damage[_qp] = (*_combined_damage_old)[_qp];
+    _stiffness_factor[_qp] = 1.0 - _combined_damage[_qp];
+  }
 }
 
 TangentCalculationMethod
@@ -226,6 +239,8 @@ AbaqusCDPStressUpdate::oldState() const
   result.viscous_plastic_strain = toArray(_viscous_plastic_strain_old[_qp]);
   result.viscous_tension_damage = _damage_t_old[_qp];
   result.viscous_compression_damage = _damage_c_old[_qp];
+  if (_combined_damage_old)
+    result.viscous_combined_damage = (*_combined_damage_old)[_qp];
   return result;
 }
 

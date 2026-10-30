@@ -49,6 +49,7 @@ private:
                   Real integration_microseconds);
 
   const bool _enable_performance_diagnostics;
+  const bool _use_combined_damage_relaxation;
   const CDPMaterialTable _table;
   const AbaqusCDPLocalIntegrator _local_integrator;
   const AbaqusCDPStateIntegrator _state_integrator;
@@ -68,6 +69,7 @@ private:
   const MaterialProperty<Real> & _damage_c_old;
 
   MaterialProperty<Real> & _combined_damage;
+  const MaterialProperty<Real> * const _combined_damage_old;
   MaterialProperty<Real> & _stiffness_factor;
   MaterialProperty<Real> & _local_iterations;
   MaterialProperty<Real> & _jacobian_fallbacks;
