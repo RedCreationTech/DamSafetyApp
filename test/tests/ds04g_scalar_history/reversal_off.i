@@ -13,7 +13,7 @@
   ymax = 0.001
   elem_type = QUAD4
 []
-[Problem/Quadrature]
+[Executioner/Quadrature]
   type = GAUSS
   order = CONSTANT
 []
