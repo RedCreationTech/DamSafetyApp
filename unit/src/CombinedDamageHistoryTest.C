@@ -152,11 +152,17 @@ TEST(CombinedDamageHistory, SubstepChainFailureRollbackAndCleanReplay)
 {
   const auto table=tables();AbaqusCDPLocalIntegrator local(table,{E,.2,30.,.1,1.16,.6667});
   Core core(local,{0,1,.0005,1e-12,true});AbaqusCDPSubstepIntegrator sub(core,{16,2.5e-5,1e-8});
-  const Six end={.0002,-.00005,0,0,0,0};State old;const auto snapshot=pack(old);
+  const Six end={.0002,-.00005,0,0,0,0};State old;
+  // A nonzero manufactured memory makes leaked partial updates observable.
+  old.viscous_combined_damage=.3;const auto snapshot=pack(old);
   const auto normal=sub.integrate({},end,.002,old);
-  ASSERT_EQ(normal.accepted_substeps,8u);
-  State manual;Core::Result last{};
-  for(unsigned i=1;i<=8;++i){Six strain{};for(unsigned j=0;j<6;++j)strain[j]=end[j]*i/8.;last=core.integrate(strain,.002/8,manual);manual=last.state;}
+  ASSERT_EQ(normal.accepted_substeps,16u);
+  EXPECT_GT(normal.cutback_count,0u);
+  EXPECT_EQ(normal.attempted_partitions,2u);
+  std::cout<<"SCALAR_ADAPTIVE_RETRY initial_N=8 accepted_N="<<normal.accepted_substeps
+           <<" cutbacks="<<normal.cutback_count<<" old_combined="<<old.viscous_combined_damage<<'\n';
+  State manual=old;Core::Result last{};
+  for(unsigned i=1;i<=16;++i){Six strain{};for(unsigned j=0;j<6;++j)strain[j]=end[j]*i/16.;last=core.integrate(strain,.002/16,manual);manual=last.state;}
   EXPECT_EQ(pack(normal.final_result.state),pack(manual));
   EXPECT_EQ(normal.final_result.cauchy_stress,last.cauchy_stress);
   auto limited=AbaqusCDPLocalIntegrator::Parameters{E,.2,30.,.1,1.16,.6667};limited.maximum_iterations=0;
