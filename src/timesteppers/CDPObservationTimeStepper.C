@@ -23,4 +23,5 @@ void CDPObservationTimeStepper::acceptStep()
   auto * p=dynamic_cast<CDPObservationProblem *>(&_fe_problem);
   if(p) p->attemptEvent("accepted_end");
   TimeSequenceStepper::acceptStep();
+  if(p) p->attemptEvent("stepper_accept_after");
 }

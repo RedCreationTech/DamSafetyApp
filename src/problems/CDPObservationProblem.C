@@ -1,4 +1,5 @@
 #include "CDPObservationProblem.h"
+#include "CDPObservationFingerprint.h"
 #include "MooseMesh.h"
 #include "NonlinearSystem.h"
 #include "AuxiliarySystem.h"
@@ -98,6 +99,12 @@ void CDPObservationProblem::initialSetup()
   status();
 }
 bool CDPObservationProblem::window() const { return _enabled && time()>=_start-1e-9 && time()<=_end+1e-9; }
+void CDPObservationProblem::advanceState()
+{
+  if (window()) attemptEvent("state_advance_before");
+  FEProblem::advanceState();
+  if (window()) attemptEvent("state_advance_after");
+}
 bool CDPObservationProblem::enterPoint(std::uint64_t e, unsigned int qp, bool new_call)
 {
   if (!window() || !_targets.count(e) || qp != 0 || _truncated || _io_failed) return false;
@@ -213,18 +220,16 @@ void CDPObservationProblem::attemptEvent(const char * event)
   _kind="event"; _element=0; _qp=0; CDPObservation::context={};
   write("attempt-events",event,"time",{time()},{});
   if(window() || std::abs(time()-(_offset+1.680))<1e-9 || std::abs(time()-_offset)<1e-9) history(event);
-  if (std::string(event).find("solve_")==0)
+  const std::string event_name(event);
+  if (window() && (event_name.find("solve_")==0 || event_name=="state_advance_before" ||
+                   event_name=="state_advance_after" || event_name=="stepper_accept_after"))
   {
-    auto * solver=dynamic_cast<libMesh::PetscNonlinearSolver<Number> *>(getNonlinearSystem(0).nonlinearSolver());
-    if(solver)
-    {
-      SNESConvergedReason reason; KSPConvergedReason linear_reason; KSP ksp;
-      PetscInt iterations; PetscReal norm;
-      const auto snes=solver->snes();
-      const bool bad=SNESGetConvergedReason(snes,&reason) || SNESGetIterationNumber(snes,&iterations) || SNESGetFunctionNorm(snes,&norm) || SNESGetKSP(snes,&ksp) || KSPGetConvergedReason(ksp,&linear_reason);
-      if(bad) _history_incomplete=true;
-      else write("attempt-events",event,"SNES_reason_iterations_norm_KSP_reason",{static_cast<double>(reason),static_cast<double>(iterations),norm,static_cast<double>(linear_reason)},{});
-    }
+    // libMesh destroys SNES after solve; reacquiring it here can create a new,
+    // unconverged object. The event name reflects the stepper's actual boolean.
+    const auto * solution = getNonlinearSystem(0).currentSolution();
+    const auto field = event_name.find("solve_")==0 ? "solve_return_vector" : event;
+    if (solution) fingerprintVector(field, *solution);
+    else _history_incomplete = true;
   }
   if(window()) status();
 }
@@ -241,10 +246,31 @@ void CDPObservationProblem::computeResidual(const NumericVector<Number> & x, Num
     _global_iteration=iteration;
     const auto * vector=dynamic_cast<const libMesh::PetscVector<Number> *>(&x);
     _kind=vector && vector->vec()==accepted ? "residual_solution_vector" : "residual_trial_vector";
+    fingerprintVector("residual_input_vector", x);
     trialVector(x);
   }
   FEProblem::computeResidual(x,r,n);
   if(window()) { _element=0; write("attempt-events","residual_complete","completed",{},"no additional collective norm"); }
+}
+void CDPObservationProblem::fingerprintVector(const char * field, const NumericVector<Number> & x) noexcept
+{
+  try
+  {
+    const auto first=x.first_local_index(), last=x.last_local_index();
+    CDPObservationFingerprint fingerprint(first,last);
+    for (auto i=first; i<last; ++i) fingerprint.add(x(i));
+    std::ostringstream note;
+    note << "fnv1a64:" << std::hex << std::setfill('0') << std::setw(16) << fingerprint.value()
+         << "; rank-local candidate filter only, not proof of acceptance";
+    const auto saved_element = _element;
+    const auto saved_qp = _qp;
+    const auto saved_call = _call;
+    _element = 0; _qp = 0; _call = 0;
+    write("attempt-events","vector_fingerprint",field,
+          {static_cast<double>(first),static_cast<double>(last)},note.str());
+    _element = saved_element; _qp = saved_qp; _call = saved_call;
+  }
+  catch (...) { _history_incomplete=true; }
 }
 void CDPObservationProblem::computeJacobian(const NumericVector<Number> & x,SparseMatrix<Number> & j,unsigned int n)
 {

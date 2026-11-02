@@ -62,6 +62,19 @@ class ObserverPreparationTest(unittest.TestCase):
         stepper = (ROOT / 'src/timesteppers/CDPObservationTimeStepper.C').read_text()
         self.assertLess(stepper.index('attemptEvent("accepted_end")'), stepper.index('TimeSequenceStepper::acceptStep()'))
 
+    def test_record_lifecycle_without_recreating_snes(self):
+        problem = (ROOT / 'src/problems/CDPObservationProblem.C').read_text()
+        event = problem.split('void CDPObservationProblem::attemptEvent(', 1)[1].split('void CDPObservationProblem::computeResidual(', 1)[0]
+        self.assertNotIn('solver->snes()', event)
+        self.assertNotIn('SNESGetConvergedReason', event)
+        self.assertIn('"solve_return_vector"', event)
+        self.assertIn('fingerprintVector(field, *solution)', event)
+        advance = problem.split('void CDPObservationProblem::advanceState()', 1)[1].split('bool CDPObservationProblem::enterPoint', 1)[0]
+        self.assertLess(advance.index('"state_advance_before"'), advance.index('FEProblem::advanceState()'))
+        self.assertLess(advance.index('FEProblem::advanceState()'), advance.index('"state_advance_after"'))
+        self.assertIn('if (window())', advance)
+        self.assertIn('rank-local candidate filter only, not proof of acceptance', problem)
+
 
 if __name__ == '__main__':
     unittest.main()

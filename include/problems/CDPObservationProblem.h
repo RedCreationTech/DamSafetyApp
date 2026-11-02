@@ -13,6 +13,7 @@ public:
   CDPObservationProblem(const InputParameters &);
   ~CDPObservationProblem() override;
   void initialSetup() override;
+  void advanceState() override;
   void computeResidual(const NumericVector<Number> &, NumericVector<Number> &, unsigned int) override;
   void computeJacobian(const NumericVector<Number> &, SparseMatrix<Number> &, unsigned int) override;
   bool enterPoint(std::uint64_t, unsigned int, bool) override;
@@ -23,6 +24,7 @@ private:
   bool window() const;
   void history(const char *);
   void trialVector(const NumericVector<Number> &);
+  void fingerprintVector(const char *, const NumericVector<Number> &) noexcept;
   void status() noexcept;
   const bool _enabled;
   const Real _start, _end, _offset;
