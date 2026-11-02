@@ -1,4 +1,5 @@
 #include "AbaqusCDPSubstepIntegrator.h"
+#include "CDPObservation.h"
 
 #include <algorithm>
 #include <cmath>
@@ -221,6 +222,12 @@ AbaqusCDPSubstepIntegrator::integrateLinearized(const SymmetricTensor & old_tota
 
     for (unsigned int i = 1; i <= substeps; ++i)
     {
+      if (CDPObservation::active())
+      {
+        CDPObservation::context.partition = attempted_partitions;
+        CDPObservation::context.subdivisions = substeps;
+        CDPObservation::context.substep = i;
+      }
       const double fraction = static_cast<double>(i) / substeps;
       const auto target = substepInterpolate(old_total_strain, total_increment, fraction);
       try
@@ -270,6 +277,8 @@ AbaqusCDPSubstepIntegrator::integrateLinearized(const SymmetricTensor & old_tota
       }
       catch (const std::exception & error)
       {
+        if (CDPObservation::active())
+          CDPObservation::values("substep-events", "partition_failed", "substep", {static_cast<double>(i)});
         partition_succeeded = false;
         last_error = error.what();
         last_failed_substep = i;
@@ -280,6 +289,8 @@ AbaqusCDPSubstepIntegrator::integrateLinearized(const SymmetricTensor & old_tota
 
     if (partition_succeeded && final_result)
     {
+      if (CDPObservation::active())
+        CDPObservation::values("substep-events", "partition_succeeded", "N", {static_cast<double>(substeps)});
       Result result{std::move(final_result->result),
                     substeps,
                     cutback_count,
