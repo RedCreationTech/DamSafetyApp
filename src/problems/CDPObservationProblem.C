@@ -1,6 +1,9 @@
 #include "CDPObservationProblem.h"
 #include "CDPObservationFingerprint.h"
 #include "CDPObservationOrigin.h"
+#include "CDPObservationContextGuard.h"
+#include "Assembly.h"
+#include "MaterialData.h"
 #include "MooseMesh.h"
 #include "NonlinearSystem.h"
 #include "AuxiliarySystem.h"
@@ -35,6 +38,7 @@ InputParameters CDPObservationProblem::validParams()
   auto p = FEProblem::validParams();
   p.addParam<bool>("observation_enabled", false, "Enable passive recorders, never extra assembly");
   p.addParam<bool>("trace_call_origin", false, "Bounded native call-origin traces for the selected target only");
+  p.addParam<bool>("trace_state_swap", false, "Record target state after existing material swap-back, without solving");
   p.addParam<unsigned int>("trace_calls_per_evaluation", 8, "Maximum selected material calls per evaluation");
   p.addParam<unsigned int>("trace_frame_limit", 32, "Maximum native frames per selected call (1-64)");
   p.addParam<Real>("observation_start", 3.018, "First observed cumulative target time");
@@ -48,6 +52,7 @@ InputParameters CDPObservationProblem::validParams()
 }
 CDPObservationProblem::CDPObservationProblem(const InputParameters & p)
   : FEProblem(p), _enabled(getParam<bool>("observation_enabled")), _trace_origin(getParam<bool>("trace_call_origin")),
+    _trace_swap(getParam<bool>("trace_state_swap")),
     _start(getParam<Real>("observation_start")), _end(getParam<Real>("observation_end")),
     _offset(getParam<Real>("earthquake_offset")), _prefix(getParam<std::string>("observation_prefix")),
     _limit(getParam<unsigned long long>("observation_byte_limit")),
@@ -118,6 +123,53 @@ void CDPObservationProblem::advanceState()
   if (window()) attemptEvent("state_advance_before");
   FEProblem::advanceState();
   if (window()) attemptEvent("state_advance_after");
+}
+void CDPObservationProblem::materialCompleted() noexcept
+{
+  if (!_enabled || !_trace_swap || !window()) return;
+  try
+  {
+    if (!_targets.count(_element) || _qp != 0 || !_call) { _swap_incomplete = true; return; }
+    _swap_tracker.completed(_element, _evaluation, _call);
+  }
+  catch (...) { _swap_incomplete = true; }
+}
+void CDPObservationProblem::swapBackMaterials(const THREAD_ID tid)
+{
+  if (!_enabled || !_trace_swap || !window()) { FEProblem::swapBackMaterials(tid); return; }
+  const Elem * element = nullptr;
+  bool was_swapped = false;
+  try
+  {
+    if (tid != 0) _swap_incomplete = true;
+    else
+    {
+      element = assembly(tid, 0).elem();
+      was_swapped = getMaterialPropertyStorage().getMaterialData(tid).isSwapped();
+    }
+  }
+  catch (...) { _swap_incomplete = true; }
+  // Exactly the original swap, regardless of any observer-side failure.
+  FEProblem::swapBackMaterials(tid);
+  if (!element || !_targets.count(element->id())) return;
+  try
+  {
+    const auto batch = _swap_tracker.take(element->id());
+    ++_swap_events;
+    if (!was_swapped || batch.overflow || batch.calls.size() != 1) _swap_incomplete = true;
+    if (batch.calls.empty()) ++_swap_empty;
+    CDPObservationContextGuard restore(_element, _qp, _call);
+    _element = element->id(); _qp = 0; _call = 0;
+    write("swapback-events", "swapback_after", "was_swapped_count_overflow",
+          {was_swapped ? 1.0 : 0.0, static_cast<double>(batch.calls.size()), batch.overflow ? 1.0 : 0.0},
+          "completed candidates since previous swapback; not an accepted-call verdict");
+    for (const auto & candidate : batch.calls)
+      write("swapback-events", "swapback_candidate", "evaluation_call",
+            {static_cast<double>(candidate.evaluation), static_cast<double>(candidate.call)},
+            "candidate must be checked against stored state and subsequent advance");
+    history("material_swapback_after");
+  }
+  catch (...) { _swap_incomplete = true; _history_incomplete = true; }
 }
 bool CDPObservationProblem::enterPoint(std::uint64_t e, unsigned int qp, bool new_call)
 {
@@ -213,7 +265,7 @@ void CDPObservationProblem::status() noexcept
   {
     for(auto & f:_streams) { f.second.flush(); if (!f.second) _io_failed=true; }
     std::ofstream f(_prefix+"-status-rank"+std::to_string(processor_id())+".json");
-    f << "{\"schema\":\"ds04g-observation-v1\",\"rank\":" << processor_id() << ",\"records\":" << _record << ",\"bytes\":" << _bytes << ",\"capture_truncated\":" << (_truncated?"true":"false") << ",\"io_failed\":" << (_io_failed?"true":"false") << ",\"history_incomplete\":" << (_history_incomplete?"true":"false") << ",\"target_elements_on_rank\":" << _targets.size() << ",\"write_microseconds\":" << _write_microseconds << ",\"origin_trace_enabled\":" << (_trace_origin?"true":"false") << ",\"origin_trace_frames\":" << _trace_frames << ",\"origin_trace_unresolved\":" << _trace_unresolved << ",\"origin_trace_symbol_missing\":" << _trace_symbol_missing << ",\"origin_trace_capped\":" << (_trace_capped?"true":"false") << ",\"origin_trace_truncated\":" << (_trace_truncated?"true":"false") << ",\"origin_trace_failed\":" << (_trace_failed?"true":"false") << ",\"streams\":{";
+    f << "{\"schema\":\"ds04g-observation-v1\",\"rank\":" << processor_id() << ",\"records\":" << _record << ",\"bytes\":" << _bytes << ",\"capture_truncated\":" << (_truncated?"true":"false") << ",\"io_failed\":" << (_io_failed?"true":"false") << ",\"history_incomplete\":" << (_history_incomplete?"true":"false") << ",\"target_elements_on_rank\":" << _targets.size() << ",\"write_microseconds\":" << _write_microseconds << ",\"origin_trace_enabled\":" << (_trace_origin?"true":"false") << ",\"origin_trace_frames\":" << _trace_frames << ",\"origin_trace_unresolved\":" << _trace_unresolved << ",\"origin_trace_symbol_missing\":" << _trace_symbol_missing << ",\"origin_trace_capped\":" << (_trace_capped?"true":"false") << ",\"origin_trace_truncated\":" << (_trace_truncated?"true":"false") << ",\"origin_trace_failed\":" << (_trace_failed?"true":"false") << ",\"swap_trace_enabled\":" << (_trace_swap?"true":"false") << ",\"swap_trace_events\":" << _swap_events << ",\"swap_trace_empty\":" << _swap_empty << ",\"swap_trace_incomplete\":" << (_swap_incomplete?"true":"false") << ",\"streams\":{";
     bool comma=false;
     for(const auto & item:_counts) { if(comma) f << ','; comma=true; f << quoted(item.first) << ':' << item.second; }
     f << "}}\n";

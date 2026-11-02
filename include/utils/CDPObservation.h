@@ -18,6 +18,7 @@ public:
   virtual ~Sink() = default;
   virtual bool enterPoint(std::uint64_t element, unsigned int qp, bool new_call) = 0;
   virtual void traceOrigin() noexcept {}
+  virtual void materialCompleted() noexcept {}
   virtual void write(const char * stream, const char * event, const char * name,
                      const std::vector<double> & values, const std::string & note) noexcept = 0;
 };
@@ -27,6 +28,7 @@ inline thread_local Context context;
 inline thread_local std::uint64_t sequence = 0;
 inline bool active() { return current != nullptr; }
 inline void traceOrigin() noexcept { if (current) current->traceOrigin(); }
+inline void materialCompleted() noexcept { if (current) current->materialCompleted(); }
 class PointScope
 {
 public:

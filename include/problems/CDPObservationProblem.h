@@ -1,6 +1,7 @@
 #pragma once
 #include "FEProblem.h"
 #include "CDPObservation.h"
+#include "CDPObservationSwapTracker.h"
 #include <fstream>
 #include <map>
 #include <petscsnes.h>
@@ -14,10 +15,12 @@ public:
   ~CDPObservationProblem() override;
   void initialSetup() override;
   void advanceState() override;
+  void swapBackMaterials(const THREAD_ID) override;
   void computeResidual(const NumericVector<Number> &, NumericVector<Number> &, unsigned int) override;
   void computeJacobian(const NumericVector<Number> &, SparseMatrix<Number> &, unsigned int) override;
   bool enterPoint(std::uint64_t, unsigned int, bool) override;
   void traceOrigin() noexcept override;
+  void materialCompleted() noexcept override;
   void write(const char *, const char *, const char *, const std::vector<double> &,
              const std::string &) noexcept override;
   void attemptEvent(const char *);
@@ -29,6 +32,7 @@ private:
   void status() noexcept;
   const bool _enabled;
   const bool _trace_origin;
+  const bool _trace_swap;
   const Real _start, _end, _offset;
   const std::string _prefix;
   const std::uint64_t _limit;
@@ -36,6 +40,9 @@ private:
   std::map<std::uint64_t, unsigned int> _trace_calls_by_evaluation;
   std::uint64_t _trace_frames = 0, _trace_unresolved = 0, _trace_symbol_missing = 0;
   bool _trace_capped = false, _trace_truncated = false, _trace_failed = false;
+  CDPObservationSwapTracker _swap_tracker{64};
+  std::uint64_t _swap_events = 0, _swap_empty = 0;
+  bool _swap_incomplete = false;
   std::map<std::uint64_t, unsigned int> _targets;
   std::map<std::string, std::ofstream> _streams;
   std::map<std::string, std::uint64_t> _counts;

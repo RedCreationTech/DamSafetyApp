@@ -90,6 +90,22 @@ class ObserverPreparationTest(unittest.TestCase):
         self.assertNotIn('computeJacobian(', trace)
         self.assertNotIn('integrate(', trace)
 
+    def test_swapback_records_only_after_base_and_preserves_disabled_path(self):
+        problem = (ROOT / 'src/problems/CDPObservationProblem.C').read_text()
+        self.assertIn('p.addParam<bool>("trace_state_swap", false', problem)
+        swap = problem.split('void CDPObservationProblem::swapBackMaterials(', 1)[1].split('bool CDPObservationProblem::enterPoint', 1)[0]
+        self.assertIn('if (!_enabled || !_trace_swap || !window()) { FEProblem::swapBackMaterials(tid); return; }', swap)
+        self.assertLess(swap.rindex('FEProblem::swapBackMaterials(tid)'), swap.index('"swapback_after"'))
+        self.assertLess(swap.rindex('FEProblem::swapBackMaterials(tid)'), swap.index('history("material_swapback_after")'))
+        self.assertIn('isSwapped()', swap)
+        self.assertIn('batch.calls.size() != 1', swap)
+        self.assertIn('catch (...) { _swap_incomplete = true;', swap)
+        self.assertIn('CDPObservationContextGuard restore', swap)
+        self.assertLess(swap.index('CDPObservationContextGuard restore'), swap.index('_element = element->id()'))
+        self.assertNotIn('comm().', swap)
+        self.assertNotIn('computeResidual(', swap)
+        self.assertNotIn('computeJacobian(', swap)
+
 
 if __name__ == '__main__':
     unittest.main()

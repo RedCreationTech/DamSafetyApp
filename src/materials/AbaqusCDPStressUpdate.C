@@ -333,6 +333,7 @@ AbaqusCDPStressUpdate::updateState(RankTwoTensor & strain_increment,
       CDPObservation::values("qp-updates", "material_success", "new_kappa_DT_DC_N_cutbacks_partitions_branch",
         {final.state.backbone.tensile_equivalent_plastic_strain, final.state.backbone.compressive_equivalent_plastic_strain, final.state.viscous_tension_damage, final.state.viscous_compression_damage, static_cast<double>(result.result.accepted_substeps), static_cast<double>(result.result.cutback_count), static_cast<double>(result.result.attempted_partitions), static_cast<double>(final.backbone.active_branch)});
       CDPObservation::matrix("qp-updates", "material_success", "tangent_column_major", result.algorithmic_tangent);
+      CDPObservation::materialCompleted();
     }
   }
   catch (const std::exception & error)
