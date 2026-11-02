@@ -278,6 +278,8 @@ AbaqusCDPStressUpdate::updateState(RankTwoTensor & strain_increment,
                                    RankFourTensor & tangent_operator)
 {
   CDPObservation::PointScope observation(CDPObservation::configured ? _current_elem->id() : 0, _qp);
+  if (CDPObservation::active())
+    CDPObservation::traceOrigin();
   const CoreState old_state = oldState();
   const auto old_elastic_strain = toArray(elastic_strain_old);
   SymmetricTensor old_total_strain;

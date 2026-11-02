@@ -17,6 +17,7 @@ public:
   void computeResidual(const NumericVector<Number> &, NumericVector<Number> &, unsigned int) override;
   void computeJacobian(const NumericVector<Number> &, SparseMatrix<Number> &, unsigned int) override;
   bool enterPoint(std::uint64_t, unsigned int, bool) override;
+  void traceOrigin() noexcept override;
   void write(const char *, const char *, const char *, const std::vector<double> &,
              const std::string &) noexcept override;
   void attemptEvent(const char *);
@@ -27,9 +28,14 @@ private:
   void fingerprintVector(const char *, const NumericVector<Number> &) noexcept;
   void status() noexcept;
   const bool _enabled;
+  const bool _trace_origin;
   const Real _start, _end, _offset;
   const std::string _prefix;
   const std::uint64_t _limit;
+  const unsigned int _trace_call_limit, _trace_frame_limit;
+  std::map<std::uint64_t, unsigned int> _trace_calls_by_evaluation;
+  std::uint64_t _trace_frames = 0, _trace_unresolved = 0, _trace_symbol_missing = 0;
+  bool _trace_capped = false, _trace_truncated = false, _trace_failed = false;
   std::map<std::uint64_t, unsigned int> _targets;
   std::map<std::string, std::ofstream> _streams;
   std::map<std::string, std::uint64_t> _counts;

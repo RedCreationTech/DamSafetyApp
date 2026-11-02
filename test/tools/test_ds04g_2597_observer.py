@@ -75,6 +75,21 @@ class ObserverPreparationTest(unittest.TestCase):
         self.assertIn('if (window())', advance)
         self.assertIn('rank-local candidate filter only, not proof of acceptance', problem)
 
+    def test_origin_trace_is_opt_in_bounded_and_records_failures(self):
+        problem = (ROOT / 'src/problems/CDPObservationProblem.C').read_text()
+        self.assertIn('p.addParam<bool>("trace_call_origin", false', problem)
+        self.assertIn('if (!_trace_origin || !_enabled || !window()) return;', problem)
+        self.assertIn('count >= _trace_call_limit', problem)
+        self.assertIn('origin_trace_unresolved', problem)
+        self.assertIn('origin_trace_symbol_missing', problem)
+        self.assertIn('origin_trace_truncated', problem)
+        self.assertIn('origin_trace_failed', problem)
+        trace = problem.split('void CDPObservationProblem::traceOrigin()', 1)[1].split('void CDPObservationProblem::write(', 1)[0]
+        self.assertNotIn('comm().', trace)
+        self.assertNotIn('computeResidual(', trace)
+        self.assertNotIn('computeJacobian(', trace)
+        self.assertNotIn('integrate(', trace)
+
 
 if __name__ == '__main__':
     unittest.main()

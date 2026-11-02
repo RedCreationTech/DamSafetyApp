@@ -1,5 +1,6 @@
 #include "CDPObservationProblem.h"
 #include "CDPObservationFingerprint.h"
+#include "CDPObservationOrigin.h"
 #include "MooseMesh.h"
 #include "NonlinearSystem.h"
 #include "AuxiliarySystem.h"
@@ -15,6 +16,10 @@
 #include <sstream>
 #include <set>
 #include <limits>
+#if defined(__linux__)
+#include <dlfcn.h>
+#include <execinfo.h>
+#endif
 registerMooseObject("DamSafetyApp", CDPObservationProblem);
 namespace
 {
@@ -29,6 +34,9 @@ InputParameters CDPObservationProblem::validParams()
 {
   auto p = FEProblem::validParams();
   p.addParam<bool>("observation_enabled", false, "Enable passive recorders, never extra assembly");
+  p.addParam<bool>("trace_call_origin", false, "Bounded native call-origin traces for the selected target only");
+  p.addParam<unsigned int>("trace_calls_per_evaluation", 8, "Maximum selected material calls per evaluation");
+  p.addParam<unsigned int>("trace_frame_limit", 32, "Maximum native frames per selected call (1-64)");
   p.addParam<Real>("observation_start", 3.018, "First observed cumulative target time");
   p.addParam<Real>("observation_end", 3.202, "Last observed cumulative target time");
   p.addParam<Real>("earthquake_offset", 1., "Cumulative time origin of EQ");
@@ -39,13 +47,19 @@ InputParameters CDPObservationProblem::validParams()
   return p;
 }
 CDPObservationProblem::CDPObservationProblem(const InputParameters & p)
-  : FEProblem(p), _enabled(getParam<bool>("observation_enabled")),
+  : FEProblem(p), _enabled(getParam<bool>("observation_enabled")), _trace_origin(getParam<bool>("trace_call_origin")),
     _start(getParam<Real>("observation_start")), _end(getParam<Real>("observation_end")),
     _offset(getParam<Real>("earthquake_offset")), _prefix(getParam<std::string>("observation_prefix")),
-    _limit(getParam<unsigned long long>("observation_byte_limit"))
+    _limit(getParam<unsigned long long>("observation_byte_limit")),
+    _trace_call_limit(getParam<unsigned int>("trace_calls_per_evaluation")),
+    _trace_frame_limit(getParam<unsigned int>("trace_frame_limit"))
 {
   if (_enabled && libMesh::n_threads() != 1) paramError("observation_enabled", "Requires one thread per MPI rank");
   if (_start > _end) paramError("observation_start", "Must not exceed end");
+  if (_trace_origin && (!_trace_call_limit || _trace_call_limit > 1000))
+    paramError("trace_calls_per_evaluation", "Must be in [1,1000]");
+  if (_trace_origin && (!_trace_frame_limit || _trace_frame_limit > CDPObservationOrigin::max_frames))
+    paramError("trace_frame_limit", "Must be in [1,64]");
 }
 CDPObservationProblem::~CDPObservationProblem()
 {
@@ -117,6 +131,54 @@ bool CDPObservationProblem::enterPoint(std::uint64_t e, unsigned int qp, bool ne
   }
   return true;
 }
+void CDPObservationProblem::traceOrigin() noexcept
+{
+  if (!_trace_origin || !_enabled || !window()) return;
+  try
+  {
+    auto & count = _trace_calls_by_evaluation[_evaluation];
+    if (count >= _trace_call_limit) { _trace_capped = true; return; }
+    ++count;
+#if defined(__linux__)
+    const auto status = CDPObservationOrigin::sample(
+      _trace_frame_limit,
+      [](void ** frames, int max) { return ::backtrace(frames, max); },
+      [](void * address, CDPObservationOrigin::Frame & frame)
+      {
+        Dl_info info{};
+        if (!::dladdr(address, &info) || !info.dli_fname || !info.dli_fbase) return false;
+        const auto absolute = reinterpret_cast<std::uintptr_t>(address);
+        const auto base = reinterpret_cast<std::uintptr_t>(info.dli_fbase);
+        if (absolute < base) return false;
+        frame.module = info.dli_fname;
+        frame.symbol = info.dli_sname;
+        frame.offset = absolute - base;
+        return true;
+      },
+      [this](unsigned int index, const CDPObservationOrigin::Frame & frame, bool resolved)
+      {
+        std::ostringstream note;
+        if (resolved)
+        {
+          note << "module=" << frame.module << ";relative_return_address=0x" << std::hex
+               << frame.offset << ";dynamic_symbol=" << (frame.symbol ? frame.symbol : "unavailable")
+               << "; symbol/return-address semantics require offline verification";
+          if (!frame.symbol) ++_trace_symbol_missing;
+        }
+        else note << "module=unresolved; relative_return_address=unavailable; dynamic_symbol=unavailable";
+        write("origin-events", "origin_frame", "frame", {static_cast<double>(index)}, note.str());
+      });
+    _trace_frames += status.frames;
+    _trace_unresolved += status.unresolved;
+    _trace_truncated = _trace_truncated || status.truncated;
+    _trace_failed = _trace_failed || status.failed;
+#else
+    // Explicitly inconclusive on unsupported platforms; never attempt a substitute solve.
+    _trace_failed = true;
+#endif
+  }
+  catch (...) { _trace_failed = true; }
+}
 void CDPObservationProblem::write(const char * stream, const char * event, const char * name,
                                  const std::vector<double> & v, const std::string & note) noexcept
 {
@@ -151,7 +213,7 @@ void CDPObservationProblem::status() noexcept
   {
     for(auto & f:_streams) { f.second.flush(); if (!f.second) _io_failed=true; }
     std::ofstream f(_prefix+"-status-rank"+std::to_string(processor_id())+".json");
-    f << "{\"schema\":\"ds04g-observation-v1\",\"rank\":" << processor_id() << ",\"records\":" << _record << ",\"bytes\":" << _bytes << ",\"capture_truncated\":" << (_truncated?"true":"false") << ",\"io_failed\":" << (_io_failed?"true":"false") << ",\"history_incomplete\":" << (_history_incomplete?"true":"false") << ",\"target_elements_on_rank\":" << _targets.size() << ",\"write_microseconds\":" << _write_microseconds << ",\"streams\":{";
+    f << "{\"schema\":\"ds04g-observation-v1\",\"rank\":" << processor_id() << ",\"records\":" << _record << ",\"bytes\":" << _bytes << ",\"capture_truncated\":" << (_truncated?"true":"false") << ",\"io_failed\":" << (_io_failed?"true":"false") << ",\"history_incomplete\":" << (_history_incomplete?"true":"false") << ",\"target_elements_on_rank\":" << _targets.size() << ",\"write_microseconds\":" << _write_microseconds << ",\"origin_trace_enabled\":" << (_trace_origin?"true":"false") << ",\"origin_trace_frames\":" << _trace_frames << ",\"origin_trace_unresolved\":" << _trace_unresolved << ",\"origin_trace_symbol_missing\":" << _trace_symbol_missing << ",\"origin_trace_capped\":" << (_trace_capped?"true":"false") << ",\"origin_trace_truncated\":" << (_trace_truncated?"true":"false") << ",\"origin_trace_failed\":" << (_trace_failed?"true":"false") << ",\"streams\":{";
     bool comma=false;
     for(const auto & item:_counts) { if(comma) f << ','; comma=true; f << quoted(item.first) << ':' << item.second; }
     f << "}}\n";
