@@ -38,8 +38,10 @@ DS04GHWSpatialElasticStress::computeQpProperties()
   // The upstream base adds extra stress after computeQpStress and would feed
   // that result into _stress_old on the next step. Reject nonzero contributions
   // at every evaluation and do not call the adding base implementation.
-  if (_extra_stress[_qp].L2norm() != 0.0)
-    mooseError("DS04GHWSpatialElasticStress does not support extra_stress with nonzero value");
+  for (unsigned int i = 0; i < 3; ++i)
+    for (unsigned int j = 0; j < 3; ++j)
+      if (_extra_stress[_qp](i, j) != 0.0)
+        mooseError("DS04GHWSpatialElasticStress does not support extra_stress with nonzero value");
   computeQpStress();
 }
 

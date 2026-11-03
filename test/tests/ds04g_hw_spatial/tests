@@ -42,4 +42,10 @@
     expect_err = 'does not support extra_stress'
     requirement = 'The diagnostic rejects nonzero extra stress when its provider sorts after the stress material.'
   []
+  [extra_stress_tiny_rejected]
+    type = RunException
+    input = extra_stress_tiny.i
+    expect_err = 'does not support extra_stress'
+    requirement = 'The diagnostic shall reject extra stress even when squared norms underflow.'
+  []
 []
