@@ -28,13 +28,17 @@ DS04GHWSpatialElasticStress::initialSetup()
   ComputeFiniteStrainElasticStress::initialSetup();
   if (!hasGuaranteedMaterialProperty(_elasticity_tensor_name, Guarantee::ISOTROPIC))
     mooseError("DS04GHWSpatialElasticStress is restricted to guaranteed isotropic elasticity");
+  if (!hasGuaranteedMaterialProperty(_elasticity_tensor_name, Guarantee::CONSTANT_IN_TIME))
+    mooseError("DS04GHWSpatialElasticStress requires time-constant elasticity");
+  if (hasMaterialPropertyByName<RankTwoTensor>(_base_name + "extra_stress"))
+    mooseError("DS04GHWSpatialElasticStress does not support extra_stress");
 }
 
 void
 DS04GHWSpatialElasticStress::computeQpStress()
 {
-  // The two required properties enforce that the configured strain producer is
-  // the Hughes-Winget branch; their values are not otherwise modified.
+  // The two named properties are dependencies. Their presence is not a proof of
+  // producer identity; users must independently lock Hughes-Winget kinematics.
   (void)_hw_midpoint_gradient;
   (void)_hw_displacement_increment_gradient;
   const auto & rotation = _rotation_increment[_qp];

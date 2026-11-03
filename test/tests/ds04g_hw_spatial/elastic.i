@@ -15,6 +15,10 @@
   generate_output = 'stress_xx stress_yy stress_xy'
 []
 [Functions]
+  [varying_stiffness]
+    type = ParsedFunction
+    expression = '1+t'
+  []
   [ux]
     type = ParsedFunction
     expression = '0.0001*t*x'

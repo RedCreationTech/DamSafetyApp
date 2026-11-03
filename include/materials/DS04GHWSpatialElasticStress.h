@@ -21,8 +21,8 @@ protected:
   void computeQpStress() override;
 
 private:
-  // Requiring these properties ensures a Hughes-Winget kinematics material is
-  // present; the tensors are created only when that decomposition is active.
+  // Requiring these named properties catches the standard Taylor-only configuration;
+  // their presence alone cannot establish their producer or configuration.
   const MaterialProperty<RankTwoTensor> & _hw_midpoint_gradient;
   const MaterialProperty<RankTwoTensor> & _hw_displacement_increment_gradient;
 };

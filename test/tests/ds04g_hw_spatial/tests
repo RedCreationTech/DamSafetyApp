@@ -17,4 +17,17 @@
     expect_err = 'This elastic-only diagnostic is not a production material'
     requirement = 'The spatial-HW elastic research material shall require explicit acknowledgement of its limitations.'
   []
+  [varying_stiffness_rejected]
+    type = RunException
+    input = elastic.i
+    cli_args = 'Materials/elasticity/elasticity_tensor_prefactor=varying_stiffness'
+    expect_err = 'requires time-constant elasticity'
+    requirement = 'The elastic diagnostic shall reject time-varying elasticity.'
+  []
+  [extra_stress_rejected]
+    type = RunException
+    input = extra_stress.i
+    expect_err = 'does not support extra_stress'
+    requirement = 'The elastic diagnostic shall reject extra stress to prevent state accumulation.'
+  []
 []
