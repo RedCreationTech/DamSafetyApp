@@ -30,4 +30,16 @@
     expect_err = 'does not support extra_stress'
     requirement = 'The elastic diagnostic shall reject extra stress to prevent state accumulation.'
   []
+  [extra_stress_provider_first_rejected]
+    type = RunException
+    input = extra_stress_provider_first.i
+    expect_err = 'does not support extra_stress'
+    requirement = 'The diagnostic rejects nonzero extra stress when its provider sorts before the stress material.'
+  []
+  [extra_stress_stress_first_rejected]
+    type = RunException
+    input = extra_stress_stress_first.i
+    expect_err = 'does not support extra_stress'
+    requirement = 'The diagnostic rejects nonzero extra stress when its provider sorts after the stress material.'
+  []
 []
