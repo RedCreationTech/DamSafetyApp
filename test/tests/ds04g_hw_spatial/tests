@@ -1,0 +1,20 @@
+[Tests]
+  [elastic_hw_constructs]
+    type = RunApp
+    input = elastic.i
+    cli_args = '--check-input'
+    requirement = 'The explicitly acknowledged isotropic spatial-HW elastic research material shall construct with Hughes-Winget kinematics.'
+  []
+  [elastic_hw_runs]
+    type = RunApp
+    input = elastic.i
+    requirement = 'The isolated elastic-only research material shall run a prescribed plane-strain extension path.'
+  []
+  [research_opt_in_required]
+    type = RunException
+    input = elastic.i
+    cli_args = '--check-input Materials/stress/acknowledge_research_limits=false'
+    expect_err = 'This elastic-only diagnostic is not a production material'
+    requirement = 'The spatial-HW elastic research material shall require explicit acknowledgement of its limitations.'
+  []
+[]
