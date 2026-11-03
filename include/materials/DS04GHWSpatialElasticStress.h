@@ -18,6 +18,7 @@ public:
   void initialSetup() override;
 
 protected:
+  void computeQpProperties() override;
   void computeQpStress() override;
 
 private:
