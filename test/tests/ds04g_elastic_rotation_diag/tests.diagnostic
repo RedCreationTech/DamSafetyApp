@@ -1,0 +1,55 @@
+[Tests]
+  [rotation_on]
+    type = RunApp
+    input = mixed.i
+    cli_args = '--check-input Materials/stress/perform_finite_strain_rotations=true'
+    requirement = 'An explicitly built and enabled diagnostic admits rotated elastic stress on a single static QUAD4.'
+  []
+  [rotation_tension_on]
+    type = RunApp
+    input = tension.i
+    cli_args = '--check-input Materials/stress/perform_finite_strain_rotations=true'
+    requirement = 'The bounded pure tension negative control admits the rotated elastic diagnostic.'
+  []
+  [rotation_off]
+    type = RunApp
+    input = mixed.i
+    cli_args = '--check-input'
+    requirement = 'The same diagnostic accepts its unrotated elastic control.'
+  []
+  [default_guard]
+    type = RunException
+    input = mixed.i
+    cli_args = '--check-input Physics/SolidMechanics/FiniteNewmark/all/sp1_rotation_elastic_diagnostic=false Materials/stress/perform_finite_strain_rotations=true'
+    expect_err = 'SP1 retains original finite-strain rotation policy'
+    requirement = 'Without the explicit diagnostic switch the existing guard remains in force.'
+  []
+  [reject_consistent]
+    type = RunException
+    input = mixed.i
+    cli_args = '--check-input Physics/SolidMechanics/FiniteNewmark/all/sp1_consistent_tangent=true'
+    expect_err = 'TEST ONLY requires SP1'
+    requirement = 'The rotation diagnostic cannot use the rotation-false consistent tangent.'
+  []
+  [reject_nonzero_gravity]
+    type = RunException
+    input = mixed.i
+    cli_args = '--check-input Physics/SolidMechanics/FiniteNewmark/all/sp1_gravity=-9.8'
+    expect_err = 'TEST ONLY requires SP1'
+    requirement = 'The rotation diagnostic refuses nonzero gravity.'
+  []
+  [reject_multiple_elements]
+    type = RunException
+    input = mixed.i
+    cli_args = '--check-input Mesh/gmg/nx=2'
+    expect_err = 'TEST ONLY rotation diagnostic requires serial one QUAD4'
+    requirement = 'The rotation diagnostic refuses more than one element.'
+  []
+  [reject_inelastic]
+    type = RunException
+    input = mixed.i
+    cli_args = '--check-input Materials/stress/inelastic_models=bogus'
+    expect_err = 'TEST ONLY rotation diagnostic requires empty inelastic_models'
+    requirement = 'The rotation diagnostic refuses any inelastic material update.'
+  []
+[]

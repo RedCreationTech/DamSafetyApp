@@ -33,6 +33,10 @@ InputParameters FinitePlaneStrainNewmarkPhysics::validParams()
   params.addParam<MooseEnum>(
       "spatial_discretization", MooseEnum("legacy_q4 sp1_center_hg", "legacy_q4"),
       "Opt-in DS04G center entity plus reference HG; never a CDP formula change");
+#ifdef DS04G_ROTATION_ELASTIC_DIAGNOSTIC
+  params.addParam<bool>("sp1_rotation_elastic_diagnostic", false,
+                        "TEST ONLY: permit finite rotation for locked single-element elastic diagnostics");
+#endif
   params.addParam<Real>("sp1_density", "Required frozen constant density for SP1");
   params.addParam<Real>("sp1_static_end", 1.000001,
                         "Must match the TimePeriod static phase endpoint");
@@ -55,6 +59,14 @@ FinitePlaneStrainNewmarkPhysics::FinitePlaneStrainNewmarkPhysics(const InputPara
       _sp1(getParam<MooseEnum>("spatial_discretization") == "sp1_center_hg"),
       _sp1_consistent(getParam<bool>("sp1_consistent_tangent"))
 {
+#ifdef DS04G_ROTATION_ELASTIC_DIAGNOSTIC
+  if (getParam<bool>("sp1_rotation_elastic_diagnostic") &&
+      (!_sp1 || _sp1_consistent || _enabled || getParam<bool>("sp1_gravity_jacobian") ||
+       getParam<bool>("sp1_two_interval_history") || getParam<Real>("sp1_gravity") != 0.0 ||
+       getParam<Real>("sp1_static_end") != 0.040001))
+    paramError("sp1_rotation_elastic_diagnostic",
+               "TEST ONLY requires SP1, static 0.04 s, zero gravity, consistent tangent and damping OFF");
+#endif
   if (_sp1_consistent && !_sp1)
     paramError("sp1_consistent_tangent", "Requires spatial_discretization=sp1_center_hg");
   if (_sp1 && _enabled && !_sp1_consistent)
@@ -120,6 +132,13 @@ void FinitePlaneStrainNewmarkPhysics::act()
   // material state initialization. The legacy branch never calls createQRules.
   if (_sp1 && _current_task == "add_material")
   {
+#ifdef DS04G_ROTATION_ELASTIC_DIAGNOSTIC
+    if (getParam<bool>("sp1_rotation_elastic_diagnostic") &&
+        (_mesh->getMesh().comm().size() != 1 || _mesh->getMesh().n_elem() != 1 ||
+         _mesh->getMesh().n_nodes() != 4 || !_mesh->getMesh().query_elem_ptr(0) ||
+         _mesh->getMesh().query_elem_ptr(0)->type() != QUAD4))
+      mooseError("TEST ONLY rotation diagnostic requires serial one QUAD4 with four nodes");
+#endif
     if (_mesh->dimension() != 2 || _mesh->meshSubdomains().size() != 1)
       mooseError("SP1 admission is a single-subdomain 2D QUAD4 mesh");
     for (const auto *q : _awh.getActions<SetupQuadratureAction>())
@@ -152,6 +171,9 @@ void FinitePlaneStrainNewmarkPhysics::act()
       return value;
     };
     unsigned gravity_count = 0, phase_count = 0;
+#ifdef DS04G_ROTATION_ELASTIC_DIAGNOSTIC
+    unsigned diag_stress_count = 0;
+#endif
     for (const auto *action : _awh.getActions<MooseObjectAction>())
     {
       const auto &q = action->getObjectParams();
@@ -187,14 +209,30 @@ void FinitePlaneStrainNewmarkPhysics::act()
               mooseError("SP1 velocity-rate damping requires TimePeriod disable_objects to include ", tag);
           }
       }
-      if (action->getMooseObjectType() == "ComputeMultipleInelasticStress" &&
-          q.get<bool>("perform_finite_strain_rotations"))
-        mooseError(
-            "SP1 retains original finite-strain rotation policy; do not change it simultaneously");
+      if (action->getMooseObjectType() == "ComputeMultipleInelasticStress")
+      {
+#ifdef DS04G_ROTATION_ELASTIC_DIAGNOSTIC
+        if (getParam<bool>("sp1_rotation_elastic_diagnostic"))
+        {
+          ++diag_stress_count;
+          if (!q.get<std::vector<MaterialName>>("inelastic_models").empty() ||
+              q.isParamValid("damage_model"))
+            mooseError("TEST ONLY rotation diagnostic requires empty inelastic_models and no damage model");
+        }
+        else
+#endif
+        if (q.get<bool>("perform_finite_strain_rotations"))
+          mooseError(
+              "SP1 retains original finite-strain rotation policy; do not change it simultaneously");
+      }
       if (_sp1_consistent && action->getMooseObjectType() == "ComputeMultipleInelasticStress" &&
           q.get<MooseEnum>("tangent_operator") != "nonlinear")
         mooseError("SP1 consistent tangent requires the nonlinear material tangent");
     }
+#ifdef DS04G_ROTATION_ELASTIC_DIAGNOSTIC
+    if (getParam<bool>("sp1_rotation_elastic_diagnostic") && diag_stress_count != 1)
+      mooseError("TEST ONLY rotation diagnostic requires exactly one stress material");
+#endif
     if (gravity_count != 1 || phase_count != 1)
       mooseError("SP1 requires exactly one original uniform Gravity and one TimePeriod phase");
     const double eta = constant("mass_damping_coefficient");
