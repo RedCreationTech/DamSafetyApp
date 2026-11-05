@@ -181,7 +181,7 @@ TEST(DS04GPeakReloadReplay, NativeSingleStepMatchesBothSavedFrames)
       arms[0].old_total, arms[0].new_total, 0.0005, unpackState(arms[0].old_state));
   const auto rotate = integrator.integrateLinearized(
       arms[1].old_total, arms[1].new_total, 0.0005, unpackState(arms[1].old_state));
-  const auto * replays[] = {&hold, &rotate};
+  const AbaqusCDPSubstepIntegrator::LinearizedResult * replays[] = {&hold, &rotate};
 
   for (std::size_t arm_index = 0; arm_index < arms.size(); ++arm_index)
   {
