@@ -12,6 +12,12 @@
 
 `accepted_interval_reject.i`为独立1D/1单元/无材料测试，用真实Transient＋ConstantDT的测试派生Stepper强制一次失败，观察hp经减步及恢复后保持；不代表CDP自然失败事务或坝体计算。总时间.007秒、最多8接受步；不得将该测试Stepper用于生产输入。
 
+`accepted_interval_observer.i`复用同一拒步注入，改为无材料的单QUAD4、`CDPObservationProblem`和`CDPObservationConstantDT`调用链，只检查stepper retry/accept及独立TIMESTEP_END execute/output身份，不宣称覆盖材料或swapBack。`observation_enabled=false`与`trace_state_swap=false`均为默认；标准`FEProblem + ConstantDT`不经过observer。诊断输入须同时使用后两个observer类型，OFF覆盖直接调用基类。
+
+`cdp_accepted_output_observer.i`复用`cdp_material_table`数据与单单元CDP加载方式，在真实单QUAD4中小应变求解并开启`trace_state_swap=true`。同一测试Stepper注入一次拒步，终态以真正CSV解析检查材料入口/出口、local trial、实际partition/substep、swapBack候选与后快照、accept/output；候选键必须回连到`material_success`，但仍不据此指定唯一accepted调用。状态文件须无截断、I/O、历史或swap不完整标志。本用例未可靠注入真实材料异常，`material_exception`仅有静态源码检查；完整OFF/OFF与OFF/ON数值对照也未在此声称覆盖，留待后续C06作业。
+
+observer所有CSV固定为`rank,record,time,dt,dt_old,step,attempt,evaluation,execution,output,call,global_iteration,context,exec_flag,element,source_element,qp,partition,N,substep,local_solve,local_iteration,event,field,values,note`。`evaluation`只在真实residual/Jacobian内非零并由RAII恢复；`execution`和`output`分别计数；`call`按rank的真实材料调用单调递增；`attempt`含拒步重试。材料`old16/new16`顺序为backbone塑性6、κt/κc、黏性塑性6、损伤t/c，rotation为row-major九分量；出口末项是最后局部子步backbone残差而非全局SNES残差。异常仅写`material_exception`后沿原路径抛出，不重复积分。详细记录仅目标单元QP0和时间窗；`observation_byte_limit`是每rank全部observer CSV的合计上限，包含各文件表头和attempt-events，完整行生成后若无法容纳则不写并立即标记truncated，独立status JSON不计入。候选队列只表示已完成调用，不单独判定唯一accepted调用。
+
 ## 可选HG材料β排除
 
 `sp1_exclude_hourglass_stiffness_damping`默认false，仅`sp1_center_hg`允许开启。开启时只让两个独立HG核使用ζ=0；保留HG弹性Kh和HHT α、实体β、质量α、CDP与全部其他控制。`e*_exclude_hg_beta.i`与`e*_two_interval.i`仅此一行差异。三个几何×四制造历史用于实际R/J、old保持与拒绝重放；不是整坝自然失败、响应改善或完整20秒验收。

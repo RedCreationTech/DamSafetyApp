@@ -1,6 +1,8 @@
 #include "AbaqusCDPStressUpdate.h"
+#include "CDPObservation.h"
 
 #include "MooseException.h"
+#include "libmesh/elem.h"
 
 #include <array>
 #include <chrono>
@@ -267,7 +269,7 @@ AbaqusCDPStressUpdate::storeState(const AbaqusCDPSubstepIntegrator::LinearizedRe
 void
 AbaqusCDPStressUpdate::updateState(RankTwoTensor & strain_increment,
                                    RankTwoTensor & inelastic_strain_increment,
-                                   const RankTwoTensor & /*rotation_increment*/,
+                                   const RankTwoTensor & rotation_increment,
                                    RankTwoTensor & stress_new,
                                    const RankTwoTensor & /*stress_old*/,
                                    const RankFourTensor & /*elasticity_tensor*/,
@@ -275,6 +277,7 @@ AbaqusCDPStressUpdate::updateState(RankTwoTensor & strain_increment,
                                    const bool compute_full_tangent_operator,
                                    RankFourTensor & tangent_operator)
 {
+  CDPObservation::PointScope observation(CDPObservation::configured ? _current_elem->id() : 0, _qp);
   const CoreState old_state = oldState();
   const auto old_elastic_strain = toArray(elastic_strain_old);
   SymmetricTensor old_total_strain;
@@ -284,6 +287,34 @@ AbaqusCDPStressUpdate::updateState(RankTwoTensor & strain_increment,
   {
     old_total_strain[i] = old_elastic_strain[i] + old_state.viscous_plastic_strain[i];
     new_total_strain[i] = old_total_strain[i] + increment[i];
+  }
+
+  if (CDPObservation::active())
+  {
+    std::array<double, 16> old16;
+    for (std::size_t i = 0; i < 6; ++i)
+    {
+      old16[i] = old_state.backbone.plastic_strain[i];
+      old16[i + 8] = old_state.viscous_plastic_strain[i];
+    }
+    old16[6] = old_state.backbone.tensile_equivalent_plastic_strain;
+    old16[7] = old_state.backbone.compressive_equivalent_plastic_strain;
+    old16[14] = old_state.viscous_tension_damage;
+    old16[15] = old_state.viscous_compression_damage;
+    std::array<std::array<double, 3>, 3> rotation;
+    for (unsigned int row = 0; row < 3; ++row)
+      for (unsigned int column = 0; column < 3; ++column)
+        rotation[row][column] = rotation_increment(row, column);
+    CDPObservation::array("qp-updates", "material_enter", "old_elastic_strain", old_elastic_strain);
+    CDPObservation::array("qp-updates", "material_enter", "raw_increment", increment);
+    CDPObservation::array("qp-updates", "material_enter", "old_total_strain", old_total_strain);
+    CDPObservation::array("qp-updates", "material_enter", "new_total_strain", new_total_strain);
+    CDPObservation::array("qp-updates", "material_enter", "old16", old16);
+    CDPObservation::matrix("qp-updates", "material_enter", "rotation_row_major", rotation);
+    CDPObservation::values("qp-updates",
+                           "material_enter",
+                           "dt_full_tangent",
+                           {_dt, compute_full_tangent_operator ? 1.0 : 0.0});
   }
 
   try
@@ -307,9 +338,43 @@ AbaqusCDPStressUpdate::updateState(RankTwoTensor & strain_increment,
     if (compute_full_tangent_operator)
       assignTangent(result.algorithmic_tangent, tangent_operator);
     storeState(result, integration_microseconds);
+    if (CDPObservation::active())
+    {
+      const auto & final = result.result.final_result;
+      std::array<double, 16> new16;
+      for (std::size_t i = 0; i < 6; ++i)
+      {
+        new16[i] = final.state.backbone.plastic_strain[i];
+        new16[i + 8] = final.state.viscous_plastic_strain[i];
+      }
+      new16[6] = final.state.backbone.tensile_equivalent_plastic_strain;
+      new16[7] = final.state.backbone.compressive_equivalent_plastic_strain;
+      new16[14] = final.state.viscous_tension_damage;
+      new16[15] = final.state.viscous_compression_damage;
+      CDPObservation::array("qp-updates", "material_success", "cauchy_stress", final.cauchy_stress);
+      CDPObservation::array("qp-updates", "material_success", "new16", new16);
+      CDPObservation::values("qp-updates",
+                             "material_success",
+                             "N_cutbacks_partitions_branch_plastic_final_local_residual",
+                             {static_cast<double>(result.result.accepted_substeps),
+                              static_cast<double>(result.result.cutback_count),
+                              static_cast<double>(result.result.attempted_partitions),
+                              static_cast<double>(final.backbone.active_branch),
+                              final.backbone.plastic ? 1.0 : 0.0,
+                              final.backbone.residual_norm},
+                             "final residual is the local last-substep backbone norm, not SNES");
+      CDPObservation::materialCompleted();
+    }
   }
   catch (const std::exception & error)
   {
+    CDPObservation::values("qp-updates", "material_exception", "message", {}, error.what());
     throw MooseException(error.what());
+  }
+  catch (...)
+  {
+    CDPObservation::values(
+        "qp-updates", "material_exception", "message", {}, "non-standard exception");
+    throw;
   }
 }

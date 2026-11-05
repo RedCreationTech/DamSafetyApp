@@ -1,4 +1,5 @@
 #include "AbaqusCDPLocalIntegrator.h"
+#include "CDPObservation.h"
 
 #include <algorithm>
 #include <array>
@@ -678,6 +679,8 @@ AbaqusCDPLocalIntegrator::Result
 AbaqusCDPLocalIntegrator::integrate(const SymmetricTensor & total_strain,
                                     const State & old_state) const
 {
+  if (CDPObservation::active())
+    CDPObservation::context.local_solve = ++CDPObservation::sequence;
   if (!finiteTensor(total_strain) || !finiteTensor(old_state.plastic_strain))
     integrationError("total or plastic strain contains a non-finite component");
   requireIntegratorFinite(old_state.tensile_equivalent_plastic_strain,
@@ -701,6 +704,18 @@ AbaqusCDPLocalIntegrator::integrate(const SymmetricTensor & total_strain,
       old_tension.value,
       _parameters.biaxial_to_uniaxial_compression_ratio,
       _parameters.tensile_meridian_ratio);
+  if (CDPObservation::active())
+  {
+    CDPObservation::array("local-newton", "trial", "trial_stress", trial_stress);
+    CDPObservation::values("local-newton",
+                           "trial",
+                           "ft_fc_scale_f_threshold",
+                           {old_tension.value,
+                            old_compression.value,
+                            stress_scale,
+                            trial_yield,
+                            _parameters.residual_tolerance * stress_scale});
+  }
   if (trial_yield <= _parameters.residual_tolerance * stress_scale)
     return {trial_stress,
             old_state,

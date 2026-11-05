@@ -79,6 +79,22 @@
     max_threads = 1
     requirement = 'The locked Transient executioner shall preserve prior accepted dt during reject and cutback, then advance it only after acceptance.'
   []
+  [accepted_interval_observer]
+    type = RunApp
+    input = accepted_interval_observer.i
+    expect_out = 'DS04G accepted interval executioner check complete'
+    max_parallel = 1
+    max_threads = 1
+    requirement = 'This no-material fixture shall verify only stepper retry/accept and independent TIMESTEP_END execute/output identities.'
+  []
+  [cdp_accepted_output_observer]
+    type = RunApp
+    input = cdp_accepted_output_observer.i
+    expect_out = 'DS04G accepted interval executioner check complete'
+    max_parallel = 1
+    max_threads = 1
+    requirement = 'A real one-QUAD4 CDP solve with one injected reject shall record material entry/exit, local/substep, swapBack candidates/state, accept and output with complete status.'
+  []
   [e833_exclude_hg_beta]
     type = RunApp
     input = e833_exclude_hg_beta.i
