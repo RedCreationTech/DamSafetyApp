@@ -288,17 +288,16 @@ void
 DS04GAcceptedIntervalTestStepper::verifyMaterialObservation() const
 {
   const auto updates = readCsvTable("accepted-output-observer-qp-updates-rank0.csv");
+  std::set<std::string> entered;
   std::set<std::string> completed;
   std::set<std::string> enter_fields;
   std::set<std::string> success_fields;
-  unsigned int enters = 0;
-  unsigned int successes = 0;
   for (std::size_t i = 1; i < updates.size(); ++i)
   {
     const auto & row = updates[i];
     if (row[22] == "material_enter")
     {
-      ++enters;
+      entered.insert(materialCallKey(row));
       enter_fields.insert(row[23]);
       const auto values = numericValues(row);
       if ((row[23] == "old16" && values.size() != 16) ||
@@ -311,7 +310,6 @@ DS04GAcceptedIntervalTestStepper::verifyMaterialObservation() const
     }
     else if (row[22] == "material_success")
     {
-      ++successes;
       success_fields.insert(row[23]);
       completed.insert(materialCallKey(row));
       const auto values = numericValues(row);
@@ -331,7 +329,7 @@ DS04GAcceptedIntervalTestStepper::verifyMaterialObservation() const
                                                 "dt_full_tangent"};
   const std::set<std::string> expected_success = {
       "cauchy_stress", "new16", "N_cutbacks_partitions_branch_plastic_final_local_residual"};
-  if (!enters || enters != successes || enter_fields != expected_enter ||
+  if (entered.empty() || entered != completed || enter_fields != expected_enter ||
       success_fields != expected_success)
     mooseError("Incomplete real-CDP material entry/exit records");
 
