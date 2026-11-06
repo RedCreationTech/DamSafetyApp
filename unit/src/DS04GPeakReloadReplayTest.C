@@ -514,7 +514,7 @@ run959Arm(const std::string & arm,
               << ",\"old_state_unchanged\":" << (old_unchanged ? 1 : 0)
               << ",\"elastic_reference_stress\":" << jsonArray(elastic_candidate)
               << ",\"elastic_delta\":" << jsonArray(elastic_delta)
-              << ",\"elastic_gate_applied\":" << (elastic_gate ? 1 : 0)
+              << ",\"elastic_gate_applied\":" << (elastic_gate && !final.backbone.plastic ? 1 : 0)
               << ",\"mid_proxy_stress\":" << proxy_stress
               << ",\"mid_proxy_delta\":" << proxy_delta << "}\n";
 
@@ -540,7 +540,7 @@ run959Arm(const std::string & arm,
                       state16[15] >= packState(old_state_before)[15],
                   arm + ": kappa or branch damage decreased");
 
-    if (elastic_gate)
+    if (elastic_gate && !final.backbone.plastic)
     {
       for (std::size_t component = 0; component < 6; ++component)
       {
