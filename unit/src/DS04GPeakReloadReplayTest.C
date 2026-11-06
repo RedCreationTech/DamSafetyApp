@@ -534,11 +534,14 @@ run959Arm(const std::string & arm,
                   arm + ": stiffness factor outside [0,1]");
     requireReplay(std::isfinite(final.backbone.residual_norm) && final.backbone.residual_norm >= 0,
                   arm + ": invalid final local residual");
-    requireReplay(state16[6] >= packState(old_state_before)[6] &&
-                      state16[7] >= packState(old_state_before)[7] &&
-                      state16[14] >= packState(old_state_before)[14] &&
-                      state16[15] >= packState(old_state_before)[15],
-                  arm + ": kappa or branch damage decreased");
+    const auto old16_before = packState(old_state_before);
+    for (const std::size_t index : {6, 7, 14, 15})
+    {
+      const double tolerance = 8 * std::numeric_limits<double>::epsilon() *
+                               std::max(1.0, std::abs(old16_before[index]));
+      requireReplay(state16[index] + tolerance >= old16_before[index],
+                    arm + ": kappa or branch damage decreased beyond roundoff");
+    }
 
     if (elastic_gate && !final.backbone.plastic)
     {
