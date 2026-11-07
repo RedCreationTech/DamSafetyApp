@@ -719,10 +719,12 @@ CDPObservationProblem::acceptedFingerprint()
         }
       }
   }
-  for (auto * system : {static_cast<const SystemBase *>(&getNonlinearSystem(0)),
-                        static_cast<const SystemBase *>(&getAuxiliarySystem())})
+  for (auto * system : {static_cast<SystemBase *>(&getNonlinearSystem(0)),
+                        static_cast<SystemBase *>(&getAuxiliarySystem())})
     for (unsigned int state = 1; state < 3; ++state)
     {
+      if (!system->hasSolutionState(state))
+        continue;
       std::vector<Number> data;
       system->solutionState(state).localize(data);
       for (const auto & v : data)
