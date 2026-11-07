@@ -24,6 +24,33 @@
 #include <set>
 #include <sstream>
 
+
+namespace
+{
+std::map<std::string, std::vector<std::string>>
+parseGroupTerms(const std::vector<std::string> & spec)
+{
+  std::map<std::string, std::vector<std::string>> terms;
+  for (const auto & entry : spec)
+  {
+    const auto colon = entry.find(':');
+    if (colon == std::string::npos || colon == 0)
+      mooseError("observation_residual_group_terms entries must look like 'term:name1,name2': ",
+                 entry);
+    std::vector<std::string> names;
+    std::stringstream rest(entry.substr(colon + 1));
+    std::string name;
+    while (std::getline(rest, name, ','))
+      if (!name.empty())
+        names.push_back(name);
+    if (names.empty())
+      mooseError("observation_residual_group_terms term has no kernels: ", entry);
+    terms[entry.substr(0, colon)] = names;
+  }
+  return terms;
+}
+} // namespace
+
 registerMooseObject("DamSafetyApp", CDPObservationProblem);
 
 namespace
@@ -64,17 +91,16 @@ CDPObservationProblem::validParams()
       "observation_vertices", {}, "Four x/y vertices per label in SI");
   parameters.addParam<bool>(
       "observation_residual_groups", false, "Record grouped nodal residuals at accepted steps in window");
-  parameters.addParam<std::map<std::string, std::vector<std::string>>>(
+  parameters.addParam<std::vector<std::string>>(
       "observation_residual_group_terms",
-      std::map<std::string, std::vector<std::string>>{
-          {"entity", {"TM_all0", "TM_all1"}},
-          {"mass_base", {"TM_all_inertia_x", "TM_all_inertia_y"}},
-          {"mass_correction", {"ds04g_sp1_mass_0", "ds04g_sp1_mass_1"}},
-          {"gravity_base", {"gravity_y"}},
-          {"gravity_correction", {"ds04g_sp1_gravity_1"}},
-          {"hg", {"ds04g_sp1_hourglass_0", "ds04g_sp1_hourglass_1"}},
-          {"entity_rate", {"ds04g_all_velocity_damping_x", "ds04g_all_velocity_damping_y"}}},
-      "Term name to kernel names; derived union terms (mass/gravity/all) are built automatically");
+      std::vector<std::string>{"entity:TM_all0,TM_all1",
+                               "mass_base:TM_all_inertia_x,TM_all_inertia_y",
+                               "mass_correction:ds04g_sp1_mass_0,ds04g_sp1_mass_1",
+                               "gravity_base:gravity_y",
+                               "gravity_correction:ds04g_sp1_gravity_1",
+                               "hg:ds04g_sp1_hourglass_0,ds04g_sp1_hourglass_1",
+                               "entity_rate:ds04g_all_velocity_damping_x,ds04g_all_velocity_damping_y"},
+      "Term to kernel names as 'term:name1,name2'; derived union terms (mass/gravity/all) are built automatically");
   parameters.addParam<std::vector<unsigned int>>(
       "observation_residual_nodes", std::vector<unsigned int>{35, 167}, "Extra node ids for grouped residuals");
   parameters.addParam<BoundaryName>(
@@ -91,8 +117,8 @@ CDPObservationProblem::CDPObservationProblem(const InputParameters & parameters)
     _prefix(getParam<std::string>("observation_prefix")),
     _limit(getParam<unsigned long long>("observation_byte_limit")),
     _res_groups(getParam<bool>("observation_residual_groups")),
-    _res_group_terms(getParam<std::map<std::string, std::vector<std::string>>>(
-        "observation_residual_group_terms")),
+    _res_group_terms(parseGroupTerms(getParam<std::vector<std::string>>(
+        "observation_residual_group_terms"))),
     _res_extra_nodes(getParam<std::vector<unsigned int>>("observation_residual_nodes")),
     _res_boundary(getParam<BoundaryName>("observation_residual_boundary"))
 {
