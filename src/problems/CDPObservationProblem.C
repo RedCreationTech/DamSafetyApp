@@ -3,6 +3,7 @@
 #include "CDPObservationContextGuard.h"
 #include "CDPObservationFingerprint.h"
 #include "Assembly.h"
+#include "KernelBase.h"
 #include "AuxiliarySystem.h"
 #include "MaterialData.h"
 #include "MaterialPropertyStorage.h"
