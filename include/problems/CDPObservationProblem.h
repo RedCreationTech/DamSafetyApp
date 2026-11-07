@@ -7,6 +7,7 @@
 #include <fstream>
 #include <map>
 #include <petscsnes.h>
+#include <set>
 #include <string>
 
 class CDPObservationProblem : public FEProblem, public CDPObservation::Sink
@@ -47,6 +48,9 @@ private:
   void fingerprintVector(const char * field, const NumericVector<Number> & soln) noexcept;
   void setExecFlag(const ExecFlagType & type) noexcept;
   void status() noexcept;
+  void residualGroups(const char * event) noexcept;
+  std::vector<double> acceptedFingerprint() const;
+  void restoreKernelEnable(const std::map<std::string, bool> & enabled) noexcept;
 
   const bool _enabled;
   const bool _trace_swap;
@@ -82,4 +86,13 @@ private:
   bool _truncated = false;
   bool _io_failed = false;
   bool _history_incomplete = false;
+
+  const bool _res_groups;
+  const std::map<std::string, std::vector<std::string>> _res_group_terms;
+  const std::vector<unsigned int> _res_extra_nodes;
+  const BoundaryName _res_boundary;
+  std::vector<dof_id_type> _res_target_nodes;
+  std::set<dof_id_type> _res_base_nodes;
+  std::uint64_t _res_rows = 0;
+  bool _res_contaminated = false;
 };

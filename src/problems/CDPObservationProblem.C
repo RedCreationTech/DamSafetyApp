@@ -14,6 +14,7 @@
 #include "libmesh/petsc_nonlinear_solver.h"
 #include "libmesh/petsc_vector.h"
 
+#include <algorithm>
 #include <chrono>
 #include <cmath>
 #include <iomanip>
@@ -59,6 +60,23 @@ CDPObservationProblem::validParams()
       "observation_labels", {}, "Source element labels");
   parameters.addParam<std::vector<Real>>(
       "observation_vertices", {}, "Four x/y vertices per label in SI");
+  parameters.addParam<bool>(
+      "observation_residual_groups", false, "Record grouped nodal residuals at accepted steps in window");
+  parameters.addParam<std::map<std::string, std::vector<std::string>>>(
+      "observation_residual_group_terms",
+      std::map<std::string, std::vector<std::string>>{
+          {"entity", {"TM_all0", "TM_all1"}},
+          {"mass_base", {"TM_all_inertia_x", "TM_all_inertia_y"}},
+          {"mass_correction", {"ds04g_sp1_mass_0", "ds04g_sp1_mass_1"}},
+          {"gravity_base", {"gravity_y"}},
+          {"gravity_correction", {"ds04g_sp1_gravity_1"}},
+          {"hg", {"ds04g_sp1_hourglass_0", "ds04g_sp1_hourglass_1"}},
+          {"entity_rate", {"ds04g_all_velocity_damping_x", "ds04g_all_velocity_damping_y"}}},
+      "Term name to kernel names; derived union terms (mass/gravity/all) are built automatically");
+  parameters.addParam<std::vector<unsigned int>>(
+      "observation_residual_nodes", std::vector<unsigned int>{35, 167}, "Extra node ids for grouped residuals");
+  parameters.addParam<BoundaryName>(
+      "observation_residual_boundary", "DAM_BASE__Dam_1", "Boundary whose nodes give the net-force sums");
   return parameters;
 }
 
@@ -69,7 +87,12 @@ CDPObservationProblem::CDPObservationProblem(const InputParameters & parameters)
     _start(getParam<Real>("observation_start")),
     _end(getParam<Real>("observation_end")),
     _prefix(getParam<std::string>("observation_prefix")),
-    _limit(getParam<unsigned long long>("observation_byte_limit"))
+    _limit(getParam<unsigned long long>("observation_byte_limit")),
+    _res_groups(getParam<bool>("observation_residual_groups")),
+    _res_group_terms(getParam<std::map<std::string, std::vector<std::string>>>(
+        "observation_residual_group_terms")),
+    _res_extra_nodes(getParam<std::vector<unsigned int>>("observation_residual_nodes")),
+    _res_boundary(getParam<BoundaryName>("observation_residual_boundary"))
 {
   if (_enabled && libMesh::n_threads() != 1)
     paramError("observation_enabled", "Requires one thread per MPI rank");
@@ -148,6 +171,45 @@ CDPObservationProblem::initialSetup()
     mooseError("Only one observation problem per process is supported");
   CDPObservation::configured = this;
   FEProblem::initialSetup();
+  if (_res_groups)
+  {
+    std::set<dof_id_type> nodes;
+    for (const auto & target : _targets)
+    {
+      const auto * element = mesh().getMesh().elem_ptr(target.first);
+      for (unsigned int i = 0; i < element->n_nodes(); ++i)
+        nodes.insert(element->node_id(i));
+    }
+    for (const auto id : _res_extra_nodes)
+    {
+      if (!mesh().queryNodePtr(id))
+        paramError("observation_residual_nodes", "Node not found in mesh: ", id);
+      nodes.insert(id);
+    }
+    const auto bid = getBoundaryID(_res_boundary);
+    if (bid == Moose::INVALID_BOUNDARY_ID)
+      paramError("observation_residual_boundary", "Boundary not found: ", _res_boundary);
+    const auto & binfo = mesh().getMesh().get_boundary_info();
+    for (const auto * node : mesh().getMesh().node_ptr_range())
+    {
+      const auto & ids = binfo.boundary_ids(node);
+      if (std::find(ids.begin(), ids.end(), bid) != ids.end())
+      {
+        _res_base_nodes.insert(node->id());
+        nodes.insert(node->id());
+      }
+    }
+    _res_target_nodes.assign(nodes.begin(), nodes.end());
+    auto & nl = getNonlinearSystem(0);
+    std::set<std::string> existing;
+    for (const auto * k : nl.getKernelWarehouse().getObjects())
+      existing.insert(k->name());
+    for (const auto & term : _res_group_terms)
+      for (const auto & name : term.second)
+        if (!existing.count(name))
+          paramError("observation_residual_group_terms",
+                     "Kernel not found for term ", term.first, ": ", name);
+  }
   for (const auto & target : _targets)
   {
     _element = target.first;
@@ -484,6 +546,9 @@ CDPObservationProblem::status() noexcept
          << ",\"swap_trace_enabled\":" << (_trace_swap ? "true" : "false")
          << ",\"swap_trace_events\":" << _swap_events << ",\"swap_trace_empty\":" << _swap_empty
          << ",\"swap_trace_incomplete\":" << (_swap_incomplete ? "true" : "false")
+         << ",\"residual_groups_enabled\":" << (_res_groups ? "true" : "false")
+         << ",\"residual_groups_rows\":" << _res_rows
+         << ",\"residual_groups_contaminated\":" << (_res_contaminated ? "true" : "false")
          << ",\"executions\":" << _execution << ",\"outputs\":" << _output
          << ",\"material_calls\":" << _next_call << ",\"streams\":{";
     bool comma = false;
@@ -594,6 +659,161 @@ CDPObservationProblem::history(const char * event)
   _qp = 0;
 }
 
+std::vector<double>
+CDPObservationProblem::acceptedFingerprint() const
+{
+  std::vector<double> values;
+  const auto & storage = getMaterialPropertyStorage();
+  for (auto state : storage.stateIndexRange())
+  {
+    if (!state)
+      continue; // state 0 is transient and legitimately recomputed by diagnostics
+    for (const auto & entry : storage.props(state))
+      for (const auto & side : entry.second)
+      {
+        const auto & props = storage.props(entry.first, side.first, state);
+        for (unsigned int id = 0; id < props.size(); ++id)
+        {
+          const auto * value = props.queryValue(id);
+          if (!value)
+            continue;
+          const auto * scalar = dynamic_cast<const MaterialProperty<Real> *>(value);
+          const auto * tensor = dynamic_cast<const MaterialProperty<RankTwoTensor> *>(value);
+          if (!scalar && !tensor)
+            continue;
+          for (unsigned int qp = 0; qp < value->size(); ++qp)
+            if (scalar)
+              values.push_back((*scalar)[qp]);
+            else
+              for (unsigned int c = 0; c < 9; ++c)
+                values.push_back((*tensor)[qp](c / 3, c % 3));
+        }
+      }
+  }
+  for (auto * system : {static_cast<const SystemBase *>(&getNonlinearSystem(0)),
+                        static_cast<const SystemBase *>(&getAuxiliarySystem())})
+    for (unsigned int state = 1; state < 3; ++state)
+    {
+      std::vector<Number> data;
+      system->solutionState(state).localize(data);
+      for (const auto & v : data)
+        values.push_back(v);
+    }
+  values.push_back(dtOld());
+  return values;
+}
+
+void
+CDPObservationProblem::restoreKernelEnable(const std::map<std::string, bool> & enabled) noexcept
+{
+  try
+  {
+    for (const auto * k : getNonlinearSystem(0).getKernelWarehouse().getObjects())
+      const_cast<bool &>(k->getParam<bool>("enable")) = enabled.at(k->name());
+    updateActiveObjects();
+  }
+  catch (...)
+  {
+    _io_failed = true;
+  }
+}
+
+void
+CDPObservationProblem::residualGroups(const char * event) noexcept
+{
+  if (_res_contaminated || _truncated || _io_failed)
+    return;
+  std::map<std::string, bool> enabled;
+  try
+  {
+    auto & nl = getNonlinearSystem(0);
+    const auto & sys = nl.system();
+    const auto vdx = sys.variable_number("disp_x");
+    const auto vdy = sys.variable_number("disp_y");
+    for (const auto * k : nl.getKernelWarehouse().getObjects())
+      enabled[k->name()] = k->enabled();
+    std::map<std::string, std::vector<std::string>> terms(_res_group_terms.begin(),
+                                                          _res_group_terms.end());
+    auto unite = [&](const std::string & out, const std::vector<std::string> & parts)
+    {
+      std::set<std::string> names;
+      for (const auto & part : parts)
+        if (terms.count(part))
+          for (const auto & n : terms.at(part))
+            names.insert(n);
+      terms[out] = std::vector<std::string>(names.begin(), names.end());
+    };
+    unite("mass", {"mass_base", "mass_correction"});
+    unite("gravity", {"gravity_base", "gravity_correction"});
+    unite("all", {"entity", "mass", "gravity", "hg", "entity_rate"});
+
+    const auto before = acceptedFingerprint();
+    auto residual = nl.currentSolution()->zero_clone();
+    std::vector<dof_id_type> dofs_x, dofs_y;
+    std::vector<char> has;
+    for (const auto id : _res_target_nodes)
+    {
+      const auto * node = mesh().queryNodePtr(id);
+      const bool hx = node && node->n_dofs(sys.number(), vdx);
+      const bool hy = node && node->n_dofs(sys.number(), vdy);
+      has.push_back(static_cast<char>((hx ? 1 : 0) | (hy ? 2 : 0)));
+      dofs_x.push_back(hx ? node->dof_number(sys.number(), vdx, 0) : DofObject::invalid_id);
+      dofs_y.push_back(hy ? node->dof_number(sys.number(), vdy, 0) : DofObject::invalid_id);
+    }
+    const auto nan = std::numeric_limits<double>::quiet_NaN();
+    for (const auto & term : terms)
+    {
+      for (const auto * k : nl.getKernelWarehouse().getObjects())
+        const_cast<bool &>(k->getParam<bool>("enable")) =
+            std::find(term.second.begin(), term.second.end(), k->name()) != term.second.end();
+      updateActiveObjects();
+      FEProblem::computeResidual(*nl.currentSolution(), *residual, 0);
+      std::vector<double> values;
+      values.reserve(2 * _res_target_nodes.size() + 2);
+      double base_x = 0.0, base_y = 0.0;
+      for (std::size_t i = 0; i < _res_target_nodes.size(); ++i)
+      {
+        const auto id = _res_target_nodes[i];
+        const double rx = (has[i] & 1) ? (*residual)(dofs_x[i]) : nan;
+        const double ry = (has[i] & 2) ? (*residual)(dofs_y[i]) : nan;
+        values.push_back(rx);
+        values.push_back(ry);
+        if (_res_base_nodes.count(id))
+        {
+          if (has[i] & 1)
+            base_x += rx;
+          if (has[i] & 2)
+            base_y += ry;
+        }
+      }
+      values.push_back(base_x);
+      values.push_back(base_y);
+      write("residual-groups",
+            event,
+            term.first.c_str(),
+            values,
+            std::string("R_at_accepted_state;nodes=") + std::to_string(_res_target_nodes.size()) +
+                ";base_nodes=" + std::to_string(_res_base_nodes.size()) +
+                ";value_order=per_target_node_rx_ry_then_net_base_Fx_Fy");
+      ++_res_rows;
+    }
+    restoreKernelEnable(enabled);
+    if (acceptedFingerprint() != before)
+    {
+      _res_contaminated = true;
+      write("residual-groups", event, "freeze_check", {1.0},
+            "accepted fingerprint changed by grouped residual capture; capture stopped");
+    }
+  }
+  catch (...)
+  {
+    _res_contaminated = true;
+    restoreKernelEnable(enabled);
+    write("residual-groups", event, "capture_exception", {1.0},
+          "grouped residual capture aborted by exception; capture stopped; solve state untouched");
+  }
+}
+
 void
 CDPObservationProblem::attemptEvent(const char * event) noexcept
 {
@@ -624,6 +844,8 @@ CDPObservationProblem::attemptEvent(const char * event) noexcept
     write("attempt-events", event, "time", {time()}, {});
     if (window())
       history(event);
+    if (_res_groups && window() && event_name == "state_advance_before")
+      residualGroups(event);
     if (window() && (event_name.find("solve_") == 0 ||
                      event_name == "state_advance_before" ||
                      event_name == "state_advance_after" ||
