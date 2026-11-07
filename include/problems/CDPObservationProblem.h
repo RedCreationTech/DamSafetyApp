@@ -49,7 +49,7 @@ private:
   void setExecFlag(const ExecFlagType & type) noexcept;
   void status() noexcept;
   void residualGroups(const char * event) noexcept;
-  std::vector<double> acceptedFingerprint() const;
+  std::vector<double> acceptedFingerprint();
   void restoreKernelEnable(const std::map<std::string, bool> & enabled) noexcept;
 
   const bool _enabled;

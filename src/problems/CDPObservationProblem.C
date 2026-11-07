@@ -7,6 +7,7 @@
 #include "MaterialData.h"
 #include "MaterialPropertyStorage.h"
 #include "MooseMesh.h"
+#include "MooseMeshUtils.h"
 #include "NonlinearSystem.h"
 #include "RankTwoTensor.h"
 #include "libmesh/elem.h"
@@ -186,13 +187,14 @@ CDPObservationProblem::initialSetup()
         paramError("observation_residual_nodes", "Node not found in mesh: ", id);
       nodes.insert(id);
     }
-    const auto bid = getBoundaryID(_res_boundary);
+    const auto bid = MooseMeshUtils::getBoundaryID(_res_boundary, mesh().getMesh());
     if (bid == Moose::INVALID_BOUNDARY_ID)
       paramError("observation_residual_boundary", "Boundary not found: ", _res_boundary);
     const auto & binfo = mesh().getMesh().get_boundary_info();
     for (const auto * node : mesh().getMesh().node_ptr_range())
     {
-      const auto & ids = binfo.boundary_ids(node);
+      std::vector<boundary_id_type> ids;
+      binfo.boundary_ids(node, ids);
       if (std::find(ids.begin(), ids.end(), bid) != ids.end())
       {
         _res_base_nodes.insert(node->id());
@@ -202,7 +204,7 @@ CDPObservationProblem::initialSetup()
     _res_target_nodes.assign(nodes.begin(), nodes.end());
     auto & nl = getNonlinearSystem(0);
     std::set<std::string> existing;
-    for (const auto * k : nl.getKernelWarehouse().getObjects())
+    for (const auto & k : nl.getKernelWarehouse().getObjects())
       existing.insert(k->name());
     for (const auto & term : _res_group_terms)
       for (const auto & name : term.second)
@@ -660,7 +662,7 @@ CDPObservationProblem::history(const char * event)
 }
 
 std::vector<double>
-CDPObservationProblem::acceptedFingerprint() const
+CDPObservationProblem::acceptedFingerprint()
 {
   std::vector<double> values;
   const auto & storage = getMaterialPropertyStorage();
@@ -708,7 +710,7 @@ CDPObservationProblem::restoreKernelEnable(const std::map<std::string, bool> & e
 {
   try
   {
-    for (const auto * k : getNonlinearSystem(0).getKernelWarehouse().getObjects())
+    for (const auto & k : getNonlinearSystem(0).getKernelWarehouse().getObjects())
       const_cast<bool &>(k->getParam<bool>("enable")) = enabled.at(k->name());
     updateActiveObjects();
   }
@@ -730,7 +732,7 @@ CDPObservationProblem::residualGroups(const char * event) noexcept
     const auto & sys = nl.system();
     const auto vdx = sys.variable_number("disp_x");
     const auto vdy = sys.variable_number("disp_y");
-    for (const auto * k : nl.getKernelWarehouse().getObjects())
+    for (const auto & k : nl.getKernelWarehouse().getObjects())
       enabled[k->name()] = k->enabled();
     std::map<std::string, std::vector<std::string>> terms(_res_group_terms.begin(),
                                                           _res_group_terms.end());
@@ -763,7 +765,7 @@ CDPObservationProblem::residualGroups(const char * event) noexcept
     const auto nan = std::numeric_limits<double>::quiet_NaN();
     for (const auto & term : terms)
     {
-      for (const auto * k : nl.getKernelWarehouse().getObjects())
+      for (const auto & k : nl.getKernelWarehouse().getObjects())
         const_cast<bool &>(k->getParam<bool>("enable")) =
             std::find(term.second.begin(), term.second.end(), k->name()) != term.second.end();
       updateActiveObjects();
